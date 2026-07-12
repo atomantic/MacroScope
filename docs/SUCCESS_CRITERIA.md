@@ -1,6 +1,6 @@
 # U.S. policy-story success criteria
 
-MacroScope's first useful release is successful when a non-specialist can see whether a modeled U.S. wealth tax and UBI helps or harms the bottom half after inflation, while the underlying engine preserves its accounting contract.
+MacroScope's first useful release is successful when a non-specialist can see whether a modeled U.S. wealth tax and redistribution package helps or harms the bottom half after inflation, while the underlying engine preserves its accounting contract.
 
 ## Application and operations
 
@@ -15,6 +15,7 @@ MacroScope's first useful release is successful when a non-specialist can see wh
 - [x] Aggregate assets, liabilities, net worth, deposits, public equity, and real estate are calibrated by wealth group to the Federal Reserve DFA for 2026:Q1.
 - [x] The top 1%, 0.1%, and 0.01% are explicitly oversampled.
 - [x] Progressive wealth-tax assessment supports asset inclusion, valuation, liability deductibility, exemptions, and installments.
+- [x] Scenarios can target a dollar exemption or a modeled top wealth percentile and expose common policy presets.
 - [x] Cash-first, borrow-first, and sell-first strategies use identical households and random draws.
 - [x] Tax payments, UBI, deposits, loans, Treasury balances, equity, and housing remain reconciled.
 - [x] Cash-funded tax plus equal redistribution does not create deposits.
@@ -36,6 +37,8 @@ MacroScope's first useful release is successful when a non-specialist can see wh
 - [x] Does that private debt automatically become a future burden on poorer households, and what additional policy action would socialize it?
 - [x] How does the answer change when taxpayers use cash, borrowing, or asset sales in different proportions?
 - [x] At what UBI and deficit-monetization stress does the model move from stable to elevated, high, crisis, extreme, and strict hyperinflation regimes?
+- [x] Does the proposed borrowing-to-assets-to-rents channel activate, and which behavioral assumption breaks it when it does not?
+- [x] How much of the funded budget reaches households as cash, reaches providers as services, or is consumed by administration and implementation?
 
 ## Validation and communication
 

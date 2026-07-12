@@ -83,8 +83,22 @@ Floating-point comparisons use an explicit tolerance. Production-scale simulatio
 
 ## Vertical-slice population and markets
 
-The interactive runner uses a deterministic weighted sample representing 50,000 households. It allocates 80% of simulated agents to the bottom 99%, then explicitly oversamples the top 1%, 0.1%, and 0.01%. The current distribution is stylized and intentionally labeled as uncalibrated.
+The interactive runner uses a deterministic weighted sample representing 135.1 million U.S. households. The default run uses 4,000 agents, allocates 80% of them to the bottom 99%, then explicitly oversamples the top 1%, 0.1%, and 0.01%. Wealth-group totals are calibrated to the Federal Reserve Distributional Financial Accounts; within-group joint distributions remain stylized.
 
 Each comparison reuses the same households for cash-first, borrow-first, and sell-first strategies. Public-equity sales interact with configurable buyer depth and price impact. Falling equity values can breach collateral limits, producing iterative forced sales and loan repayment. Domestic buyers absorb asset quantities, so ownership changes and price revaluation remain distinct. Housing can fund otherwise-unpayable tax liabilities as a slower last-resort transfer, but regional housing price feedback is deferred.
 
 Demand changes are allocated across housing, food, healthcare, transportation, energy, durable goods, discretionary spending, and services. Sector inflation pressure, supply-constraint amplification, and monetary-policy offset are reduced-form assumptions rather than forecasts.
+
+## Owner-renter theory test
+
+The ten-year theory view deliberately separates an accounting result from behavioral assumptions:
+
+1. Bank loans used to settle wealth tax create deposits while the loans remain outstanding.
+2. The tax payment itself goes to Treasury; it does not purchase housing or equities.
+3. A configurable share of the resulting liquidity may later be recycled into housing and equities as an inflation hedge.
+4. Housing-price pressure depends on the selected housing allocation and housing-supply response.
+5. Renter burden changes only when rents follow house prices faster than renter resources, including direct cash support.
+
+The view reports an owner-renter housing-position channel, not a claim that total wealth inequality must rise. Top-one-percent real wealth, bottom-half cash purchasing power, service spending, and administration remain separate outcomes. Service spending is not assigned an invented cash-equivalent welfare value.
+
+Wealth taxes can target net worth above a dollar exemption or a modeled top population share. Percentile targeting derives an effective exemption from the weighted synthetic population, so the cutoff is scenario-dependent. The funded budget is allocated among administration, cash transfers, and healthcare/social-service demand before household and sector outcomes are calculated.

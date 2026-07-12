@@ -60,6 +60,8 @@ describe("PortOS server", () => {
     const shellMarkup = await fetch(origin).then((response) => response.text());
     expect(shellMarkup).toContain('id="buyer-depth"');
     expect(shellMarkup).toContain('step="0.1"');
+    expect(shellMarkup).toContain('data-preset="top-one"');
+    expect(shellMarkup).toContain('id="theory-chart"');
   });
 
   it("validates and runs comparison requests over HTTP", async () => {
@@ -120,11 +122,13 @@ describe("PortOS server", () => {
       parseComparisonRequest({
         sampleSize: 100,
         representedHouseholds: 50,
+        wealthTax: { targetMode: "magic" },
         ubi: { fundingRule: "magic" },
       }).errors,
     ).toEqual(
       expect.arrayContaining([
         "representedHouseholds must be at least sampleSize.",
+        "targetMode must be exemption or top-share.",
         "fundingRule must be fixed, revenue-constrained, or smoothed.",
       ]),
     );

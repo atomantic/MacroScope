@@ -25,18 +25,23 @@ export interface ComparisonRequestV1 {
   readonly sampleSize: number;
   readonly representedHouseholds: number;
   readonly wealthTax: {
+    readonly targetMode: "exemption" | "top-share";
     readonly exemption: number;
+    readonly topShare: number;
     readonly rate: number;
   };
   readonly ubi: {
     readonly adultMonthlyBenefit: number;
     readonly childMonthlyBenefit: number;
     readonly fundingRule: UbiFundingRule;
+    readonly directCashShare: number;
+    readonly administrativeShare: number;
   };
   readonly market: {
     readonly buyerDepthRatio: number;
     readonly priceImpactCoefficient: number;
     readonly maximumCollateralLtv: number;
+    readonly housingSupplyElasticity: number;
   };
   readonly behavior: {
     readonly borrowShare: number;
@@ -44,6 +49,9 @@ export interface ComparisonRequestV1 {
     readonly annualAssetReturn: number;
     readonly loanInterestRate: number;
     readonly deficitMonetizationShare: number;
+    readonly assetHedgeShare: number;
+    readonly housingHedgeShare: number;
+    readonly rentPassThrough: number;
   };
 }
 
@@ -70,6 +78,16 @@ export interface ProjectionYear {
   readonly regime: InflationRegime;
 }
 
+export interface TheoryTestYear {
+  readonly year: number;
+  readonly liquiditySeekingAssets: number;
+  readonly housingPriceIndex: number;
+  readonly equityPriceIndex: number;
+  readonly middleHomeownerWealthIndex: number;
+  readonly bottomRenterHousingBurdenIndex: number;
+  readonly bottomRenterDisposableIncomeIndex: number;
+}
+
 export interface StressCell {
   readonly ubiMultiplier: number;
   readonly monetizationShare: number;
@@ -92,6 +110,8 @@ export interface PolicyProjection {
   readonly annualFlows: {
     readonly taxCollected: number;
     readonly ubiReceived: number;
+    readonly publicServicesSpending: number;
+    readonly administrativeCost: number;
     readonly newPrivateLoans: number;
     readonly assetSales: number;
     readonly governmentDeficit: number;
@@ -117,6 +137,30 @@ export interface PolicyProjection {
       readonly annualInflationEquivalent: number;
       readonly explanation: string;
     };
+  };
+  readonly theoryTest: {
+    readonly verdict: {
+      readonly rating: "active" | "partial" | "inactive";
+      readonly headline: string;
+      readonly explanation: string;
+    };
+    readonly assumptions: {
+      readonly assetHedgeShare: number;
+      readonly housingHedgeShare: number;
+      readonly housingSupplyElasticity: number;
+      readonly rentPassThrough: number;
+      readonly baselineRenterHousingCostShare: number;
+    };
+    readonly summary: {
+      readonly annualLiquiditySeekingAssets: number;
+      readonly housingPriceChange: number;
+      readonly equityPriceChange: number;
+      readonly middleHomeownerWealthChange: number;
+      readonly bottomRenterHousingBurdenChange: number;
+      readonly bottomRenterDisposableIncomeChange: number;
+      readonly housingPositionGapChange: number;
+    };
+    readonly years: readonly TheoryTestYear[];
   };
   readonly interpretation: readonly string[];
 }
@@ -152,6 +196,7 @@ export interface StrategyOutcome {
     readonly taxDeferred: number;
     readonly requestedUbi: number;
     readonly ubiReceived: number;
+    readonly publicServicesSpending: number;
     readonly administrativeCost: number;
     readonly leakage: number;
     readonly governmentBalance: number;
@@ -205,6 +250,12 @@ export interface StrategyOutcome {
 export interface ComparisonResultV1 {
   readonly schemaVersion: typeof SCENARIO_SCHEMA_VERSION;
   readonly assumptions: ComparisonRequestV1;
+  readonly wealthTaxTarget: {
+    readonly mode: "exemption" | "top-share";
+    readonly requestedExemption: number;
+    readonly topShare: number;
+    readonly effectiveExemption: number;
+  };
   readonly population: PopulationSummary;
   readonly strategies: Readonly<Record<PaymentStrategy, StrategyOutcome>>;
   readonly projection: PolicyProjection;
@@ -217,18 +268,23 @@ export const DEFAULT_COMPARISON_REQUEST: ComparisonRequestV1 = {
   sampleSize: 4_000,
   representedHouseholds: US_BASELINE.households,
   wealthTax: {
+    targetMode: "exemption",
     exemption: 10_000_000,
+    topShare: 0.01,
     rate: 0.02,
   },
   ubi: {
     adultMonthlyBenefit: 1_000,
     childMonthlyBenefit: 500,
     fundingRule: "revenue-constrained",
+    directCashShare: 1,
+    administrativeShare: 0.05,
   },
   market: {
     buyerDepthRatio: 0.08,
     priceImpactCoefficient: 0.12,
     maximumCollateralLtv: 0.5,
+    housingSupplyElasticity: 0.4,
   },
   behavior: {
     borrowShare: 0.65,
@@ -236,5 +292,8 @@ export const DEFAULT_COMPARISON_REQUEST: ComparisonRequestV1 = {
     annualAssetReturn: 0.06,
     loanInterestRate: 0.045,
     deficitMonetizationShare: 0,
+    assetHedgeShare: 0.35,
+    housingHedgeShare: 0.6,
+    rentPassThrough: 0.3,
   },
 };

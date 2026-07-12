@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f2efe7" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./styles.css?v=3" />
+    <link rel="stylesheet" href="./styles.css?v=4" />
     <title>MacroScope</title>
   </head>
   <body>
@@ -21,10 +21,10 @@
     <main>
       <section class="verdict-section" aria-labelledby="verdict-headline">
         <div class="verdict-copy">
-          <p class="kicker">Model verdict · wealth tax funds UBI</p>
+          <p class="kicker">Model verdict · wealth tax funds redistribution</p>
           <div class="verdict-line">
             <span class="verdict-badge" id="verdict-badge">Calculating</span>
-            <span class="scenario-summary" id="scenario-summary">2% above $10M · $1,000/mo adult UBI</span>
+            <span class="scenario-summary" id="scenario-summary">2% above $10M · $1,000/mo adult equivalent</span>
           </div>
           <h1 id="verdict-headline">Does the policy make ordinary Americans better off?</h1>
           <p class="verdict-explanation" id="verdict-explanation">Loading the calibrated U.S. scenario…</p>
@@ -93,7 +93,7 @@
           </li>
           <li>
             <span class="step-number">03</span>
-            <div><span>UBI reaches households</span><strong id="flow-ubi">—</strong><small id="flow-balance">—</small></div>
+            <div><span>Cash and services delivered</span><strong id="flow-ubi">—</strong><small id="flow-balance">—</small></div>
           </li>
           <li>
             <span class="step-number">04</span>
@@ -103,6 +103,34 @@
         <div class="plain-language-answer" id="money-answer">
           <strong>What this means:</strong>
           <span>Taxing and transferring existing deposits does not create money. New bank loans do.</span>
+        </div>
+      </section>
+
+      <section class="theory-section" aria-labelledby="theory-heading">
+        <div class="section-intro theory-intro">
+          <p class="kicker">Test the owner–renter gap theory</p>
+          <div>
+            <div class="theory-title-line"><span class="theory-badge" id="theory-badge">Calculating</span><h2 id="theory-heading">Does tax-funded redistribution widen the housing divide?</h2></div>
+            <p id="theory-explanation">Tracing each required link in the proposed causal chain…</p>
+          </div>
+        </div>
+        <ol class="theory-chain" aria-label="Theory causal links">
+          <li><span>01 · Accounting result</span><strong id="theory-credit">—</strong><small>tax-payment loans create deposits</small></li>
+          <li><span>02 · Behavior assumption</span><strong id="theory-hedge">—</strong><small>of new liquidity seeks assets</small></li>
+          <li><span>03 · Market response</span><strong id="theory-housing">—</strong><small>house-price premium vs. no policy</small></li>
+          <li><span>04 · Incidence test</span><strong id="theory-rent">—</strong><small>renter housing-burden change</small></li>
+          <li><span>05 · Distribution result</span><strong id="theory-gap">—</strong><small>owner–renter housing-position gap</small></li>
+        </ol>
+        <div class="theory-visual">
+          <figure>
+            <figcaption><strong>Who captures the housing channel?</strong><span>100 = no-policy path; higher rent burden is worse</span></figcaption>
+            <div class="chart" id="theory-chart"></div>
+          </figure>
+          <aside class="theory-reading">
+            <span>How to read this test</span>
+            <p>The theory is supported only if borrowing expands deposits, some resulting liquidity seeks hard assets, constrained supply raises housing prices, and rent rises faster than renter resources.</p>
+            <p id="theory-renter-result">—</p>
+          </aside>
         </div>
       </section>
 
@@ -144,7 +172,7 @@
         <div class="reason-grid">
           <article class="benefit-reason">
             <span>What helps</span>
-            <strong id="reason-benefit-title">The UBI raises spendable income.</strong>
+            <strong id="reason-benefit-title">Cash and services deliver the benefit.</strong>
             <p id="reason-benefit">—</p>
           </article>
           <article class="risk-reason">
@@ -159,16 +187,27 @@
       <details class="assumptions-panel" open>
         <summary><span>Change the policy and behavior assumptions</span><small>Re-run the U.S. model</small></summary>
         <form id="scenario-form">
+          <div class="policy-presets" aria-label="Policy scenario presets">
+            <span>Start with a scenario</span>
+            <button type="button" data-preset="top-one">1% on top 1%</button>
+            <button type="button" data-preset="billionaire">10% over $1B</button>
+            <button type="button" data-preset="ten-million">5% over $10M</button>
+            <button type="button" data-preset="universal">Universal 1% + UBI</button>
+          </div>
           <fieldset>
             <legend>Wealth tax</legend>
-            <label for="exemption">Exemption ($M)<input id="exemption" name="exemption" type="number" min="0" max="1000" step="1" /></label>
+            <label for="target-mode">Target by<select id="target-mode" name="targetMode"><option value="exemption">Dollar exemption</option><option value="top-share">Top wealth share</option></select></label>
+            <label for="exemption" id="exemption-label">Exemption ($M)<input id="exemption" name="exemption" type="number" min="0" max="1000000" step="1" /></label>
+            <label for="top-share" id="top-share-label">Top share (%)<input id="top-share" name="topShare" type="number" min="0.01" max="100" step="0.1" /></label>
             <label for="tax-rate">Annual rate (%)<input id="tax-rate" name="taxRate" type="number" min="0" max="20" step="0.1" /></label>
           </fieldset>
           <fieldset>
-            <legend>UBI</legend>
-            <label for="adult-benefit">Adult / month<input id="adult-benefit" name="adultBenefit" type="number" min="0" step="100" /></label>
-            <label for="child-benefit">Child / month<input id="child-benefit" name="childBenefit" type="number" min="0" step="100" /></label>
+            <legend>Redistribution</legend>
+            <label for="adult-benefit">Adult monthly equivalent<input id="adult-benefit" name="adultBenefit" type="number" min="0" step="100" /></label>
+            <label for="child-benefit">Child monthly equivalent<input id="child-benefit" name="childBenefit" type="number" min="0" step="100" /></label>
             <label for="funding-rule">Funding rule<select id="funding-rule" name="fundingRule"><option value="revenue-constrained">Revenue constrained</option><option value="fixed">Fixed benefit + deficit</option><option value="smoothed">Smoothed with debt</option></select></label>
+            <label for="direct-cash-share">Delivered as cash (%)<input id="direct-cash-share" name="directCashShare" type="number" min="0" max="100" step="5" /></label>
+            <label for="administrative-share">Administration share (%)<input id="administrative-share" name="administrativeShare" type="number" min="0" max="50" step="1" /></label>
           </fieldset>
           <fieldset>
             <legend>How the wealthy pay</legend>
@@ -181,6 +220,13 @@
             <label for="asset-return">Annual asset return (%)<input id="asset-return" name="assetReturn" type="number" min="-50" max="50" step="0.5" /></label>
             <label for="monetization">Deficit monetized (%)<input id="monetization" name="monetization" type="number" min="0" max="100" step="5" /></label>
             <label for="buyer-depth">Buyer depth (% equity)<input id="buyer-depth" name="buyerDepth" type="number" min="0.1" max="200" step="0.1" /></label>
+          </fieldset>
+          <fieldset>
+            <legend>Asset feedback</legend>
+            <label for="asset-hedge-share">New liquidity to assets (%)<input id="asset-hedge-share" name="assetHedgeShare" type="number" min="0" max="100" step="5" /></label>
+            <label for="housing-hedge-share">Asset flow to housing (%)<input id="housing-hedge-share" name="housingHedgeShare" type="number" min="0" max="100" step="5" /></label>
+            <label for="housing-supply">Housing supply response<input id="housing-supply" name="housingSupply" type="number" min="0" max="2" step="0.1" /></label>
+            <label for="rent-pass-through">Price gain passed to rent (%)<input id="rent-pass-through" name="rentPassThrough" type="number" min="0" max="100" step="5" /></label>
           </fieldset>
           <details class="advanced-controls">
             <summary>Advanced simulation controls</summary>
@@ -233,6 +279,6 @@
       <span>Conditional, transparent scenarios — not forecasts or financial advice.</span>
       <nav aria-label="Developer endpoints"><a href="/health">Health</a><a href="/api/status">Engine</a><a href="/api/baseline/us">U.S. baseline</a><a href="/api/scenarios/default">Scenario JSON</a></nav>
     </footer>
-    <script src="./app.js?v=3" defer></script>
+    <script src="./app.js?v=4" defer></script>
   </body>
 </html>

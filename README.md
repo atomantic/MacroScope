@@ -1,12 +1,13 @@
 # MacroScope
 
-MacroScope is a deterministic economic-policy simulator focused first on whether a U.S. wealth-tax-funded universal basic income improves real purchasing power after inflation and financing effects. A TypeScript engine powers the JSON API and a verdict-led interactive story.
+MacroScope is a deterministic economic-policy simulator focused first on whether U.S. wealth-tax-funded redistribution—direct cash, welfare, healthcare, or social services—improves real purchasing power after inflation, administration, and financing effects. A TypeScript engine powers the JSON API and a verdict-led interactive story.
 
 The current implementation covers the model contract and a usable first policy vertical slice:
 
 - Double-entry journal events with transaction, revaluation, and other-volume layers.
 - Sector and instrument metadata for households, banks, government, the central bank, and firms.
 - Versioned wealth-tax and UBI scenario schemas.
+- Dollar-exemption and modeled top-percentile wealth-tax targeting, with presets for top-1%, billionaire, $10 million, and universal scenarios.
 - Progressive wealth-tax assessment.
 - Cash-funded, borrow-funded, and asset-sale-funded tax settlement.
 - Treasury-to-household UBI settlement and collateralized-loan repayment.
@@ -18,6 +19,8 @@ The current implementation covers the model contract and a usable first policy v
 - Public-equity and last-resort housing sale channels with asset-quantity reconciliation.
 - Fiscal, money-and-credit, distributional-decile, and eight-sector demand outcomes.
 - A transparent ten-year projection of M2, inflation, private tax debt, public debt, bottom-half purchasing power, and top-one-percent real wealth.
+- A five-link owner-renter theory test that keeps bank-credit creation separate from the optional portfolio shift into housing and equities, then exposes housing supply and rent pass-through assumptions.
+- Configurable allocation of the funded budget among direct cash, public services, and administration/implementation costs.
 - A 25-cell stress test that separates elevated inflation, crisis inflation, and the Cagan 50%-per-month hyperinflation threshold.
 - A responsive verdict-led dashboard with editable policy, taxpayer behavior, market, and monetization assumptions.
 

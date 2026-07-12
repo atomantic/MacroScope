@@ -50,7 +50,7 @@ const initialize = async () => {
       populateForm(defaults);
       latestResult = snapshot;
       render(snapshot);
-      byId("scenario-summary").textContent = `${formatRate(defaults.wealthTax.rate)} above ${compactMoney.format(defaults.wealthTax.exemption)} · ${money.format(defaults.ubi.adultMonthlyBenefit)}/mo adult UBI`;
+      byId("scenario-summary").textContent = scenarioSummary(defaults, snapshot);
       byId("run-button").textContent = "Interactive model runs locally";
       byId("run-button").disabled = true;
       setFormStatus("Published default scenario. Run the PortOS/PM2 app to change assumptions.");
@@ -84,18 +84,27 @@ const populateForm = (request) => {
   byId("seed").value = request.seed;
   byId("sample-size").value = request.sampleSize;
   byId("exemption").value = request.wealthTax.exemption / 1_000_000;
+  byId("target-mode").value = request.wealthTax.targetMode;
+  byId("top-share").value = request.wealthTax.topShare * 100;
   byId("tax-rate").value = request.wealthTax.rate * 100;
   byId("adult-benefit").value = request.ubi.adultMonthlyBenefit;
   byId("child-benefit").value = request.ubi.childMonthlyBenefit;
   byId("funding-rule").value = request.ubi.fundingRule;
+  byId("direct-cash-share").value = request.ubi.directCashShare * 100;
+  byId("administrative-share").value = request.ubi.administrativeShare * 100;
   byId("buyer-depth").value = request.market.buyerDepthRatio * 100;
   byId("price-impact").value = request.market.priceImpactCoefficient;
   byId("maximum-ltv").value = request.market.maximumCollateralLtv * 100;
+  byId("housing-supply").value = request.market.housingSupplyElasticity;
   byId("borrow-share").value = request.behavior.borrowShare * 100;
   byId("sell-share").value = request.behavior.sellShare * 100;
   byId("asset-return").value = request.behavior.annualAssetReturn * 100;
   byId("loan-rate").value = request.behavior.loanInterestRate * 100;
   byId("monetization").value = request.behavior.deficitMonetizationShare * 100;
+  byId("asset-hedge-share").value = request.behavior.assetHedgeShare * 100;
+  byId("housing-hedge-share").value = request.behavior.housingHedgeShare * 100;
+  byId("rent-pass-through").value = request.behavior.rentPassThrough * 100;
+  syncTargetControls();
 };
 
 const formRequest = () => ({
@@ -104,18 +113,23 @@ const formRequest = () => ({
   sampleSize: Number(byId("sample-size").value),
   representedHouseholds,
   wealthTax: {
+    targetMode: byId("target-mode").value,
     exemption: Number(byId("exemption").value) * 1_000_000,
+    topShare: Number(byId("top-share").value) / 100,
     rate: Number(byId("tax-rate").value) / 100,
   },
   ubi: {
     adultMonthlyBenefit: Number(byId("adult-benefit").value),
     childMonthlyBenefit: Number(byId("child-benefit").value),
     fundingRule: byId("funding-rule").value,
+    directCashShare: Number(byId("direct-cash-share").value) / 100,
+    administrativeShare: Number(byId("administrative-share").value) / 100,
   },
   market: {
     buyerDepthRatio: Number(byId("buyer-depth").value) / 100,
     priceImpactCoefficient: Number(byId("price-impact").value),
     maximumCollateralLtv: Number(byId("maximum-ltv").value) / 100,
+    housingSupplyElasticity: Number(byId("housing-supply").value),
   },
   behavior: {
     borrowShare: Number(byId("borrow-share").value) / 100,
@@ -123,6 +137,9 @@ const formRequest = () => ({
     annualAssetReturn: Number(byId("asset-return").value) / 100,
     loanInterestRate: Number(byId("loan-rate").value) / 100,
     deficitMonetizationShare: Number(byId("monetization").value) / 100,
+    assetHedgeShare: Number(byId("asset-hedge-share").value) / 100,
+    housingHedgeShare: Number(byId("housing-hedge-share").value) / 100,
+    rentPassThrough: Number(byId("rent-pass-through").value) / 100,
   },
 });
 
@@ -144,7 +161,7 @@ const runScenario = async () => {
     }
     latestResult = payload;
     render(payload);
-    byId("scenario-summary").textContent = `${formatRate(request.wealthTax.rate)} above ${compactMoney.format(request.wealthTax.exemption)} · ${money.format(request.ubi.adultMonthlyBenefit)}/mo adult UBI`;
+    byId("scenario-summary").textContent = scenarioSummary(request, payload);
     setFormStatus(`Updated from ${integer.format(payload.population.sampledHouseholds)} weighted household agents.`);
   } catch (error) {
     setFormStatus(error instanceof Error ? error.message : "Scenario failed.", true);
@@ -157,6 +174,7 @@ const render = (result) => {
   renderVerdict(result.projection);
   renderCharts(result.projection);
   renderFlow(result.projection);
+  renderTheory(result.projection.theoryTest, result.projection);
   renderStress(result.projection.stressTest);
   renderReasons(result.projection);
   renderDetails(result);
@@ -226,7 +244,19 @@ const renderLineChart = (id, options) => {
   });
   svg.append(svgNode("line", { x1: margin.left, y1: y(options.baseline), x2: width - margin.right, y2: y(options.baseline), class: "baseline-line" }));
 
-  options.series.forEach((series) => {
+  const labelPositions = options.series
+    .map((series, index) => ({ index, y: y(series.values.at(-1)) }))
+    .sort((left, right) => left.y - right.y);
+  for (let index = 1; index < labelPositions.length; index += 1) {
+    labelPositions[index].y = Math.max(labelPositions[index].y, labelPositions[index - 1].y + 28);
+  }
+  const bottomOverflow = (labelPositions.at(-1)?.y ?? 0) - (height - margin.bottom - 12);
+  if (bottomOverflow > 0) labelPositions.forEach((position) => { position.y -= bottomOverflow; });
+  const topOverflow = margin.top + 8 - (labelPositions[0]?.y ?? margin.top + 8);
+  if (topOverflow > 0) labelPositions.forEach((position) => { position.y += topOverflow; });
+  const labelY = new Map(labelPositions.map((position) => [position.index, position.y]));
+
+  options.series.forEach((series, seriesIndex) => {
     const points = series.values.map((value, index) => `${x(index, series.values.length)},${y(value)}`).join(" ");
     svg.append(svgNode("polyline", { points, class: `data-line ${series.tone}`, fill: "none" }));
     series.values.forEach((value, index) => {
@@ -235,8 +265,9 @@ const renderLineChart = (id, options) => {
       svg.append(circle);
     });
     const finalValue = series.values.at(-1);
-    svg.append(svgNode("text", { x: width - margin.right + 12, y: y(finalValue) - 5, class: `series-label ${series.tone}` }, series.label));
-    svg.append(svgNode("text", { x: width - margin.right + 12, y: y(finalValue) + 13, class: "series-value" }, `${finalValue.toFixed(1)}${options.valueSuffix}`));
+    const finalLabelY = labelY.get(seriesIndex) ?? y(finalValue);
+    svg.append(svgNode("text", { x: width - margin.right + 12, y: finalLabelY - 5, class: `series-label ${series.tone}` }, series.label));
+    svg.append(svgNode("text", { x: width - margin.right + 12, y: finalLabelY + 13, class: "series-value" }, `${finalValue.toFixed(1)}${options.valueSuffix}`));
   });
   root.append(svg);
 };
@@ -246,13 +277,35 @@ const renderFlow = (projection) => {
   byId("flow-tax").textContent = compactMoney.format(annualFlows.taxCollected);
   byId("flow-mix").textContent = `${percent.format(behaviorMix.borrowShare)} borrow · ${percent.format(behaviorMix.sellShare)} sell`;
   byId("flow-loans").textContent = `${compactMoney.format(annualFlows.newPrivateLoans)} in new bank loans each year`;
-  byId("flow-ubi").textContent = compactMoney.format(annualFlows.ubiReceived);
-  byId("flow-balance").textContent = annualFlows.governmentDeficit > 1
-    ? `${compactMoney.format(annualFlows.governmentDeficit)} annual federal deficit`
-    : "Revenue-constrained: no modeled federal deficit";
+  byId("flow-ubi").textContent = `${compactMoney.format(annualFlows.ubiReceived)} cash · ${compactMoney.format(annualFlows.publicServicesSpending)} services`;
+  byId("flow-balance").textContent = `${compactMoney.format(annualFlows.administrativeCost)} administration${annualFlows.governmentDeficit > 1 ? ` · ${compactMoney.format(annualFlows.governmentDeficit)} deficit` : " · no modeled deficit"}`;
   byId("flow-result").textContent = `${signedPercent(summary.bottom50PurchasingPowerChange)} buying power`;
   byId("flow-debt").textContent = `${compactMoney.format(summary.privateTaxDebt)} in private tax debt`;
-  byId("money-answer").innerHTML = `<strong>What this means:</strong><span>The tax-and-UBI transfer itself reshuffles deposits. The selected borrowing behavior adds ${compactMoney.format(annualFlows.m2Injection)} to M2 in year one; selling assets does not create deposits economy-wide.</span>`;
+  byId("money-answer").innerHTML = `<strong>What this means:</strong><span>The tax-and-spending cycle itself reshuffles deposits. The selected borrowing behavior adds ${compactMoney.format(annualFlows.m2Injection)} to M2 in year one; selling assets does not create deposits economy-wide.</span>`;
+};
+
+const renderTheory = (theory, projection) => {
+  const { verdict, summary, assumptions, years } = theory;
+  byId("theory-badge").textContent = verdict.rating;
+  byId("theory-badge").dataset.rating = verdict.rating;
+  byId("theory-heading").textContent = verdict.headline;
+  byId("theory-explanation").textContent = verdict.explanation;
+  byId("theory-credit").textContent = signedPercent(projection.summary.cumulativeM2Change);
+  byId("theory-hedge").textContent = `${percent.format(assumptions.assetHedgeShare)} · ${compactMoney.format(summary.annualLiquiditySeekingAssets)}/yr`;
+  byId("theory-housing").textContent = signedPercent(summary.housingPriceChange);
+  byId("theory-rent").textContent = signedPercent(summary.bottomRenterHousingBurdenChange);
+  byId("theory-gap").textContent = signedPoints(summary.housingPositionGapChange);
+  byId("theory-renter-result").textContent = `After cash transfers, administration, prices, and rent, modeled bottom-half renters end with ${signedPercent(summary.bottomRenterDisposableIncomeChange)} disposable buying power relative to the no-policy path.`;
+  renderLineChart("theory-chart", {
+    description: `The middle-homeowner wealth index ends at ${years.at(-1).middleHomeownerWealthIndex.toFixed(1)}, renter housing burden at ${years.at(-1).bottomRenterHousingBurdenIndex.toFixed(1)}, and renter disposable income at ${years.at(-1).bottomRenterDisposableIncomeIndex.toFixed(1)}, with 100 representing no policy.`,
+    series: [
+      { label: "Middle homeowner wealth", values: years.map((year) => year.middleHomeownerWealthIndex), tone: "series-a" },
+      { label: "Renter housing burden", values: years.map((year) => year.bottomRenterHousingBurdenIndex), tone: "series-b" },
+      { label: "Renter disposable income", values: years.map((year) => year.bottomRenterDisposableIncomeIndex), tone: "series-c" },
+    ],
+    baseline: 100,
+    valueSuffix: "",
+  });
 };
 
 const renderStress = (stress) => {
@@ -279,7 +332,7 @@ const renderStress = (stress) => {
 
 const renderReasons = (projection) => {
   const { annualFlows, summary, behaviorMix } = projection;
-  byId("reason-benefit").textContent = `${compactMoney.format(annualFlows.ubiReceived)} reaches households each year. After modeled price changes, the bottom half ends ${plainDirection(summary.bottom50PurchasingPowerChange)} relative to a no-policy path.`;
+  byId("reason-benefit").textContent = `${compactMoney.format(annualFlows.ubiReceived)} reaches households as cash and ${compactMoney.format(annualFlows.publicServicesSpending)} funds services each year, after ${compactMoney.format(annualFlows.administrativeCost)} in modeled administration. Cash buying power for the bottom half ends ${plainDirection(summary.bottom50PurchasingPowerChange)} relative to a no-policy path; in-kind service value is reported separately.`;
   byId("reason-risk").textContent = `${percent.format(behaviorMix.borrowShare)} of wealthy households’ payment behavior is represented by the borrow-first path. That leaves ${compactMoney.format(summary.privateTaxDebt)} of private tax debt after ten years and lifts M2 ${signedPercent(summary.cumulativeM2Change)}.`;
 };
 
@@ -317,6 +370,8 @@ const renderComparison = (strategies) => {
   const rows = [
     ["Tax collected", (outcome) => compactMoney.format(outcome.fiscal.taxCollected)],
     ["UBI received", (outcome) => compactMoney.format(outcome.fiscal.ubiReceived)],
+    ["Public services", (outcome) => compactMoney.format(outcome.fiscal.publicServicesSpending)],
+    ["Administration", (outcome) => compactMoney.format(outcome.fiscal.administrativeCost)],
     ["Government balance", (outcome) => compactMoney.format(outcome.fiscal.governmentBalance)],
     ["Bank deposits Δ", (outcome) => compactMoney.format(outcome.moneyAndCredit.bankDepositsChange)],
     ["Bank loans Δ", (outcome) => compactMoney.format(outcome.moneyAndCredit.bankLoansChange)],
@@ -384,6 +439,40 @@ const stressInflationLabel = (value) => value >= 10 ? `${integer.format(value * 
 const capitalize = (text) => text.charAt(0).toUpperCase() + text.slice(1);
 const regimeFor = (inflation) => inflation >= 5 ? "extreme" : inflation >= 0.5 ? "crisis" : inflation >= 0.1 ? "high" : inflation >= 0.05 ? "elevated" : "stable";
 const plainDirection = (value) => value >= 0 ? `${percent.format(value)} better off` : `${percent.format(Math.abs(value))} worse off`;
+const scenarioSummary = (request, result) => {
+  const target = request.wealthTax.targetMode === "top-share"
+    ? `top ${percent.format(request.wealthTax.topShare)}`
+    : `wealth above ${compactMoney.format(result?.wealthTaxTarget?.effectiveExemption ?? request.wealthTax.exemption)}`;
+  return `${formatRate(request.wealthTax.rate)} on ${target} · ${money.format(request.ubi.adultMonthlyBenefit)}/mo equivalent`;
+};
+
+const syncTargetControls = () => {
+  const topShareMode = byId("target-mode").value === "top-share";
+  byId("top-share").disabled = !topShareMode;
+  byId("top-share-label").classList.toggle("is-disabled", !topShareMode);
+  byId("exemption").disabled = topShareMode;
+  byId("exemption-label").classList.toggle("is-disabled", topShareMode);
+};
+
+const applyPreset = (name) => {
+  const presets = {
+    "top-one": { targetMode: "top-share", topShare: 1, exemption: 10, rate: 1 },
+    billionaire: { targetMode: "exemption", topShare: 1, exemption: 1000, rate: 10 },
+    "ten-million": { targetMode: "exemption", topShare: 1, exemption: 10, rate: 5 },
+    universal: { targetMode: "exemption", topShare: 100, exemption: 0, rate: 1, adultBenefit: 1000, childBenefit: 500, directCashShare: 100 },
+  };
+  const preset = presets[name];
+  if (!preset) return;
+  byId("target-mode").value = preset.targetMode;
+  byId("top-share").value = preset.topShare;
+  byId("exemption").value = preset.exemption;
+  byId("tax-rate").value = preset.rate;
+  if (preset.adultBenefit !== undefined) byId("adult-benefit").value = preset.adultBenefit;
+  if (preset.childBenefit !== undefined) byId("child-benefit").value = preset.childBenefit;
+  if (preset.directCashShare !== undefined) byId("direct-cash-share").value = preset.directCashShare;
+  syncTargetControls();
+  void runScenario();
+};
 
 const setFormStatus = (message, isError = false) => {
   const status = byId("form-status");
@@ -400,4 +489,8 @@ byId("run-button").addEventListener("click", (event) => {
   void runScenario();
 });
 byId("distribution-strategy").addEventListener("change", renderDistribution);
+byId("target-mode").addEventListener("change", syncTargetControls);
+document.querySelectorAll("[data-preset]").forEach((button) => {
+  button.addEventListener("click", () => applyPreset(button.dataset.preset));
+});
 void initialize();

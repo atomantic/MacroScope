@@ -72,6 +72,7 @@ const SUPPLY_SENSITIVITY: Readonly<Record<ConsumptionSector, number>> = {
 export const runComparison = (
   request: ComparisonRequestV1 = DEFAULT_COMPARISON_REQUEST,
 ): ComparisonResultV1 => {
+  request = normalizeComparisonRequest(request);
   const generatedHouseholds = generateSyntheticPopulation({
     seed: request.seed,
     sampleSize: request.sampleSize,
@@ -82,7 +83,8 @@ export const runComparison = (
     request.representedHouseholds,
   );
   const population = summarizePopulation(households);
-  const policy = buildWealthTaxPolicy(request);
+  const effectiveExemption = resolveEffectiveExemption(households, request);
+  const policy = buildWealthTaxPolicy(request, effectiveExemption);
   const strategies = Object.fromEntries(
     STRATEGIES.map((strategy) => [
       strategy,
@@ -93,6 +95,12 @@ export const runComparison = (
   return {
     schemaVersion: request.schemaVersion,
     assumptions: request,
+    wealthTaxTarget: {
+      mode: request.wealthTax.targetMode,
+      requestedExemption: request.wealthTax.exemption,
+      topShare: request.wealthTax.topShare,
+      effectiveExemption,
+    },
     population,
     strategies,
     projection: buildPolicyProjection(request, strategies),
@@ -101,12 +109,37 @@ export const runComparison = (
       "Wealth-group totals are calibrated to the Federal Reserve DFA for 2026:Q1; within-group joint distributions remain stylized.",
       "Equity price impact and inflation are reduced-form assumptions exposed for sensitivity testing.",
       "The current closed economy assumes domestic buyers absorb all equity and housing sales.",
-      "Housing is a slower last-resort transfer channel without endogenous regional price feedback in this slice.",
+      "Housing sales remain a national, closed-economy transfer channel; the ten-year owner-renter view adds reduced-form price, supply, and rent feedback rather than regional market clearing.",
       "Wealth Gini values treat negative net worth as zero for the inequality calculation.",
       "The ten-year path is a transparent reduced-form projection with constant real policy flows, partial wage adjustment, and no private-loan bailout.",
+      "Cash purchasing-power measures do not assign a dollar welfare value to healthcare or social services delivered in kind.",
+      "Percentile targeting resolves an effective exemption from the synthetic weighted population, so its dollar cutoff varies with calibration and sample size.",
     ],
   };
 };
+
+const normalizeComparisonRequest = (
+  request: ComparisonRequestV1,
+): ComparisonRequestV1 => ({
+  ...DEFAULT_COMPARISON_REQUEST,
+  ...request,
+  wealthTax: {
+    ...DEFAULT_COMPARISON_REQUEST.wealthTax,
+    ...request.wealthTax,
+  },
+  ubi: {
+    ...DEFAULT_COMPARISON_REQUEST.ubi,
+    ...request.ubi,
+  },
+  market: {
+    ...DEFAULT_COMPARISON_REQUEST.market,
+    ...request.market,
+  },
+  behavior: {
+    ...DEFAULT_COMPARISON_REQUEST.behavior,
+    ...request.behavior,
+  },
+});
 
 const runStrategy = (
   households: readonly SyntheticHousehold[],
@@ -138,16 +171,22 @@ const runStrategy = (
       (household.adults * request.ubi.adultMonthlyBenefit +
         household.children * request.ubi.childMonthlyBenefit),
   );
-  const administrativeRate = 0.01;
   const leakageRate = 0.002;
-  const fundingRatio =
+  const programBudget =
     request.ubi.fundingRule === "revenue-constrained"
-      ? Math.min(1, taxCollected / Math.max(1, requestedUbi * (1 + administrativeRate)))
-      : 1;
-  const ubiReceived = requestedUbi * fundingRatio * (1 - leakageRate);
-  const leakage = requestedUbi * fundingRatio * leakageRate;
-  const administrativeCost = requestedUbi * fundingRatio * administrativeRate;
-  const governmentOutlays = ubiReceived + leakage + administrativeCost;
+      ? Math.min(taxCollected, requestedUbi)
+      : requestedUbi;
+  const fundingRatio = programBudget / Math.max(1, requestedUbi);
+  const administrativeCost =
+    programBudget * request.ubi.administrativeShare;
+  const postAdministrationBudget = programBudget - administrativeCost;
+  const leakage = postAdministrationBudget * leakageRate;
+  const deliveredBudget = postAdministrationBudget - leakage;
+  const ubiReceived = deliveredBudget * request.ubi.directCashShare;
+  const publicServicesSpending =
+    deliveredBudget * (1 - request.ubi.directCashShare);
+  const governmentOutlays = programBudget;
+  const householdCashDeliveryRatio = ubiReceived / Math.max(1, requestedUbi);
 
   const cascade = calculateCascade(households, funding, request);
   const primaryBookSales = weightedSum(
@@ -179,7 +218,7 @@ const runStrategy = (
       12 *
       (household.adults * request.ubi.adultMonthlyBenefit +
         household.children * request.ubi.childMonthlyBenefit);
-    const receivedUbi = grossUbi * fundingRatio * (1 - leakageRate);
+    const receivedUbi = grossUbi * householdCashDeliveryRatio;
     const forcedBookSale = cascade.forcedBookSales.get(household.id) ?? 0;
     const forcedRepayment = cascade.forcedRepayments.get(household.id) ?? 0;
     const buyerWeight = buyerWeights[householdIndex] ?? 0;
@@ -248,6 +287,10 @@ const runStrategy = (
     });
     householdIndex += 1;
   }
+
+  sectorChanges.healthcare += publicServicesSpending * 0.6;
+  sectorChanges.services += publicServicesSpending * 0.4;
+  consumptionDemandChange += publicServicesSpending;
 
   const paidFromCash = weightedSum(households, (household) =>
     requireFunding(funding, household.id).cash,
@@ -321,6 +364,7 @@ const runStrategy = (
       taxDeferred: taxAssessed - taxCollected,
       requestedUbi,
       ubiReceived,
+      publicServicesSpending,
       administrativeCost,
       leakage,
       governmentBalance: taxCollected - governmentOutlays,
@@ -520,9 +564,10 @@ const summarizePopulation = (
 
 const buildWealthTaxPolicy = (
   request: ComparisonRequestV1,
+  exemption = request.wealthTax.exemption,
 ): WealthTaxPolicyV1 => ({
   unit: "tax-household",
-  exemption: request.wealthTax.exemption,
+  exemption,
   brackets: [{ threshold: 0, rate: request.wealthTax.rate }],
   assets: {
     deposits: { inclusionRate: 1, valuationFactor: 1 },
@@ -540,6 +585,39 @@ const buildWealthTaxPolicy = (
   installments: 4,
   allowDeferral: true,
 });
+
+const resolveEffectiveExemption = (
+  households: readonly SyntheticHousehold[],
+  request: ComparisonRequestV1,
+): number => {
+  if (request.wealthTax.targetMode === "exemption") {
+    return request.wealthTax.exemption;
+  }
+  const zeroExemptionPolicy = buildWealthTaxPolicy(request, 0);
+  const ranked = households
+    .map((household) => {
+      const assessment = assessWealthTax(
+        { assets: household.assets, liabilities: household.liabilities },
+        zeroExemptionPolicy,
+      );
+      return {
+        wealth: Math.max(
+          0,
+          assessment.includedAssets - assessment.deductibleLiabilities,
+        ),
+        weight: household.weight,
+      };
+    })
+    .sort((left, right) => left.wealth - right.wealth);
+  const totalWeight = ranked.reduce((sum, item) => sum + item.weight, 0);
+  const cutoffWeight = totalWeight * (1 - request.wealthTax.topShare);
+  let cumulativeWeight = 0;
+  for (const item of ranked) {
+    cumulativeWeight += item.weight;
+    if (cumulativeWeight >= cutoffWeight) return item.wealth;
+  }
+  return ranked.at(-1)?.wealth ?? 0;
+};
 
 const consumptionShares = (
   percentile: number,

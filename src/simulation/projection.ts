@@ -13,6 +13,7 @@ const REAL_GROWTH = 0.01;
 const ANNUAL_LOAN_AMORTIZATION = 0.1;
 const STRICT_HYPER_MONTHLY_RATE = 0.5;
 const STRICT_HYPER_ANNUAL_RATE = (1 + STRICT_HYPER_MONTHLY_RATE) ** 12 - 1;
+const BASELINE_RENTER_HOUSING_COST_SHARE = 0.31;
 
 type Strategies = Readonly<Record<PaymentStrategy, StrategyOutcome>>;
 
@@ -33,6 +34,12 @@ export const buildPolicyProjection = (
 
   const taxCollected = blended((outcome) => outcome.fiscal.taxCollected);
   const ubiReceived = blended((outcome) => outcome.fiscal.ubiReceived);
+  const publicServicesSpending = blended(
+    (outcome) => outcome.fiscal.publicServicesSpending,
+  );
+  const administrativeCost = blended(
+    (outcome) => outcome.fiscal.administrativeCost,
+  );
   const newPrivateLoans = blended(
     (outcome) => outcome.funding.newCollateralizedLoans,
   );
@@ -61,8 +68,26 @@ export const buildPolicyProjection = (
   let confidence = 1;
   let bottomWageBase = (US_BASELINE.annualPce * 0.3) / (US_BASELINE.households * 0.5);
   let baselineResources = bottomWageBase;
+  const initialBottomResources = bottomWageBase;
   let topWealth = topOnePercentWealth();
   let baselineTopWealth = topWealth;
+  const housingWealth = totalHousingWealth();
+  const publicEquityWealth = totalPublicEquityWealth();
+  const middleHousingToNetWorth = middleFortyHousingToNetWorth();
+  let housingPriceIndex = 1;
+  let equityPriceIndex = 1;
+  let rentPremiumIndex = 1;
+  const theoryYears: PolicyProjection["theoryTest"]["years"][number][] = [
+    {
+      year: 0,
+      liquiditySeekingAssets: 0,
+      housingPriceIndex: 100,
+      equityPriceIndex: 100,
+      middleHomeownerWealthIndex: 100,
+      bottomRenterHousingBurdenIndex: 100,
+      bottomRenterDisposableIncomeIndex: 100,
+    },
+  ];
   const years: PolicyProjection["years"][number][] = [
     {
       year: 0,
@@ -89,6 +114,25 @@ export const buildPolicyProjection = (
       governmentDeficit * request.behavior.deficitMonetizationShare;
     const moneyGrowth = moneyInjection / Math.max(1, m2);
     m2 += moneyInjection;
+
+    // Tax-payment loans do not buy assets directly: they settle with Treasury.
+    // This separate, exposed assumption asks how much of the resulting liquidity
+    // is later recycled into inflation hedges by its eventual holders.
+    const liquiditySeekingAssets =
+      Math.max(0, moneyInjection) * request.behavior.assetHedgeShare;
+    const housingDemand =
+      liquiditySeekingAssets * request.behavior.housingHedgeShare;
+    const equityDemand = liquiditySeekingAssets - housingDemand;
+    const housingPricePressure =
+      (housingDemand / Math.max(1, housingWealth)) /
+      (0.25 + request.market.housingSupplyElasticity);
+    const equityPricePressure =
+      (equityDemand / Math.max(1, publicEquityWealth)) *
+      (1 + request.market.priceImpactCoefficient * 4);
+    housingPriceIndex *= 1 + housingPricePressure;
+    equityPriceIndex *= 1 + equityPricePressure;
+    rentPremiumIndex *=
+      1 + housingPricePressure * request.behavior.rentPassThrough;
 
     const stress = inflationFromStress({
       baselineInflation: US_BASELINE.baselineInflation,
@@ -120,6 +164,38 @@ export const buildPolicyProjection = (
       topWealth * (1 + request.behavior.annualAssetReturn) - topTaxBurden - interestCost,
     );
     baselineTopWealth *= 1 + request.behavior.annualAssetReturn;
+
+    const middleHomeownerWealthIndex =
+      (1 + (housingPriceIndex - 1) * middleHousingToNetWorth) * 100;
+    const baselineRentCost =
+      initialBottomResources *
+      BASELINE_RENTER_HOUSING_COST_SHARE *
+      baselinePriceLevel;
+    const policyRentCost =
+      initialBottomResources *
+      BASELINE_RENTER_HOUSING_COST_SHARE *
+      priceLevel *
+      rentPremiumIndex;
+    const policyRenterIncome = bottomWageBase + bottom50AnnualUbi;
+    const baselineRenterIncome = baselineResources;
+    const policyRentBurden = policyRentCost / Math.max(1, policyRenterIncome);
+    const baselineRentBurden = baselineRentCost / Math.max(1, baselineRenterIncome);
+    const policyDisposable = Math.max(1, policyRenterIncome - policyRentCost);
+    const baselineDisposable = Math.max(1, baselineRenterIncome - baselineRentCost);
+
+    theoryYears.push({
+      year,
+      liquiditySeekingAssets,
+      housingPriceIndex: housingPriceIndex * 100,
+      equityPriceIndex: equityPriceIndex * 100,
+      middleHomeownerWealthIndex,
+      bottomRenterHousingBurdenIndex:
+        (policyRentBurden / Math.max(0.0001, baselineRentBurden)) * 100,
+      bottomRenterDisposableIncomeIndex:
+        ((policyDisposable / priceLevel) /
+          Math.max(1, baselineDisposable / baselinePriceLevel)) *
+        100,
+    });
 
     years.push({
       year,
@@ -154,6 +230,7 @@ export const buildPolicyProjection = (
     borrowShare: weights.borrow,
   });
   const stressTest = buildStressTest(strategies, newPrivateLoans, taxCollected);
+  const theoryTest = buildTheoryTest(request, theoryYears, finalYear.m2Index / 100 - 1);
 
   return {
     verdict,
@@ -165,6 +242,8 @@ export const buildPolicyProjection = (
     annualFlows: {
       taxCollected,
       ubiReceived,
+      publicServicesSpending,
+      administrativeCost,
       newPrivateLoans,
       assetSales,
       governmentDeficit,
@@ -185,12 +264,90 @@ export const buildPolicyProjection = (
     },
     years,
     stressTest,
+    theoryTest,
     interpretation: [
       "A tax-funded UBI moves existing deposits between households; it does not by itself create money.",
       "Bank borrowing creates deposits while the tax loans remain outstanding, so borrowing can expand M2 and add inflation pressure even when the federal budget balances.",
       "Private loans remain liabilities of the wealthy borrowers. They become a burden on other households only if losses are later socialized through bailouts, guarantees, or inflationary deficit finance; this model assumes no such bailout.",
       "Purchasing-power results compare the bottom half with a no-policy baseline after prices; they include partial wage adjustment and an annual UBI flow.",
+      "The asset-price and rent channel is not implied by the accounting identities. It activates only when the selected share of new liquidity seeks housing or equities, housing supply is constrained, and rents follow asset prices.",
     ],
+  };
+};
+
+const buildTheoryTest = (
+  request: ComparisonRequestV1,
+  years: PolicyProjection["theoryTest"]["years"],
+  cumulativeM2Change: number,
+): PolicyProjection["theoryTest"] => {
+  const finalYear = years.at(-1);
+  if (!finalYear) throw new Error("Theory test did not produce a final year.");
+  const housingPriceChange = finalYear.housingPriceIndex / 100 - 1;
+  const equityPriceChange = finalYear.equityPriceIndex / 100 - 1;
+  const middleHomeownerWealthChange =
+    finalYear.middleHomeownerWealthIndex / 100 - 1;
+  const bottomRenterHousingBurdenChange =
+    finalYear.bottomRenterHousingBurdenIndex / 100 - 1;
+  const bottomRenterDisposableIncomeChange =
+    finalYear.bottomRenterDisposableIncomeIndex / 100 - 1;
+  const housingPositionGapChange =
+    middleHomeownerWealthChange + bottomRenterHousingBurdenChange;
+  const annualLiquiditySeekingAssets =
+    years.slice(1).reduce((sum, year) => sum + year.liquiditySeekingAssets, 0) /
+    Math.max(1, years.length - 1);
+
+  const hasMonetaryLink = cumulativeM2Change > 0.005;
+  const hasAssetLink = housingPriceChange > 0.005 || equityPriceChange > 0.005;
+  const hasRenterHarm = bottomRenterHousingBurdenChange > 0.005;
+  const hasWiderPositionGap = housingPositionGapChange > 0.01;
+  const rating =
+    hasMonetaryLink && hasAssetLink && hasRenterHarm && hasWiderPositionGap
+      ? "active"
+      : hasMonetaryLink && hasAssetLink
+        ? "partial"
+        : "inactive";
+  const verdict: PolicyProjection["theoryTest"]["verdict"] = rating === "active"
+    ? {
+        rating,
+        headline: "The proposed owner–renter gap channel is active.",
+        explanation:
+          bottomRenterDisposableIncomeChange >= 0
+            ? "Asset owners gain relative housing wealth and renters face a higher housing burden, although the transfer still leaves renters with more disposable buying power overall."
+            : "Asset owners gain relative housing wealth while renters face both a higher housing burden and lower disposable buying power.",
+      }
+    : rating === "partial"
+      ? {
+          rating,
+          headline: "Asset prices rise, but the renter-harm link is not established.",
+          explanation:
+            "Borrowing expands deposits and the selected portfolio response lifts asset prices, but income support, housing supply, or weak rent pass-through prevents a clear widening of renter housing burden.",
+        }
+      : {
+          rating,
+          headline: "The proposed feedback loop breaks under these assumptions.",
+          explanation:
+            "Borrowing or the portfolio shift is too small to produce a material policy-linked asset-price and rent effect in this reduced-form test.",
+        };
+
+  return {
+    verdict,
+    assumptions: {
+      assetHedgeShare: request.behavior.assetHedgeShare,
+      housingHedgeShare: request.behavior.housingHedgeShare,
+      housingSupplyElasticity: request.market.housingSupplyElasticity,
+      rentPassThrough: request.behavior.rentPassThrough,
+      baselineRenterHousingCostShare: BASELINE_RENTER_HOUSING_COST_SHARE,
+    },
+    summary: {
+      annualLiquiditySeekingAssets,
+      housingPriceChange,
+      equityPriceChange,
+      middleHomeownerWealthChange,
+      bottomRenterHousingBurdenChange,
+      bottomRenterDisposableIncomeChange,
+      housingPositionGapChange,
+    },
+    years,
   };
 };
 
@@ -397,3 +554,17 @@ const topOnePercentWealth = (): number =>
   US_BASELINE.wealthGroups
     .filter((group) => group.percentileMinimum >= 0.99)
     .reduce((sum, group) => sum + group.netWorth, 0);
+
+const totalHousingWealth = (): number =>
+  US_BASELINE.wealthGroups.reduce((sum, group) => sum + group.realEstate, 0);
+
+const totalPublicEquityWealth = (): number =>
+  US_BASELINE.wealthGroups.reduce((sum, group) => sum + group.publicEquity, 0);
+
+const middleFortyHousingToNetWorth = (): number => {
+  const group = US_BASELINE.wealthGroups.find(
+    (candidate) => candidate.id === "next-40",
+  );
+  if (!group) throw new Error("Missing middle-forty wealth baseline.");
+  return group.realEstate / Math.max(1, group.netWorth);
+};

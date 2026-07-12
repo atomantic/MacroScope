@@ -100,4 +100,67 @@ describe("vertical-slice scenario runner", () => {
     expect(Math.abs(sell.accounting.housingQuantityResidual)).toBeLessThan(0.01);
     expect(sell.accounting.passed).toBe(true);
   });
+
+  it("keeps the owner-renter gap channel contingent on portfolio feedback", () => {
+    const active = runComparison(DEFAULT_COMPARISON_REQUEST);
+    const noAssetFeedback = runComparison({
+      ...DEFAULT_COMPARISON_REQUEST,
+      behavior: {
+        ...DEFAULT_COMPARISON_REQUEST.behavior,
+        assetHedgeShare: 0,
+      },
+    });
+
+    expect(active.projection.theoryTest.verdict.rating).toBe("active");
+    expect(active.projection.theoryTest.summary.housingPriceChange).toBeGreaterThan(0.01);
+    expect(active.projection.theoryTest.summary.housingPositionGapChange).toBeGreaterThan(0.01);
+    expect(active.projection.summary.top1RealWealthChange).toBeLessThan(0);
+    expect(noAssetFeedback.projection.theoryTest.verdict.rating).toBe("inactive");
+    expect(noAssetFeedback.projection.theoryTest.summary.housingPriceChange).toBe(0);
+  });
+
+  it("allocates the funded budget between administration, cash, and services", () => {
+    const result = runComparison({
+      ...compactRequest(),
+      ubi: {
+        ...compactRequest().ubi,
+        directCashShare: 0.4,
+        administrativeShare: 0.25,
+      },
+    });
+    const fiscal = result.strategies["cash-first"].fiscal;
+    expect(fiscal.administrativeCost).toBeCloseTo(fiscal.taxCollected * 0.25, 4);
+    expect(fiscal.publicServicesSpending).toBeGreaterThan(fiscal.ubiReceived);
+    expect(
+      fiscal.ubiReceived +
+        fiscal.publicServicesSpending +
+        fiscal.administrativeCost +
+        fiscal.leakage,
+    ).toBeCloseTo(fiscal.taxCollected, 4);
+    expect(Math.abs(fiscal.governmentBalance)).toBeLessThan(0.01);
+  });
+
+  it("resolves percentile targets separately from dollar exemptions", () => {
+    const topOne = runComparison({
+      ...compactRequest(),
+      wealthTax: {
+        targetMode: "top-share",
+        topShare: 0.01,
+        exemption: 0,
+        rate: 0.01,
+      },
+    });
+    const billionaire = runComparison({
+      ...compactRequest(),
+      wealthTax: {
+        targetMode: "exemption",
+        topShare: 0.01,
+        exemption: 1_000_000_000,
+        rate: 0.1,
+      },
+    });
+    expect(topOne.wealthTaxTarget.mode).toBe("top-share");
+    expect(topOne.wealthTaxTarget.effectiveExemption).toBeGreaterThan(0);
+    expect(billionaire.wealthTaxTarget.effectiveExemption).toBe(1_000_000_000);
+  });
 });

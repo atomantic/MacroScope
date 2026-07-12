@@ -139,6 +139,24 @@ export const US_BASELINE = {
       vintage: "Cagan threshold reference",
       url: "https://www.imf.org/external/pubs/ft/wp/2002/wp02197.pdf",
     },
+    {
+      label: "The Role and Design of Net Wealth Taxes",
+      organization: "OECD",
+      vintage: "2018; debt deductibility and tax-base design",
+      url: "https://www.oecd.org/en/publications/the-role-and-design-of-net-wealth-taxes-in-the-oecd_9789264290303-en.html",
+    },
+    {
+      label: "Housing costs and renter burden",
+      organization: "U.S. Census Bureau",
+      vintage: "2024 American Community Survey",
+      url: "https://www.census.gov/newsroom/press-releases/2025/acs-1-year-estimates.html",
+    },
+    {
+      label: "Homeowner Balance Sheets and Monetary Policy",
+      organization: "Federal Reserve Board",
+      vintage: "FEDS 2014-98; collateral and constrained housing supply",
+      url: "https://www.federalreserve.gov/econres/feds/homeowner-balance-sheets-and-monetary-policy.htm",
+    },
   ] satisfies readonly DataSource[],
 } as const;
 

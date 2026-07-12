@@ -18,11 +18,12 @@ export interface AppOptions {
 export const createApp = (options: AppOptions = {}): Express => {
   const app = express();
   const startedAt = options.startedAt ?? Date.now();
-  const publicDirectory = options.publicDirectory ?? resolve(process.cwd(), "public");
+  const publicDirectory =
+    options.publicDirectory ?? resolve(import.meta.dirname, "../../public");
 
   app.disable("x-powered-by");
   app.use(express.json({ limit: "32kb" }));
-  app.use(express.static(publicDirectory, { index: false, maxAge: 0 }));
+  app.use(express.static(publicDirectory, { index: "index.html", maxAge: 0 }));
 
   app.get("/health", (_request, response) => {
     response.json({
@@ -54,6 +55,9 @@ export const createApp = (options: AppOptions = {}): Express => {
         "federal-reserve-dfa-calibration",
         "ten-year-purchasing-power-projection",
         "inflation-and-monetization-stress-test",
+        "owner-renter-asset-feedback-theory-test",
+        "percentile-or-dollar-wealth-tax-targeting",
+        "cash-services-and-administration-allocation",
       ],
     });
   });
@@ -80,10 +84,6 @@ export const createApp = (options: AppOptions = {}): Express => {
       return;
     }
     response.json(runComparison(parsed.value));
-  });
-
-  app.get("/", (_request, response) => {
-    response.sendFile(resolve(publicDirectory, "index.html"));
   });
 
   app.use("/api", (_request, response) => {

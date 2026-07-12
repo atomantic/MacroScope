@@ -56,12 +56,21 @@ export const parseComparisonRequest = (input: unknown): ParsedComparisonRequest 
     errors.push("representedHouseholds must be at least sampleSize.");
   }
 
+  const targetMode = readTargetMode(wealthTax.targetMode, errors);
   const exemption = readNumber(
     wealthTax,
     "exemption",
     DEFAULT_COMPARISON_REQUEST.wealthTax.exemption,
     0,
     1_000_000_000_000,
+    errors,
+  );
+  const topShare = readNumber(
+    wealthTax,
+    "topShare",
+    DEFAULT_COMPARISON_REQUEST.wealthTax.topShare,
+    0.0001,
+    1,
     errors,
   );
   const rate = readNumber(
@@ -89,6 +98,22 @@ export const parseComparisonRequest = (input: unknown): ParsedComparisonRequest 
     errors,
   );
   const fundingRule = readFundingRule(ubi.fundingRule, errors);
+  const directCashShare = readNumber(
+    ubi,
+    "directCashShare",
+    DEFAULT_COMPARISON_REQUEST.ubi.directCashShare,
+    0,
+    1,
+    errors,
+  );
+  const administrativeShare = readNumber(
+    ubi,
+    "administrativeShare",
+    DEFAULT_COMPARISON_REQUEST.ubi.administrativeShare,
+    0,
+    0.5,
+    errors,
+  );
   const buyerDepthRatio = readNumber(
     market,
     "buyerDepthRatio",
@@ -111,6 +136,14 @@ export const parseComparisonRequest = (input: unknown): ParsedComparisonRequest 
     DEFAULT_COMPARISON_REQUEST.market.maximumCollateralLtv,
     0.1,
     0.9,
+    errors,
+  );
+  const housingSupplyElasticity = readNumber(
+    market,
+    "housingSupplyElasticity",
+    DEFAULT_COMPARISON_REQUEST.market.housingSupplyElasticity,
+    0,
+    2,
     errors,
   );
   const borrowShare = readNumber(
@@ -153,6 +186,30 @@ export const parseComparisonRequest = (input: unknown): ParsedComparisonRequest 
     1,
     errors,
   );
+  const assetHedgeShare = readNumber(
+    behavior,
+    "assetHedgeShare",
+    DEFAULT_COMPARISON_REQUEST.behavior.assetHedgeShare,
+    0,
+    1,
+    errors,
+  );
+  const housingHedgeShare = readNumber(
+    behavior,
+    "housingHedgeShare",
+    DEFAULT_COMPARISON_REQUEST.behavior.housingHedgeShare,
+    0,
+    1,
+    errors,
+  );
+  const rentPassThrough = readNumber(
+    behavior,
+    "rentPassThrough",
+    DEFAULT_COMPARISON_REQUEST.behavior.rentPassThrough,
+    0,
+    1,
+    errors,
+  );
   if (borrowShare + sellShare > 1) {
     errors.push("borrowShare plus sellShare must not exceed 1.");
   }
@@ -165,16 +222,19 @@ export const parseComparisonRequest = (input: unknown): ParsedComparisonRequest 
       seed,
       sampleSize,
       representedHouseholds,
-      wealthTax: { exemption, rate },
+      wealthTax: { targetMode, exemption, topShare, rate },
       ubi: {
         adultMonthlyBenefit,
         childMonthlyBenefit,
         fundingRule,
+        directCashShare,
+        administrativeShare,
       },
       market: {
         buyerDepthRatio,
         priceImpactCoefficient,
         maximumCollateralLtv,
+        housingSupplyElasticity,
       },
       behavior: {
         borrowShare,
@@ -182,6 +242,9 @@ export const parseComparisonRequest = (input: unknown): ParsedComparisonRequest 
         annualAssetReturn,
         loanInterestRate,
         deficitMonetizationShare,
+        assetHedgeShare,
+        housingHedgeShare,
+        rentPassThrough,
       },
     },
   };
@@ -219,6 +282,16 @@ const readFundingRule = (
   }
   errors.push("fundingRule must be fixed, revenue-constrained, or smoothed.");
   return DEFAULT_COMPARISON_REQUEST.ubi.fundingRule;
+};
+
+const readTargetMode = (
+  raw: unknown,
+  errors: string[],
+): ComparisonRequestV1["wealthTax"]["targetMode"] => {
+  if (raw === undefined) return DEFAULT_COMPARISON_REQUEST.wealthTax.targetMode;
+  if (raw === "exemption" || raw === "top-share") return raw;
+  errors.push("targetMode must be exemption or top-share.");
+  return DEFAULT_COMPARISON_REQUEST.wealthTax.targetMode;
 };
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>

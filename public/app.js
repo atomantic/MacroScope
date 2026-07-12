@@ -75,6 +75,9 @@ const initialize = async () => {
   } catch (error) {
     setFormStatus(error instanceof Error ? error.message : "Unable to initialize.", true);
     byId("service-status-text").textContent = "Unavailable";
+    // Without the fetched defaults the form would submit an invalid request
+    // (representedHouseholds 0) on every click — disable it instead.
+    byId("run-button").disabled = true;
   }
 };
 

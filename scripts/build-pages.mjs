@@ -15,7 +15,7 @@ const engine = resolve(output, "engine");
 // The module the web worker (public/engine-worker.js) imports; every compiled
 // module it reaches through static ESM imports is published alongside it.
 const ENGINE_ENTRY = "browser/engine.js";
-const IMPORT_PATTERN = /(?:from|import)\s*"(\.\.?\/[^"]+)"/g;
+const IMPORT_PATTERN = /(?:from|import)\s*"([^"]+)"/g;
 
 const collectEngineModules = async () => {
   const modules = new Map();
@@ -29,7 +29,13 @@ const collectEngineModules = async () => {
     const source = await readFile(resolve(dist, moduleId), "utf8");
     modules.set(moduleId, source);
     for (const match of source.matchAll(IMPORT_PATTERN)) {
-      queue.push(posix.join(posix.dirname(moduleId), match[1]));
+      const specifier = match[1];
+      if (!specifier.startsWith("./") && !specifier.startsWith("../")) {
+        throw new Error(
+          `Engine module ${moduleId} imports "${specifier}", which a browser cannot resolve; the in-browser engine graph must stay relative and dependency-free.`,
+        );
+      }
+      queue.push(posix.join(posix.dirname(moduleId), specifier));
     }
   }
   return modules;

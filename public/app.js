@@ -148,24 +148,25 @@ const enginePending = new Map();
 
 const ensureEngineWorker = () => {
   if (engineWorker) return engineWorker;
-  engineWorker = new Worker("./engine-worker.js", { type: "module" });
-  engineWorker.addEventListener("message", (event) => {
+  const worker = new Worker("./engine-worker.js", { type: "module" });
+  worker.addEventListener("message", (event) => {
     const { id } = event.data ?? {};
     const respond = enginePending.get(id);
     if (!respond) return;
     enginePending.delete(id);
     respond(event.data);
   });
-  engineWorker.addEventListener("error", () => {
+  worker.addEventListener("error", () => {
     const waiting = [...enginePending.values()];
     enginePending.clear();
-    engineWorker.terminate();
-    engineWorker = null;
+    worker.terminate();
+    if (engineWorker === worker) engineWorker = null;
     waiting.forEach((respond) =>
       respond({ ok: false, error: "The in-browser model failed to run. Try again.", details: [] }),
     );
   });
-  return engineWorker;
+  engineWorker = worker;
+  return worker;
 };
 
 const runInWorker = (request) =>

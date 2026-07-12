@@ -264,9 +264,7 @@ export const buildPolicyProjection = (
       administrativeCost: administrativeCost * budgetScale,
       newPrivateLoans: newPrivateLoansYear,
       governmentDeficit: governmentDeficitYear,
-      m2Injection:
-        newPrivateLoansYear +
-        governmentDeficitYear * request.behavior.deficitMonetizationShare,
+      m2Injection: moneyInjection,
     };
     // Evolve the taxable base for next year: nominal asset returns plus partial
     // excess-inflation pass-through grow it; the statutory rate erodes it.

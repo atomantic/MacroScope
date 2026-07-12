@@ -11,6 +11,9 @@ import { US_BASELINE } from "./usBaseline.js";
 const YEARS = 10;
 const REAL_GROWTH = 0.01;
 const ANNUAL_LOAN_AMORTIZATION = 0.1;
+// Share of policy-driven excess inflation assumed to pass through into the
+// nominal prices of the taxed asset base each year.
+const ASSET_PRICE_INFLATION_PASS_THROUGH = 0.5;
 const STRICT_HYPER_MONTHLY_RATE = 0.5;
 const STRICT_HYPER_ANNUAL_RATE = (1 + STRICT_HYPER_MONTHLY_RATE) ** 12 - 1;
 const BASELINE_RENTER_HOUSING_COST_SHARE = 0.31;
@@ -59,6 +62,29 @@ export const buildPolicyProjection = (
     weights,
     (decile) => decile.averageUbiReceived,
   );
+  const requestedUbi = blended((outcome) => outcome.fiscal.requestedUbi);
+
+  // Reduced-form wealth-tax base dynamics: the taxable base compounds with the
+  // selected nominal asset return plus partial pass-through of policy-driven
+  // excess inflation into asset prices, and shrinks by the statutory rate paid
+  // out of the base each year (so cumulative tax paid compounds against it).
+  // Year 1 reproduces the strategy outcomes exactly (multiplier = 1).
+  let taxBaseMultiplier = 1;
+  const yearOneProgramBudget =
+    request.ubi.fundingRule === "revenue-constrained"
+      ? Math.min(requestedUbi, taxCollected)
+      : requestedUbi;
+  let finalYearFlows = {
+    taxCollected,
+    ubiReceived,
+    publicServicesSpending,
+    administrativeCost,
+    newPrivateLoans,
+    governmentDeficit,
+    m2Injection:
+      newPrivateLoans +
+      governmentDeficit * request.behavior.deficitMonetizationShare,
+  };
 
   let m2 = US_BASELINE.m2;
   let priceLevel = 1;
@@ -106,12 +132,27 @@ export const buildPolicyProjection = (
   ];
 
   for (let year = 1; year <= YEARS; year += 1) {
+    // CPI indexation applies the last observed policy price level (a one-year
+    // recognition lag), so year 1 always matches the strategy outcomes.
+    const indexation = request.ubi.benefitIndexation === "cpi" ? priceLevel : 1;
+    const taxCollectedYear = taxCollected * taxBaseMultiplier;
+    const newPrivateLoansYear = newPrivateLoans * taxBaseMultiplier;
+    const requestedUbiYear = requestedUbi * indexation;
+    const programBudgetYear =
+      request.ubi.fundingRule === "revenue-constrained"
+        ? Math.min(requestedUbiYear, taxCollectedYear)
+        : requestedUbiYear;
+    const budgetScale = programBudgetYear / Math.max(1, yearOneProgramBudget);
+    const rawDeficitYear = Math.max(0, programBudgetYear - taxCollectedYear);
+    const governmentDeficitYear = rawDeficitYear < 1_000_000 ? 0 : rawDeficitYear;
+    const bottom50UbiYear = bottom50AnnualUbi * budgetScale;
+
     const repayments = privateTaxDebt * ANNUAL_LOAN_AMORTIZATION;
-    privateTaxDebt = Math.max(0, privateTaxDebt + newPrivateLoans - repayments);
-    publicDebt += governmentDeficit;
+    privateTaxDebt = Math.max(0, privateTaxDebt + newPrivateLoansYear - repayments);
+    publicDebt += governmentDeficitYear;
     const moneyInjection =
-      newPrivateLoans - repayments +
-      governmentDeficit * request.behavior.deficitMonetizationShare;
+      newPrivateLoansYear - repayments +
+      governmentDeficitYear * request.behavior.deficitMonetizationShare;
     const moneyGrowth = moneyInjection / Math.max(1, m2);
     m2 += moneyInjection;
 
@@ -141,7 +182,7 @@ export const buildPolicyProjection = (
       demandInflation: demandInflation * Math.exp(-(year - 1) / 3),
       moneyGrowth,
       monetizedDeficitRatio:
-        (governmentDeficit * request.behavior.deficitMonetizationShare) /
+        (governmentDeficitYear * request.behavior.deficitMonetizationShare) /
         US_BASELINE.nominalGdp,
       priorConfidence: confidence,
     });
@@ -154,10 +195,10 @@ export const buildPolicyProjection = (
       1 + REAL_GROWTH + US_BASELINE.baselineInflation +
       Math.max(0, annualInflation - US_BASELINE.baselineInflation) * 0.55;
     baselineResources *= 1 + REAL_GROWTH + US_BASELINE.baselineInflation;
-    const policyRealResources = (bottomWageBase + bottom50AnnualUbi) / priceLevel;
+    const policyRealResources = (bottomWageBase + bottom50UbiYear) / priceLevel;
     const baselineRealResources = baselineResources / baselinePriceLevel;
 
-    const topTaxBurden = taxCollected * 0.8;
+    const topTaxBurden = taxCollectedYear * 0.8;
     const interestCost = privateTaxDebt * request.behavior.loanInterestRate * 0.8;
     topWealth = Math.max(
       0,
@@ -176,7 +217,7 @@ export const buildPolicyProjection = (
       BASELINE_RENTER_HOUSING_COST_SHARE *
       priceLevel *
       rentPremiumIndex;
-    const policyRenterIncome = bottomWageBase + bottom50AnnualUbi;
+    const policyRenterIncome = bottomWageBase + bottom50UbiYear;
     const baselineRenterIncome = baselineResources;
     const policyRentBurden = policyRentCost / Math.max(1, policyRenterIncome);
     const baselineRentBurden = baselineRentCost / Math.max(1, baselineRenterIncome);
@@ -215,6 +256,29 @@ export const buildPolicyProjection = (
       confidenceIndex: confidence * 100,
       regime: regimeForInflation(annualInflation),
     });
+
+    finalYearFlows = {
+      taxCollected: taxCollectedYear,
+      ubiReceived: ubiReceived * budgetScale,
+      publicServicesSpending: publicServicesSpending * budgetScale,
+      administrativeCost: administrativeCost * budgetScale,
+      newPrivateLoans: newPrivateLoansYear,
+      governmentDeficit: governmentDeficitYear,
+      m2Injection:
+        newPrivateLoansYear +
+        governmentDeficitYear * request.behavior.deficitMonetizationShare,
+    };
+    // Evolve the taxable base for next year: nominal asset returns plus partial
+    // excess-inflation pass-through grow it; the statutory rate erodes it.
+    taxBaseMultiplier = Math.max(
+      0,
+      taxBaseMultiplier *
+        (1 +
+          request.behavior.annualAssetReturn +
+          Math.max(0, annualInflation - US_BASELINE.baselineInflation) *
+            ASSET_PRICE_INFLATION_PASS_THROUGH) *
+        (1 - request.wealthTax.rate),
+    );
   }
 
   const finalYear = years.at(-1);
@@ -250,6 +314,7 @@ export const buildPolicyProjection = (
       m2Injection:
         newPrivateLoans +
         governmentDeficit * request.behavior.deficitMonetizationShare,
+      finalYear: finalYearFlows,
     },
     summary: {
       peakAnnualInflation,

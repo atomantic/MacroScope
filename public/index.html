@@ -85,7 +85,7 @@
         <ol class="causal-flow">
           <li>
             <span class="step-number">01</span>
-            <div><span>Annual wealth tax collected</span><strong id="flow-tax">—</strong><small>on net worth above the exemption</small></div>
+            <div><span>Year-one wealth tax collected</span><strong id="flow-tax">—</strong><small id="flow-tax-detail">on net worth above the exemption</small></div>
           </li>
           <li>
             <span class="step-number">02</span>
@@ -93,7 +93,7 @@
           </li>
           <li>
             <span class="step-number">03</span>
-            <div><span>Cash and services delivered</span><strong id="flow-ubi">—</strong><small id="flow-balance">—</small></div>
+            <div><span>Cash and services in year one</span><strong id="flow-ubi">—</strong><small id="flow-balance">—</small></div>
           </li>
           <li>
             <span class="step-number">04</span>
@@ -206,6 +206,7 @@
             <label for="adult-benefit">Adult monthly equivalent<input id="adult-benefit" name="adultBenefit" type="number" min="0" step="100" /></label>
             <label for="child-benefit">Child monthly equivalent<input id="child-benefit" name="childBenefit" type="number" min="0" step="100" /></label>
             <label for="funding-rule">Funding rule<select id="funding-rule" name="fundingRule"><option value="revenue-constrained">Revenue constrained</option><option value="fixed">Fixed benefit + deficit</option><option value="smoothed">Smoothed with debt</option></select></label>
+            <label for="benefit-indexation">Benefit indexation<select id="benefit-indexation" name="benefitIndexation"><option value="none">Fixed nominal</option><option value="cpi">CPI indexed</option></select></label>
             <label for="direct-cash-share">Delivered as cash (%)<input id="direct-cash-share" name="directCashShare" type="number" min="0" max="100" step="5" /></label>
             <label for="administrative-share">Administration share (%)<input id="administrative-share" name="administrativeShare" type="number" min="0" max="50" step="1" /></label>
           </fieldset>

@@ -90,6 +90,7 @@ const populateForm = (request) => {
   byId("adult-benefit").value = request.ubi.adultMonthlyBenefit;
   byId("child-benefit").value = request.ubi.childMonthlyBenefit;
   byId("funding-rule").value = request.ubi.fundingRule;
+  byId("benefit-indexation").value = request.ubi.benefitIndexation ?? "none";
   byId("direct-cash-share").value = request.ubi.directCashShare * 100;
   byId("administrative-share").value = request.ubi.administrativeShare * 100;
   byId("buyer-depth").value = request.market.buyerDepthRatio * 100;
@@ -122,6 +123,7 @@ const formRequest = () => ({
     adultMonthlyBenefit: Number(byId("adult-benefit").value),
     childMonthlyBenefit: Number(byId("child-benefit").value),
     fundingRule: byId("funding-rule").value,
+    benefitIndexation: byId("benefit-indexation").value,
     directCashShare: Number(byId("direct-cash-share").value) / 100,
     administrativeShare: Number(byId("administrative-share").value) / 100,
   },
@@ -274,9 +276,13 @@ const renderLineChart = (id, options) => {
 
 const renderFlow = (projection) => {
   const { behaviorMix, annualFlows, summary } = projection;
+  const finalYear = annualFlows.finalYear;
   byId("flow-tax").textContent = compactMoney.format(annualFlows.taxCollected);
+  byId("flow-tax-detail").textContent = finalYear
+    ? `${compactMoney.format(finalYear.taxCollected)} by year ten as the taxed base ${finalYear.taxCollected < annualFlows.taxCollected ? "erodes" : "grows"}`
+    : "on net worth above the exemption";
   byId("flow-mix").textContent = `${percent.format(behaviorMix.borrowShare)} borrow · ${percent.format(behaviorMix.sellShare)} sell`;
-  byId("flow-loans").textContent = `${compactMoney.format(annualFlows.newPrivateLoans)} in new bank loans each year`;
+  byId("flow-loans").textContent = `${compactMoney.format(annualFlows.newPrivateLoans)} in new bank loans in year one${finalYear ? ` · ${compactMoney.format(finalYear.newPrivateLoans)} by year ten` : ""}`;
   byId("flow-ubi").textContent = `${compactMoney.format(annualFlows.ubiReceived)} cash · ${compactMoney.format(annualFlows.publicServicesSpending)} services`;
   byId("flow-balance").textContent = `${compactMoney.format(annualFlows.administrativeCost)} administration${annualFlows.governmentDeficit > 1 ? ` · ${compactMoney.format(annualFlows.governmentDeficit)} deficit` : " · no modeled deficit"}`;
   byId("flow-result").textContent = `${signedPercent(summary.bottom50PurchasingPowerChange)} buying power`;
@@ -332,7 +338,7 @@ const renderStress = (stress) => {
 
 const renderReasons = (projection) => {
   const { annualFlows, summary, behaviorMix } = projection;
-  byId("reason-benefit").textContent = `${compactMoney.format(annualFlows.ubiReceived)} reaches households as cash and ${compactMoney.format(annualFlows.publicServicesSpending)} funds services each year, after ${compactMoney.format(annualFlows.administrativeCost)} in modeled administration. Cash buying power for the bottom half ends ${plainDirection(summary.bottom50PurchasingPowerChange)} relative to a no-policy path; in-kind service value is reported separately.`;
+  byId("reason-benefit").textContent = `${compactMoney.format(annualFlows.ubiReceived)} reaches households as cash and ${compactMoney.format(annualFlows.publicServicesSpending)} funds services in year one, after ${compactMoney.format(annualFlows.administrativeCost)} in modeled administration${annualFlows.finalYear ? `; the evolving tax base supports ${compactMoney.format(annualFlows.finalYear.ubiReceived)} in cash by year ten` : ""}. Cash buying power for the bottom half ends ${plainDirection(summary.bottom50PurchasingPowerChange)} relative to a no-policy path; in-kind service value is reported separately.`;
   byId("reason-risk").textContent = `${percent.format(behaviorMix.borrowShare)} of wealthy households’ payment behavior is represented by the borrow-first path. That leaves ${compactMoney.format(summary.privateTaxDebt)} of private tax debt after ten years and lifts M2 ${signedPercent(summary.cumulativeM2Change)}.`;
 };
 

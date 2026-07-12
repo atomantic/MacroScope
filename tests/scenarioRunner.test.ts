@@ -102,15 +102,36 @@ describe("vertical-slice scenario runner", () => {
   });
 
   it("keeps the owner-renter gap channel contingent on portfolio feedback", () => {
-    const active = runComparison(DEFAULT_COMPARISON_REQUEST);
-    const noAssetFeedback = runComparison({
-      ...DEFAULT_COMPARISON_REQUEST,
+    // With the tax base evolving, the default scenario's growing revenue also
+    // grows the revenue-constrained UBI, so renter income keeps pace and only
+    // tighter housing supply with stronger rent pass-through activates the
+    // full renter-harm chain.
+    const harshHousing = {
+      market: {
+        ...DEFAULT_COMPARISON_REQUEST.market,
+        housingSupplyElasticity: 0.1,
+      },
       behavior: {
         ...DEFAULT_COMPARISON_REQUEST.behavior,
+        rentPassThrough: 0.7,
+      },
+    };
+    const active = runComparison({
+      ...DEFAULT_COMPARISON_REQUEST,
+      ...harshHousing,
+    });
+    const noAssetFeedback = runComparison({
+      ...DEFAULT_COMPARISON_REQUEST,
+      ...harshHousing,
+      behavior: {
+        ...harshHousing.behavior,
         assetHedgeShare: 0,
       },
     });
 
+    expect(runComparison(DEFAULT_COMPARISON_REQUEST).projection.theoryTest.verdict.rating).toBe(
+      "partial",
+    );
     expect(active.projection.theoryTest.verdict.rating).toBe("active");
     expect(active.projection.theoryTest.summary.housingPriceChange).toBeGreaterThan(0.01);
     expect(active.projection.theoryTest.summary.housingPositionGapChange).toBeGreaterThan(0.01);

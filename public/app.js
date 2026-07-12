@@ -146,6 +146,7 @@ const formRequest = () => ({
 });
 
 let engineWorker = null;
+let engineWorkerFailed = false;
 let engineRequestId = 0;
 const enginePending = new Map();
 
@@ -160,13 +161,15 @@ const ensureEngineWorker = () => {
     respond(event.data);
   });
   worker.addEventListener("error", () => {
+    worker.terminate();
+    // A late error from an already-replaced worker must not drain the
+    // replacement's pending requests.
+    if (engineWorker !== worker) return;
+    engineWorker = null;
+    engineWorkerFailed = true;
     const waiting = [...enginePending.values()];
     enginePending.clear();
-    worker.terminate();
-    if (engineWorker === worker) engineWorker = null;
-    waiting.forEach((respond) =>
-      respond({ ok: false, error: "The in-browser model failed to run. Try again.", details: [] }),
-    );
+    waiting.forEach((respond) => respond({ ok: false, workerFailed: true }));
   });
   engineWorker = worker;
   return worker;
@@ -179,11 +182,15 @@ const runInWorker = (request) =>
     ensureEngineWorker().postMessage({ id: engineRequestId, request });
   });
 
+const runOnMainThread = async (request) =>
+  (await import("./engine/browser/engine.js")).compareScenarios(request);
+
 const runLocalScenario = async (request) => {
-  const response =
-    typeof Worker === "undefined"
-      ? (await import("./engine/browser/engine.js")).compareScenarios(request)
-      : await runInWorker(request);
+  const useWorker = typeof Worker !== "undefined" && !engineWorkerFailed;
+  let response = useWorker ? await runInWorker(request) : await runOnMainThread(request);
+  // Module workers can fail where Worker itself exists (older Firefox,
+  // blocked worker loading) — retry the same request on the main thread.
+  if (response?.workerFailed) response = await runOnMainThread(request);
   if (!response?.ok) {
     throw new Error(response?.details?.join(" ") || response?.error || "Scenario failed.");
   }

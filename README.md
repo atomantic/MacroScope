@@ -1,0 +1,75 @@
+# MacroScope
+
+MacroScope is a deterministic economic-policy simulator focused first on whether a U.S. wealth-tax-funded universal basic income improves real purchasing power after inflation and financing effects. A TypeScript engine powers the JSON API and a verdict-led interactive story.
+
+The current implementation covers the model contract and a usable first policy vertical slice:
+
+- Double-entry journal events with transaction, revaluation, and other-volume layers.
+- Sector and instrument metadata for households, banks, government, the central bank, and firms.
+- Versioned wealth-tax and UBI scenario schemas.
+- Progressive wealth-tax assessment.
+- Cash-funded, borrow-funded, and asset-sale-funded tax settlement.
+- Treasury-to-household UBI settlement and collateralized-loan repayment.
+- Tick-level accounting invariants and causal event tags.
+- A deterministic weighted population representing 135.1 million U.S. households with explicit top-tail oversampling.
+- Balance-sheet totals calibrated to the Federal Reserve Distributional Financial Accounts for 2026:Q1.
+- Parallel cash-first, borrow-first, and sell-first scenarios using common households.
+- Reduced-form equity depth, price impact, collateral calls, and iterative forced liquidation.
+- Public-equity and last-resort housing sale channels with asset-quantity reconciliation.
+- Fiscal, money-and-credit, distributional-decile, and eight-sector demand outcomes.
+- A transparent ten-year projection of M2, inflation, private tax debt, public debt, bottom-half purchasing power, and top-one-percent real wealth.
+- A 25-cell stress test that separates elevated inflation, crisis inflation, and the Cagan 50%-per-month hyperinflation threshold.
+- A responsive verdict-led dashboard with editable policy, taxpayer behavior, market, and monetization assumptions.
+
+## Development
+
+```sh
+npm install
+npm run verify
+```
+
+The current build intentionally has no Three.js dependency. See [docs/MODEL_CONTRACT.md](docs/MODEL_CONTRACT.md) for the accounting conventions and [docs/SUCCESS_CRITERIA.md](docs/SUCCESS_CRITERIA.md) for the vertical-slice acceptance bar.
+
+## PortOS and PM2
+
+MacroScope is a single-process PortOS-compatible application. Its web UI, JSON API, and health check share port `6020`, defined only in `ecosystem.config.cjs`.
+
+```sh
+npm install
+npm run pm2:start
+```
+
+Useful commands:
+
+```sh
+npm run pm2:status
+npm run pm2:logs
+npm run pm2:restart
+npm run pm2:stop
+```
+
+PortOS can import this directory directly. It will detect:
+
+- UI and API on port `6020`.
+- PM2 process `macroscope-server`.
+- Build command `npm run build`.
+- Start command `npm start`.
+- Health endpoint `/health`.
+
+The PM2 process serves the compiled engine and static shell from one Node process. Ports belong in `ecosystem.config.cjs`, not `.env`.
+
+## Scenario API
+
+The UI uses the same versioned JSON API available to headless clients:
+
+```sh
+# Fetch a complete baseline request
+curl http://127.0.0.1:6020/api/scenarios/default
+
+# Run all three payment strategies
+curl -X POST http://127.0.0.1:6020/api/scenarios/compare \
+  -H 'Content-Type: application/json' \
+  --data @scenario.json
+```
+
+The response contains the immutable assumptions, population aggregates, all three strategy outcomes, the ten-year projection and verdict, the inflation stress test, accounting residuals, decile results, sector demand, and caveats. Replaying the same request produces the same response.

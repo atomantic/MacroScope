@@ -1,0 +1,7 @@
+node_modules/
+dist/
+dist-pages/
+coverage/
+.DS_Store
+*.log
+.pm2/

@@ -1,0 +1,35 @@
+{
+  "name": "macroscope",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A deterministic, stock-flow-consistent economic policy simulation engine.",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:pages": "npm run build && node scripts/build-pages.mjs",
+    "prepare": "npm run build",
+    "start": "node dist/server/index.js",
+    "pm2:logs": "pm2 logs macroscope-server",
+    "pm2:restart": "pm2 restart ecosystem.config.cjs",
+    "pm2:start": "pm2 start ecosystem.config.cjs",
+    "pm2:status": "pm2 status macroscope-server",
+    "pm2:stop": "pm2 stop ecosystem.config.cjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "verify": "npm run typecheck && npm test"
+  },
+  "dependencies": {
+    "express": "5.2.1"
+  },
+  "devDependencies": {
+    "@types/express": "5.0.6",
+    "@types/node": "26.1.1",
+    "pm2": "7.0.3",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f2efe7" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css?v=3" />
+    <title>MacroScope</title>
+  </head>
+  <body>
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="MacroScope home">MacroScope<span>.</span></a>
+      <div class="baseline-label" id="baseline-label">U.S. economy · loading baseline</div>
+      <div class="service-status" id="service-status">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span id="service-status-text">Connecting</span>
+      </div>
+    </header>
+
+    <main>
+      <section class="verdict-section" aria-labelledby="verdict-headline">
+        <div class="verdict-copy">
+          <p class="kicker">Model verdict · wealth tax funds UBI</p>
+          <div class="verdict-line">
+            <span class="verdict-badge" id="verdict-badge">Calculating</span>
+            <span class="scenario-summary" id="scenario-summary">2% above $10M · $1,000/mo adult UBI</span>
+          </div>
+          <h1 id="verdict-headline">Does the policy make ordinary Americans better off?</h1>
+          <p class="verdict-explanation" id="verdict-explanation">Loading the calibrated U.S. scenario…</p>
+        </div>
+        <div class="hero-question" aria-label="Question answered by this model">
+          <span>Core test</span>
+          <strong>Does the bottom half keep more buying power after inflation?</strong>
+        </div>
+      </section>
+
+      <section class="headline-metrics" aria-label="Ten-year policy outcomes">
+        <article>
+          <span>Bottom 50% buying power</span>
+          <strong id="metric-buying-power">—</strong>
+          <small>vs. no-policy path, year 10</small>
+        </article>
+        <article>
+          <span>Peak annual inflation</span>
+          <strong id="metric-inflation">—</strong>
+          <small id="metric-inflation-context">baseline 2.6%</small>
+        </article>
+        <article>
+          <span>M2 money stock</span>
+          <strong id="metric-m2">—</strong>
+          <small>cumulative change, year 10</small>
+        </article>
+      </section>
+
+      <section class="story-section" aria-labelledby="trajectory-heading">
+        <div class="section-intro">
+          <p class="kicker">The ten-year story</p>
+          <h2 id="trajectory-heading">The transfer helps first. Prices and financing decide whether it lasts.</h2>
+          <p>Every line is indexed to 100 before the policy, so the ending distance shows who gained or lost relative to the no-policy U.S. path.</p>
+        </div>
+        <div class="chart-grid">
+          <figure>
+            <figcaption>
+              <strong>Who wins after inflation?</strong>
+              <span>Real purchasing power and real wealth vs. no policy</span>
+            </figcaption>
+            <div class="chart" id="power-chart"></div>
+          </figure>
+          <figure>
+            <figcaption>
+              <strong>Does it create money?</strong>
+              <span id="money-chart-caption">M2 and the price level, indexed to 100</span>
+            </figcaption>
+            <div class="chart" id="money-chart"></div>
+          </figure>
+        </div>
+      </section>
+
+      <section class="causal-section" aria-labelledby="causal-heading">
+        <div class="section-intro compact">
+          <p class="kicker">Follow the dollars</p>
+          <h2 id="causal-heading">Borrowing is the hinge in this scenario.</h2>
+        </div>
+        <ol class="causal-flow">
+          <li>
+            <span class="step-number">01</span>
+            <div><span>Annual wealth tax collected</span><strong id="flow-tax">—</strong><small>on net worth above the exemption</small></div>
+          </li>
+          <li>
+            <span class="step-number">02</span>
+            <div><span>How wealthy households pay</span><strong id="flow-mix">—</strong><small id="flow-loans">— in new bank loans</small></div>
+          </li>
+          <li>
+            <span class="step-number">03</span>
+            <div><span>UBI reaches households</span><strong id="flow-ubi">—</strong><small id="flow-balance">—</small></div>
+          </li>
+          <li>
+            <span class="step-number">04</span>
+            <div><span>Ten years later</span><strong id="flow-result">—</strong><small id="flow-debt">— in private tax debt</small></div>
+          </li>
+        </ol>
+        <div class="plain-language-answer" id="money-answer">
+          <strong>What this means:</strong>
+          <span>Taxing and transferring existing deposits does not create money. New bank loans do.</span>
+        </div>
+      </section>
+
+      <section class="stress-section" aria-labelledby="stress-heading">
+        <div class="section-intro">
+          <p class="kicker">How far from hyperinflation?</p>
+          <h2 id="stress-heading">A stress test, not a prediction.</h2>
+          <p>Each cell holds the peak annual inflation in a ten-year run. For this stress test the full UBI is paid; rows scale its size and columns show how much of the resulting deficit is permanently monetized.</p>
+        </div>
+        <div class="stress-layout">
+          <div class="stress-table-wrap">
+            <table class="stress-table" aria-label="Inflation stress test">
+              <thead id="stress-head"></thead>
+              <tbody id="stress-body"></tbody>
+            </table>
+            <div class="stress-legend" aria-label="Inflation regimes">
+              <span class="stable">Stable &lt;5%</span>
+              <span class="elevated">Elevated 5–10%</span>
+              <span class="high">High 10–50%</span>
+              <span class="crisis">Crisis 50–500%</span>
+              <span class="extreme">Extreme 500%+</span>
+              <span class="hyperinflation">Hyper: 50% monthly</span>
+            </div>
+          </div>
+          <aside class="threshold-note">
+            <span>Strict hyperinflation line</span>
+            <strong>50% every month</strong>
+            <p id="hyper-threshold">Calculating the first modeled breach…</p>
+            <small>“High inflation” and “hyperinflation” are not synonyms. The latter compounds to roughly 12,875% annually.</small>
+          </aside>
+        </div>
+      </section>
+
+      <section class="verdict-reasons" aria-labelledby="reasons-heading">
+        <div class="section-intro compact">
+          <p class="kicker">Why the model says this</p>
+          <h2 id="reasons-heading">The benefit and the risk are both visible.</h2>
+        </div>
+        <div class="reason-grid">
+          <article class="benefit-reason">
+            <span>What helps</span>
+            <strong id="reason-benefit-title">The UBI raises spendable income.</strong>
+            <p id="reason-benefit">—</p>
+          </article>
+          <article class="risk-reason">
+            <span>What can hurt</span>
+            <strong id="reason-risk-title">Borrowing can turn tax payment into new money.</strong>
+            <p id="reason-risk">—</p>
+          </article>
+        </div>
+        <p class="debt-answer" id="debt-answer"><strong>Does rich-people debt get passed to the poor?</strong> Not automatically. It remains the borrower’s liability unless government later socializes losses through bailouts, guarantees, or monetary financing.</p>
+      </section>
+
+      <details class="assumptions-panel" open>
+        <summary><span>Change the policy and behavior assumptions</span><small>Re-run the U.S. model</small></summary>
+        <form id="scenario-form">
+          <fieldset>
+            <legend>Wealth tax</legend>
+            <label for="exemption">Exemption ($M)<input id="exemption" name="exemption" type="number" min="0" max="1000" step="1" /></label>
+            <label for="tax-rate">Annual rate (%)<input id="tax-rate" name="taxRate" type="number" min="0" max="20" step="0.1" /></label>
+          </fieldset>
+          <fieldset>
+            <legend>UBI</legend>
+            <label for="adult-benefit">Adult / month<input id="adult-benefit" name="adultBenefit" type="number" min="0" step="100" /></label>
+            <label for="child-benefit">Child / month<input id="child-benefit" name="childBenefit" type="number" min="0" step="100" /></label>
+            <label for="funding-rule">Funding rule<select id="funding-rule" name="fundingRule"><option value="revenue-constrained">Revenue constrained</option><option value="fixed">Fixed benefit + deficit</option><option value="smoothed">Smoothed with debt</option></select></label>
+          </fieldset>
+          <fieldset>
+            <legend>How the wealthy pay</legend>
+            <label for="borrow-share">Borrow share (%)<input id="borrow-share" name="borrowShare" type="number" min="0" max="100" step="5" /></label>
+            <label for="sell-share">Asset-sale share (%)<input id="sell-share" name="sellShare" type="number" min="0" max="100" step="5" /></label>
+            <label for="loan-rate">Loan interest (%)<input id="loan-rate" name="loanRate" type="number" min="0" max="50" step="0.1" /></label>
+          </fieldset>
+          <fieldset>
+            <legend>Macro assumptions</legend>
+            <label for="asset-return">Annual asset return (%)<input id="asset-return" name="assetReturn" type="number" min="-50" max="50" step="0.5" /></label>
+            <label for="monetization">Deficit monetized (%)<input id="monetization" name="monetization" type="number" min="0" max="100" step="5" /></label>
+            <label for="buyer-depth">Buyer depth (% equity)<input id="buyer-depth" name="buyerDepth" type="number" min="0.1" max="200" step="0.1" /></label>
+          </fieldset>
+          <details class="advanced-controls">
+            <summary>Advanced simulation controls</summary>
+            <div>
+              <label for="seed">Random seed<input id="seed" name="seed" type="number" step="1" /></label>
+              <label for="sample-size">Sample size<select id="sample-size" name="sampleSize"><option value="1000">1,000</option><option value="4000">4,000</option><option value="8000">8,000</option></select></label>
+              <label for="price-impact">Price impact<input id="price-impact" name="priceImpact" type="number" min="0" max="2" step="0.05" /></label>
+              <label for="maximum-ltv">Maximum LTV (%)<input id="maximum-ltv" name="maximumLtv" type="number" min="10" max="90" step="1" /></label>
+            </div>
+          </details>
+          <div class="form-actions">
+            <button class="run-button" id="run-button" type="submit">Recalculate verdict</button>
+            <p class="form-status" id="form-status" role="status">Loading baseline scenario…</p>
+          </div>
+        </form>
+      </details>
+
+      <details class="model-details">
+        <summary><span>Inspect model details</span><small>Funding paths, deciles, sectors, and accounting</small></summary>
+        <section class="population-strip" aria-label="Synthetic population summary">
+          <div><span>Represented households</span><strong id="population-households">—</strong></div>
+          <div><span>Aggregate net worth</span><strong id="population-wealth">—</strong></div>
+          <div><span>Public equity</span><strong id="population-equity">—</strong></div>
+          <div><span>Sampled agents</span><strong id="population-sample">—</strong></div>
+        </section>
+        <div class="strategy-grid" id="strategy-grid"></div>
+        <div class="detail-table">
+          <h3>Funding-path comparison</h3>
+          <div class="table-scroll"><table><thead><tr><th>Metric</th><th>Cash first</th><th>Borrow first</th><th>Sell first</th></tr></thead><tbody id="comparison-body"></tbody></table></div>
+        </div>
+        <div class="detail-table">
+          <div class="detail-heading"><h3>Household deciles</h3><label for="distribution-strategy">Strategy<select id="distribution-strategy"><option value="cash-first">Cash first</option><option value="borrow-first">Borrow first</option><option value="sell-first">Sell first</option></select></label></div>
+          <div class="table-scroll"><table><thead><tr><th>Decile</th><th>Net worth before</th><th>Net worth after</th><th>Tax paid</th><th>UBI received</th><th>Consumption Δ</th></tr></thead><tbody id="distribution-body"></tbody></table></div>
+        </div>
+        <div class="detail-table">
+          <h3>Consumption sectors</h3>
+          <div class="table-scroll"><table><thead><tr><th>Sector</th><th>Cash first</th><th>Borrow first</th><th>Sell first</th></tr></thead><tbody id="sector-body"></tbody></table></div>
+        </div>
+        <div class="caveats"><h3>Model boundaries</h3><ul id="caveat-list"></ul></div>
+      </details>
+
+      <section class="sources" aria-labelledby="sources-heading">
+        <p class="kicker">Calibration and definitions</p>
+        <h2 id="sources-heading">Built on official U.S. data.</h2>
+        <div id="source-list"></div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>Conditional, transparent scenarios — not forecasts or financial advice.</span>
+      <nav aria-label="Developer endpoints"><a href="/health">Health</a><a href="/api/status">Engine</a><a href="/api/baseline/us">U.S. baseline</a><a href="/api/scenarios/default">Scenario JSON</a></nav>
+    </footer>
+    <script src="/app.js?v=3" defer></script>
+  </body>
+</html>

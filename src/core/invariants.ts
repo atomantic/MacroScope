@@ -15,6 +15,36 @@ const residualFailure = (
 ): InvariantFailure[] =>
   Math.abs(residual) <= epsilon ? [] : [{ invariant, message, residual }];
 
+export interface LedgerResiduals {
+  readonly trialBalance: number;
+  readonly instrumentMirror: number;
+}
+
+const MIRRORLESS_INSTRUMENTS: readonly Instrument[] = [
+  "productive-capital",
+  "government-security",
+];
+
+export const measureLedgerResiduals = (ledger: Ledger): LedgerResiduals => {
+  const accounts = ledger.accounts();
+  const trialBalance = accounts.reduce(
+    (total, account) => total + signedTrialBalance(account),
+    0,
+  );
+  const instruments = new Set(
+    accounts.flatMap((account) => (account.instrument ? [account.instrument] : [])),
+  );
+  let instrumentMirror = 0;
+  for (const instrument of instruments) {
+    if (MIRRORLESS_INSTRUMENTS.includes(instrument)) continue;
+    const residual =
+      sumInstrument(accounts, instrument, "holder") -
+      sumInstrument(accounts, instrument, "issuer");
+    if (Math.abs(residual) > Math.abs(instrumentMirror)) instrumentMirror = residual;
+  }
+  return { trialBalance, instrumentMirror };
+};
+
 export const checkLedgerInvariants = (ledger: Ledger): readonly InvariantFailure[] => {
   const accounts = ledger.accounts();
   const failures: InvariantFailure[] = [];
@@ -50,7 +80,7 @@ export const checkLedgerInvariants = (ledger: Ledger): readonly InvariantFailure
     accounts.flatMap((account) => (account.instrument ? [account.instrument] : [])),
   );
   for (const instrument of instruments) {
-    if (instrument === "productive-capital" || instrument === "government-security") {
+    if (MIRRORLESS_INSTRUMENTS.includes(instrument)) {
       continue;
     }
     const holderBalance = sumInstrument(accounts, instrument, "holder");

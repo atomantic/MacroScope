@@ -21,6 +21,9 @@ export const SYSTEM_ACCOUNTS = {
   treasuryLiability: "central-bank:treasury-liability",
   productiveCapital: "firms:productive-capital",
   issuedEquity: "firms:issued-equity",
+  operationsExpense: "government:operations-expense",
+  firmDeposits: "firms:deposits",
+  firmOperationsIncome: "firms:operations-income",
 } as const;
 
 export const householdAccounts = (householdId: string) => ({
@@ -46,8 +49,8 @@ export interface OpeningEconomy {
   readonly treasuryBalance?: number;
 }
 
-export const createOpeningLedger = (economy: OpeningEconomy): Ledger => {
-  const ledger = new Ledger();
+export const createOpeningLedger = (economy: OpeningEconomy, epsilon?: number): Ledger => {
+  const ledger = epsilon === undefined ? new Ledger() : new Ledger(epsilon);
   ledger.addEntity({ id: SYSTEM.bank, kind: "bank", label: "Commercial bank" });
   ledger.addEntity({
     id: SYSTEM.government,
@@ -112,6 +115,12 @@ export const createOpeningLedger = (economy: OpeningEconomy): Ledger => {
     claimSide: "holder",
   }, treasuryBalance);
   add(ledger, {
+    id: SYSTEM_ACCOUNTS.operationsExpense,
+    ownerId: SYSTEM.government,
+    name: "Public services and administration expense",
+    class: "expense",
+  });
+  add(ledger, {
     id: SYSTEM_ACCOUNTS.taxIncome,
     ownerId: SYSTEM.government,
     name: "Tax income",
@@ -173,6 +182,21 @@ export const createOpeningLedger = (economy: OpeningEconomy): Ledger => {
     instrument: "public-equity",
     claimSide: "issuer",
   }, totalPublicEquity);
+  add(ledger, {
+    id: SYSTEM_ACCOUNTS.firmDeposits,
+    ownerId: SYSTEM.firms,
+    name: "Bank deposits",
+    class: "asset",
+    instrument: "deposit",
+    claimSide: "holder",
+    counterpartyId: SYSTEM.bank,
+  });
+  add(ledger, {
+    id: SYSTEM_ACCOUNTS.firmOperationsIncome,
+    ownerId: SYSTEM.firms,
+    name: "Government operations income",
+    class: "income",
+  });
 
   for (const household of economy.households) {
     ledger.addEntity({

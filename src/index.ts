@@ -6,6 +6,7 @@ export * from "./policies/wealthTax.js";
 export * from "./simulation/accounts.js";
 export * from "./simulation/contracts.js";
 export * from "./simulation/distribution.js";
+export * from "./simulation/ledgerAudit.js";
 export * from "./simulation/population.js";
 export * from "./simulation/scenarioRunner.js";
 export * from "./simulation/usBaseline.js";

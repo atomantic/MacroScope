@@ -22,6 +22,7 @@ import {
 } from "./population.js";
 import { calibratePopulationToUs } from "./usBaseline.js";
 import { buildPolicyProjection } from "./projection.js";
+import { computeStrategyAccounting } from "./ledgerAudit.js";
 
 interface HouseholdFunding {
   readonly taxAssessed: number;
@@ -114,6 +115,7 @@ export const runComparison = (
       "The ten-year path is a transparent reduced-form projection with constant real policy flows, partial wage adjustment, and no private-loan bailout.",
       "Cash purchasing-power measures do not assign a dollar welfare value to healthcare or social services delivered in kind.",
       "Percentile targeting resolves an effective exemption from the synthetic weighted population, so its dollar cutoff varies with calibration and sample size.",
+      "Accounting checks replay each strategy's aggregate sector-level flows through the double-entry ledger and cross-check them against independent per-household deposit sums; intra-household asset trades net out within the household sector.",
     ],
   };
 };
@@ -208,6 +210,7 @@ const runStrategy = (
   const distributionRecords: DistributionRecord[] = [];
   let endingBookEquity = 0;
   let endingBookHousing = 0;
+  let perHouseholdDepositsChange = 0;
   let consumptionDemandChange = 0;
   const sectorBaseline = emptySectorRecord();
   const sectorChanges = emptySectorRecord();
@@ -240,6 +243,8 @@ const runStrategy = (
       taxPaid +
       receivedUbi -
       purchaseCost;
+    perHouseholdDepositsChange +=
+      (depositsAfter - household.assets.deposits) * household.weight;
     const collateralizedLoanAfter = Math.max(
       0,
       household.liabilities.collateralizedLoan + item.borrowed - forcedRepayment,
@@ -298,17 +303,15 @@ const runStrategy = (
   const newLoans = weightedSum(households, (household) =>
     requireFunding(funding, household.id).borrowed,
   );
-  const taxFundingResidual =
-    taxCollected -
-    weightedSum(households, (household) => {
-      const item = requireFunding(funding, household.id);
-      return item.cash + item.borrowed + item.equitySold + item.housingSold;
-    });
+  const taxDeferred = weightedSum(households, (household) =>
+    requireFunding(funding, household.id).deferred,
+  );
+  const openingCollateralizedLoans = weightedSum(
+    households,
+    (household) => household.liabilities.collateralizedLoan,
+  );
   const depositsChange =
     newLoans - taxCollected + governmentOutlays - cascade.totalForcedRepayments;
-  const depositsIdentityResidual =
-    depositsChange -
-    (newLoans - taxCollected + governmentOutlays - cascade.totalForcedRepayments);
   const equityQuantityResidual = population.aggregatePublicEquity - endingBookEquity;
   const openingBookHousing = weightedSum(
     households,
@@ -349,19 +352,35 @@ const runStrategy = (
     households,
     (household) => (requireFunding(funding, household.id).equitySold > 0 ? 1 : 0),
   );
-  const tolerance = Math.max(0.01, population.aggregatePublicEquity * 1e-10);
-  const accountingPassed =
-    Math.abs(depositsIdentityResidual) <= tolerance &&
-    Math.abs(taxFundingResidual) <= tolerance &&
-    Math.abs(equityQuantityResidual) <= tolerance &&
-    Math.abs(housingQuantityResidual) <= tolerance;
+  const tolerance = Math.max(
+    0.01,
+    (population.aggregatePublicEquity + population.aggregateDeposits) * 1e-10,
+  );
+  const accounting = computeStrategyAccounting({
+    flows: {
+      openingDeposits: population.aggregateDeposits,
+      openingCollateralizedLoans,
+      openingPublicEquity: population.aggregatePublicEquity,
+      newLoans,
+      taxCollected,
+      ubiReceived,
+      otherGovernmentOutlays: governmentOutlays - ubiReceived,
+      forcedLoanRepayments: cascade.totalForcedRepayments,
+    },
+    perHouseholdDepositsChange,
+    taxAssessed,
+    taxDeferred,
+    equityQuantityResidual,
+    housingQuantityResidual,
+    tolerance,
+  });
 
   return {
     strategy,
     fiscal: {
       taxAssessed,
       taxCollected,
-      taxDeferred: taxAssessed - taxCollected,
+      taxDeferred,
       requestedUbi,
       ubiReceived,
       publicServicesSpending,
@@ -407,13 +426,7 @@ const runStrategy = (
       wealthGiniAfter: weightedGini(distributionRecords, (record) => record.netWorthAfter),
       deciles: buildDeciles(distributionRecords),
     },
-    accounting: {
-      depositsIdentityResidual,
-      taxFundingResidual,
-      equityQuantityResidual,
-      housingQuantityResidual,
-      passed: accountingPassed,
-    },
+    accounting,
   };
 };
 

@@ -243,6 +243,10 @@ export interface StrategyOutcome {
     readonly taxFundingResidual: number;
     readonly equityQuantityResidual: number;
     readonly housingQuantityResidual: number;
+    readonly ledgerTrialBalanceResidual: number;
+    readonly ledgerInstrumentResidual: number;
+    readonly ledgerEvents: number;
+    readonly ledgerFailures: readonly string[];
     readonly passed: boolean;
   };
 }

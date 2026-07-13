@@ -1,12 +1,24 @@
-import {
+// Derive the asset version from this module's own URL (index.html loads
+// `app.js?v=N`). A single page-bundle bump then flows to every sibling asset
+// this file pulls — scenario params, the engine worker, the main-thread engine
+// fallback, and the data snapshots — so a returning client can never pair a
+// fresh app.js with a stale engine graph or data JSON. Empty in the unversioned
+// dev case, which simply loads assets without a cache-busting query.
+const ASSET_VERSION = new URL(import.meta.url).searchParams.get("v") ?? "";
+const versionQuery = ASSET_VERSION ? `?v=${ASSET_VERSION}` : "";
+const versioned = (path) => `${path}${versionQuery}`;
+
+// Dynamically imported (rather than statically) so the specifier can carry the
+// runtime-derived version; a bumped app.js always pulls the matching
+// FIELD_SPECS rather than a browser-cached copy that predates newly added
+// fields.
+const {
   FIELD_SPECS,
   SCENARIO_FIELD_SPECS,
   DEFAULT_STRATEGY,
   encodeScenarioParams,
   decodeScenarioParams,
-  // Versioned so a bumped app.js always pulls the matching FIELD_SPECS rather
-  // than a browser-cached copy that predates newly added fields.
-} from "./scenario-params.js?v=14";
+} = await import(versioned("./scenario-params.js"));
 
 const STRATEGIES = ["cash-first", "borrow-first", "sell-first"];
 const LABELS = {
@@ -65,10 +77,10 @@ const initialize = async () => {
     loadModelConstants();
     if (isStaticSnapshot) {
       const [defaultResponse, baselineResponse, snapshotResponse, backtestResponse] = await Promise.all([
-        fetch("data/default-request.json"),
-        fetch("data/us-baseline.json"),
-        fetch("data/default-scenario.json"),
-        fetch("data/historical-backtest.json"),
+        fetch(versioned("data/default-request.json")),
+        fetch(versioned("data/us-baseline.json")),
+        fetch(versioned("data/default-scenario.json")),
+        fetch(versioned("data/historical-backtest.json")),
       ]);
       if (!defaultResponse.ok || !baselineResponse.ok || !snapshotResponse.ok || !backtestResponse.ok) {
         throw new Error("The published policy snapshot is unavailable.");
@@ -553,7 +565,7 @@ const createEngineChannel = () => {
   const pending = new Map();
   const ensure = () => {
     if (worker) return worker;
-    const created = new Worker("./engine-worker.js", { type: "module" });
+    const created = new Worker(versioned("./engine-worker.js"), { type: "module" });
     created.addEventListener("message", (event) => {
       const { id } = event.data ?? {};
       const respond = pending.get(id);
@@ -591,7 +603,7 @@ const comparisonChannel = createEngineChannel();
 const sensitivityChannel = createEngineChannel();
 
 const runOnMainThread = async (request, mode = "compare") => {
-  const engine = await import("./engine/browser/engine.js");
+  const engine = await import(versioned("./engine/browser/engine.js"));
   return mode === "sensitivity"
     ? engine.analyzeSensitivity(request)
     : engine.compareScenarios(request);
@@ -1767,7 +1779,7 @@ const renderDetails = (result) => {
 // boundaries panel. Loaded once from the server endpoint or the static
 // snapshot; a failed load is non-fatal and simply leaves the table empty.
 const loadModelConstants = () => {
-  const url = isStaticSnapshot ? "data/model-constants.json" : "/api/model/constants";
+  const url = isStaticSnapshot ? versioned("data/model-constants.json") : "/api/model/constants";
   return fetch(url)
     .then((response) => (response.ok ? response.json() : null))
     .then((payload) => {

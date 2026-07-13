@@ -7,6 +7,7 @@ import {
   US_BASELINE,
   runComparison,
 } from "../dist/index.js";
+import { parseAssetVersion, versionRelativeImports } from "./asset-version.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const dist = resolve(root, "dist");
@@ -45,6 +46,14 @@ const collectEngineModules = async () => {
 
 const engineModules = await collectEngineModules();
 
+// One asset version, read from the page bundle's own `app.js?v=N`, cache-busts
+// the whole static graph together: the engine modules and worker entry get it
+// stamped onto their import specifiers here, and app.js re-derives it at runtime
+// for the worker load and data-snapshot fetches.
+const ASSET_VERSION = parseAssetVersion(
+  await readFile(resolve(root, "public", "index.html"), "utf8"),
+);
+
 await rm(output, { recursive: true, force: true });
 await mkdir(data, { recursive: true });
 await cp(resolve(root, "public"), output, { recursive: true });
@@ -52,9 +61,19 @@ await cp(resolve(root, "public"), output, { recursive: true });
 for (const [moduleId, source] of engineModules) {
   const target = resolve(engine, moduleId);
   await mkdir(dirname(target), { recursive: true });
-  await writeFile(target, source);
+  await writeFile(target, versionRelativeImports(source, ASSET_VERSION));
 }
-console.log(`🧠 Published ${engineModules.size} engine modules for the in-browser worker`);
+console.log(
+  `🧠 Published ${engineModules.size} engine modules (v=${ASSET_VERSION}) for the in-browser worker`,
+);
+
+// The worker entry statically imports the engine graph; version that specifier
+// too so `engine-worker.js?v=N` and its imports invalidate as one unit.
+const workerPath = resolve(output, "engine-worker.js");
+await writeFile(
+  workerPath,
+  versionRelativeImports(await readFile(workerPath, "utf8"), ASSET_VERSION),
+);
 
 const indexPath = resolve(output, "index.html");
 const index = await readFile(indexPath, "utf8");

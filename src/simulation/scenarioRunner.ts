@@ -104,7 +104,11 @@ export const runComparison = (
     },
     population,
     strategies,
-    projection: buildPolicyProjection(request, strategies),
+    projection: buildPolicyProjection(
+      request,
+      strategies,
+      resolveEffectiveTaxRate(households, policy),
+    ),
     caveats: [
       "Results are conditional scenarios, not forecasts.",
       "Wealth-group totals are calibrated to the Federal Reserve DFA for 2026:Q1; within-group joint distributions remain stylized.",
@@ -634,6 +638,27 @@ const resolveBrackets = (
     threshold: Math.max(0, bracket.threshold - exemption),
     rate: bracket.rate,
   }));
+};
+
+// Weighted average rate paid out of the taxable base (assessed tax ÷ base). For
+// a flat policy this collapses to the single rate; for a graduated schedule it
+// is the blended effective rate the projection needs to erode the out-year base
+// consistently with year-one collections.
+const resolveEffectiveTaxRate = (
+  households: readonly SyntheticHousehold[],
+  policy: WealthTaxPolicyV1,
+): number => {
+  let weightedTax = 0;
+  let weightedBase = 0;
+  for (const household of households) {
+    const assessment = assessWealthTax(
+      { assets: household.assets, liabilities: household.liabilities },
+      policy,
+    );
+    weightedTax += household.weight * assessment.annualTax;
+    weightedBase += household.weight * assessment.taxableBase;
+  }
+  return weightedBase > 0 ? weightedTax / weightedBase : policy.brackets[0]?.rate ?? 0;
 };
 
 const resolveEffectiveExemption = (

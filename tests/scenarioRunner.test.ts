@@ -232,5 +232,13 @@ describe("vertical-slice scenario runner", () => {
       flat.strategies["cash-first"].fiscal.taxAssessed,
     );
     expect(warren.strategies["cash-first"].accounting.passed).toBe(true);
+
+    // The out-year projection must erode the base at the graduated schedule's
+    // blended effective rate, not the (lower) flat 2% floor rate. With the same
+    // $50M exemption but a 6% top bracket, the graduated top-1% real wealth must
+    // fall at least as fast as under the flat 2%.
+    expect(warren.projection.summary.top1RealWealthChange).toBeLessThan(
+      flat.projection.summary.top1RealWealthChange,
+    );
   });
 });

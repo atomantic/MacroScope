@@ -169,6 +169,18 @@ export const US_BASELINE = {
       vintage: "FEDS 2014-98; collateral and constrained housing supply",
       url: "https://www.federalreserve.gov/econres/feds/homeowner-balance-sheets-and-monetary-policy.htm",
     },
+    {
+      label: "Senator Warren's Wealth Tax: Budgetary and Economic Effects",
+      organization: "Penn Wharton Budget Model",
+      vintage: "2019; dynamic capital, wage, and GDP response to a wealth tax",
+      url: "https://budgetmodel.wharton.upenn.edu/issues/2019/12/12/senator-warren-wealth-tax",
+    },
+    {
+      label: "The Economic Effects of Wealth Taxes",
+      organization: "Tax Foundation",
+      vintage: "2019–2020; savings/investment response and long-run capital-stock drag",
+      url: "https://taxfoundation.org/research/all/federal/wealth-tax/",
+    },
   ] satisfies readonly DataSource[],
 } as const;
 

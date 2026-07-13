@@ -74,6 +74,16 @@ export interface ComparisonRequestV1 {
     readonly avoidanceElasticity: number;
     readonly expatriationShare: number;
     readonly privateBusinessInclusionRate: number;
+    // Growth/investment channel dials (issue #13). savingsResponseElasticity is
+    // the fraction of the capital-replacement investment rate lost per unit of
+    // after-tax-return drag the wealth tax imposes (the supply-side, real
+    // objection: taxing wealth lowers saving/investment, the capital stock,
+    // wages, and GDP). demandGrowthOffset is how strongly the transfer's demand
+    // impulse (program budget as a share of GDP) feeds investment/output the
+    // other way. Both default to 0, which pins the capital index at 1 and
+    // reproduces the constant-trend growth path exactly.
+    readonly savingsResponseElasticity: number;
+    readonly demandGrowthOffset: number;
   };
 }
 
@@ -97,6 +107,11 @@ export interface ProjectionYear {
   readonly bottom50PurchasingPowerIndex: number;
   readonly top1RealWealthIndex: number;
   readonly confidenceIndex: number;
+  // Real output per worker versus the no-policy path, indexed to 100 (issue #13).
+  // Moves with the endogenous capital stock: below 100 when the wealth tax's
+  // savings drag shrinks investment, above 100 when the transfer's demand offset
+  // dominates. Exactly 100 every year when both growth dials are 0.
+  readonly gdpIndex: number;
   readonly regime: InflationRegime;
 }
 
@@ -191,6 +206,9 @@ export interface PolicyProjection {
     readonly cumulativeM2Change: number;
     readonly bottom50PurchasingPowerChange: number;
     readonly top1RealWealthChange: number;
+    // Year-10 real GDP-per-worker change versus the no-policy path (fractional;
+    // e.g. -0.04 = 4% output drag). Zero when both growth dials are 0.
+    readonly gdpChange: number;
     readonly privateTaxDebt: number;
     readonly publicBurdenPerHousehold: number;
     readonly firstHyperinflationYear: number | null;
@@ -374,5 +392,7 @@ export const DEFAULT_COMPARISON_REQUEST: ComparisonRequestV1 = {
     avoidanceElasticity: 0,
     expatriationShare: 0,
     privateBusinessInclusionRate: 0.7,
+    savingsResponseElasticity: 0,
+    demandGrowthOffset: 0,
   },
 };

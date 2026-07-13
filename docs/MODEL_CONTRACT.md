@@ -101,6 +101,17 @@ The ten-year theory view deliberately separates an accounting result from behavi
 
 The view reports an owner-renter housing-position channel, not a claim that total wealth inequality must rise. Top-one-percent real wealth, bottom-half cash purchasing power, service spending, and administration remain separate outcomes. Service spending is not assigned an invented cash-equivalent welfare value.
 
+## Growth and investment channel
+
+The ten-year path also carries the *real* objection to a wealth tax, alongside the monetary one: taxing wealth can reduce saving and investment, which over a decade lowers the capital stock, productivity, and wages — including for the bottom half. It is a reduced-form Solow-style block, not a general-equilibrium model.
+
+- The capital stock is tracked as an index relative to the no-policy path, starting at 1. Each year investment deviates from the replacement rate that just offsets depreciation. A deviation of zero pins the index at 1, so the block collapses to the constant real-growth trend and reproduces prior behavior exactly.
+- Two dials drive the deviation, and either can be set to zero to isolate the pure case:
+  - **Savings response elasticity** turns the wealth tax's drag on the after-tax return to wealth (the average rate paid out of the base each year) into an investment shortfall — the supply-side, real objection. Central estimates around 0.5–1 span the Penn-Wharton Budget Model and Tax Foundation dynamic-scoring range for the Warren/Sanders proposals; the default is 0.
+  - **Demand growth offset** turns the transfer's demand impulse — the real program budget as a share of national GDP — into added investment and output, the opposite pull of redistribution toward high-spending households. The default is 0.
+- Wages track capital per worker (`capitalIndex ** capitalShare`, capital share ≈ 0.33), and the bottom-half wage base is scaled by the change in that deviation rather than a fixed formula. Real GDP per worker is reported as an index (100 = no-policy path) alongside M2 and prices, and its year-ten change feeds the summary.
+- Because the wage path flows into the bottom half's real purchasing power, a savings-driven drag shows up directly in the verdict: at literature-default elasticities a large wealth tax leaves the bottom half with visibly less buying power than the transfer alone would suggest.
+
 ## Winners and losers by wealth group
 
 Each run also reports an explicit ten-year outcome for every calibrated cohort — bottom 50% renters and owners, the middle 40%, the top 10%, top 1%, and top 0.1% — so no group's result stays hidden inside a year-one decile average. Two reduced-form measures lead the story:

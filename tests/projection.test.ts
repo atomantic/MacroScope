@@ -281,6 +281,71 @@ describe("ten-year projection dynamics", () => {
     }
   });
 
+  it("leaves output on the no-policy trend when both growth dials are zero", () => {
+    // The growth/investment block must be inert at its defaults: the capital
+    // index stays pinned at 1, so every year's GDP index is exactly 100 and the
+    // year-ten change is exactly 0 (the golden/no-regression guarantee).
+    const result = runComparison({
+      ...nationalRequest(),
+      wealthTax: { targetMode: "exemption", exemption: 0, topShare: 0.01, rate: 0.05 },
+    });
+    for (const year of result.projection.years) {
+      expect(year.gdpIndex).toBe(100);
+    }
+    expect(result.projection.summary.gdpChange).toBe(0);
+  });
+
+  it("drags wages and GDP when the savings response to a large wealth tax is on", () => {
+    const base: ComparisonRequestV1 = {
+      ...nationalRequest(),
+      wealthTax: { targetMode: "exemption", exemption: 0, topShare: 0.01, rate: 0.05 },
+    };
+    const noResponse = runComparison(base);
+    const withResponse = runComparison({
+      ...base,
+      behavior: { ...base.behavior, savingsResponseElasticity: 0.8 },
+    });
+
+    // A positive savings elasticity shrinks the capital stock, so real GDP per
+    // worker ends visibly below the no-policy path...
+    expect(withResponse.projection.summary.gdpChange).toBeLessThan(-0.01);
+    expect(noResponse.projection.summary.gdpChange).toBe(0);
+    // ...the GDP index ends below where it started...
+    expect(withResponse.projection.years.at(-1)?.gdpIndex).toBeLessThan(100);
+    // ...and because wages track capital per worker, the bottom half ends with
+    // less real buying power than the same tax without the growth drag — the
+    // verdict weighs the steelman against the transfer gain.
+    expect(
+      withResponse.projection.summary.bottom50PurchasingPowerChange,
+    ).toBeLessThan(noResponse.projection.summary.bottom50PurchasingPowerChange);
+    // Every GDP value stays finite even as the capital index is dragged down.
+    for (const year of withResponse.projection.years) {
+      expect(Number.isFinite(year.gdpIndex)).toBe(true);
+    }
+  });
+
+  it("lifts output when the transfer's demand offset is on", () => {
+    // With no savings response, a positive demand offset feeds the transfer's
+    // fiscal impulse into investment and output, so GDP ends ABOVE the no-policy
+    // path — the pure demand case, isolated from the supply drag.
+    const base: ComparisonRequestV1 = {
+      ...nationalRequest(),
+      ubi: { ...nationalRequest().ubi, adultMonthlyBenefit: 1_500, childMonthlyBenefit: 750 },
+    };
+    const noOffset = runComparison(base);
+    const withOffset = runComparison({
+      ...base,
+      behavior: {
+        ...base.behavior,
+        savingsResponseElasticity: 0,
+        demandGrowthOffset: 1,
+      },
+    });
+    expect(noOffset.projection.summary.gdpChange).toBe(0);
+    expect(withOffset.projection.summary.gdpChange).toBeGreaterThan(0.01);
+    expect(withOffset.projection.years.at(-1)?.gdpIndex).toBeGreaterThan(100);
+  });
+
   it("keeps year-one flows identical to the strategy outcomes and caveats aligned", () => {
     const result = runComparison(nationalRequest());
     const flows = result.projection.annualFlows;

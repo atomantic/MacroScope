@@ -142,6 +142,8 @@ const populateForm = (request) => {
   byId("expatriation-share").value = request.behavior.expatriationShare * 100;
   byId("private-business-inclusion").value =
     request.behavior.privateBusinessInclusionRate * 100;
+  byId("savings-response").value = request.behavior.savingsResponseElasticity;
+  byId("demand-offset").value = request.behavior.demandGrowthOffset;
   renderBrackets(request.wealthTax.brackets);
   syncTargetControls();
 };
@@ -187,6 +189,8 @@ const formRequest = () => {
       expatriationShare: Number(byId("expatriation-share").value) / 100,
       privateBusinessInclusionRate:
         Number(byId("private-business-inclusion").value) / 100,
+      savingsResponseElasticity: Number(byId("savings-response").value),
+      demandGrowthOffset: Number(byId("demand-offset").value),
     },
   };
 };
@@ -760,10 +764,11 @@ const powerChartOptions = (projection) => {
 const moneyChartOptions = (projection) => {
   const years = projection.years;
   return {
-    description: `M2 ends at index ${years.at(-1).m2Index.toFixed(1)} and the price level at ${(years.at(-1).priceLevel * 100).toFixed(1)}, with 100 before policy.`,
+    description: `M2 ends at index ${years.at(-1).m2Index.toFixed(1)}, the price level at ${(years.at(-1).priceLevel * 100).toFixed(1)}, and real GDP per worker at ${years.at(-1).gdpIndex.toFixed(1)}, with 100 before policy.`,
     series: [
       { label: "M2 money stock", values: years.map((year) => year.m2Index), tone: "series-c" },
       { label: "Price level", values: years.map((year) => year.priceLevel * 100), tone: "series-d" },
+      { label: "Real GDP / worker", values: years.map((year) => year.gdpIndex), tone: "series-a" },
     ],
     baseline: 100,
     valueSuffix: "",

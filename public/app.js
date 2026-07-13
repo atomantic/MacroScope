@@ -335,8 +335,17 @@ const renderPersona = (result) => {
   const group = outcomes.find((candidate) => candidate.id === targetId) ?? outcomes[0];
   if (!group) return;
   const request = result.assumptions;
-  const annualUbi =
+  const grossUbi =
     12 * (adults * request.ubi.adultMonthlyBenefit + children * request.ubi.childMonthlyBenefit);
+  // Scale the household's gross benefit by the engine's cash-delivery ratio
+  // (funding scale, administration, leakage, cash-vs-services split) so the
+  // persona shows delivered cash, matching the per-cohort cards, not the gross
+  // schedule.
+  const requestedUbi = result.strategies?.["cash-first"]?.fiscal?.requestedUbi ?? 0;
+  const deliveryRatio = requestedUbi > 0
+    ? result.projection.annualFlows.ubiReceived / requestedUbi
+    : 0;
+  const annualUbi = grossUbi * deliveryRatio;
   const exemption = result.wealthTaxTarget?.effectiveExemption ?? request.wealthTax.exemption;
   const annualTax = Math.max(0, netWorth - exemption) * request.wealthTax.rate;
   const change = groupChange(group) ?? 0;

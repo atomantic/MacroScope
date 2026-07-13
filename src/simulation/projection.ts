@@ -552,6 +552,12 @@ const buildGroupOutcomes = (inputs: GroupOutcomeInputs): WealthGroupOutcome[] =>
   const bottom50 = groupOf("bottom-50");
   const renterHouseholds = bottom50.households * BOTTOM_HALF_RENTER_SHARE;
   const ownerHouseholds = bottom50.households - renterHouseholds;
+  // The bottom half's taxable base (real estate, equity) sits with its owners;
+  // renters hold negligible taxable wealth. So when a low exemption reaches into
+  // the bottom half, attribute the whole group's tax to the owner cohort and
+  // leave renters at ~zero, rather than splitting the average across both.
+  const bottom50CumulativeTax = inputs.cumulativeGroupTax.get(bottom50.id) ?? 0;
+  const bottom50TaxYearOne = inputs.taxCollected * (inputs.groupTaxShare.get(bottom50.id) ?? 0);
   const purchasingPowerLabel = (change: number): string =>
     change >= 0 ? `+${(change * 100).toFixed(1)}% buying power` : `${(change * 100).toFixed(1)}% buying power`;
   const wealthLabel = (change: number): string =>
@@ -576,8 +582,9 @@ const buildGroupOutcomes = (inputs: GroupOutcomeInputs): WealthGroupOutcome[] =>
   });
 
   // Bottom 50% owners: same transfers as renters, but leveraged home equity and
-  // inflation-eroded mortgages make real net worth the leading measure.
-  const ownerWealthChange = groupRealWealthChange(bottom50, 0, inputs);
+  // inflation-eroded mortgages make real net worth the leading measure. They also
+  // carry the group's whole wealth-tax burden when a low exemption reaches it.
+  const ownerWealthChange = groupRealWealthChange(bottom50, bottom50CumulativeTax, inputs);
   outcomes.push({
     id: "bottom-50-owner",
     label: "Bottom 50% owner",
@@ -585,7 +592,7 @@ const buildGroupOutcomes = (inputs: GroupOutcomeInputs): WealthGroupOutcome[] =>
     primaryMetric: "real-wealth",
     purchasingPowerChange: inputs.bottom50PurchasingPowerChange,
     realWealthChange: ownerWealthChange,
-    annualTaxPaid: 0,
+    annualTaxPaid: bottom50TaxYearOne / Math.max(1, ownerHouseholds),
     annualUbiReceived: perHouseholdUbi,
     rentPremiumChange: inputs.rentPremiumChange,
     rating: rateGroupOutcome(ownerWealthChange),

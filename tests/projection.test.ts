@@ -176,6 +176,33 @@ describe("ten-year projection dynamics", () => {
     }
   });
 
+  it("charges the bottom-50 owner cohort when a zero exemption reaches it", () => {
+    // The "universal" preset taxes from the first dollar, so the bottom half's
+    // owners must show a real burden — not a hardcoded $0 — that scales with the
+    // rate, and renters (with negligible taxable wealth) must stay at zero.
+    const ownerTaxAt = (rate: number): number => {
+      const result = runComparison({
+        ...nationalRequest(),
+        wealthTax: { targetMode: "exemption", exemption: 0, topShare: 0.01, rate },
+      });
+      const renter = result.projection.groupOutcomes.find((g) => g.id === "bottom-50-renter");
+      expect(renter?.annualTaxPaid).toBe(0);
+      return (
+        result.projection.groupOutcomes.find((g) => g.id === "bottom-50-owner")?.annualTaxPaid ?? 0
+      );
+    };
+    const taxAtOne = ownerTaxAt(0.01);
+    const taxAtTwo = ownerTaxAt(0.02);
+    expect(taxAtOne).toBeGreaterThan(0);
+    // A higher rate lands a larger per-household burden on the owner cohort.
+    expect(taxAtTwo).toBeGreaterThan(taxAtOne);
+    // Under the default $10M exemption the bottom half is untouched.
+    const owner = runComparison(nationalRequest()).projection.groupOutcomes.find(
+      (g) => g.id === "bottom-50-owner",
+    );
+    expect(owner?.annualTaxPaid).toBe(0);
+  });
+
   it("removes every group's tax burden when the wealth-tax rate is zero", () => {
     const result = runComparison({
       ...nationalRequest(),

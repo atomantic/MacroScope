@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f2efe7" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./styles.css?v=10" />
+    <link rel="stylesheet" href="./styles.css?v=12" />
     <title>MacroScope</title>
   </head>
   <body>
@@ -271,14 +271,17 @@
             <button type="button" data-preset="warren-2020">Warren 2020</button>
             <button type="button" data-preset="sanders-2020">Sanders 2020</button>
             <button type="button" data-preset="current-law">Current law (no tax)</button>
+            <button class="preset-share-button" id="copy-link-button" type="button">Copy scenario link</button>
             <a class="preset-reference-link" href="#policy-references">See real-world precedents ↓</a>
           </div>
-          <fieldset>
+          <fieldset class="wealth-tax-fieldset">
             <legend>Wealth tax</legend>
-            <label for="target-mode">Target by<select id="target-mode" name="targetMode"><option value="exemption">Dollar exemption</option><option value="top-share">Top wealth share</option></select></label>
-            <label for="exemption" id="exemption-label">Exemption ($M)<input id="exemption" name="exemption" type="number" min="0" max="1000000" step="1" /></label>
-            <label for="top-share" id="top-share-label">Top share (%)<input id="top-share" name="topShare" type="number" min="0.01" max="100" step="0.1" /></label>
-            <label for="tax-rate" id="tax-rate-label">Annual rate (%)<input id="tax-rate" name="taxRate" type="number" min="0" max="20" step="0.1" /></label>
+            <div class="wealth-tax-controls">
+              <label for="target-mode">Target by<select id="target-mode" name="targetMode"><option value="exemption">Dollar exemption</option><option value="top-share">Top wealth share</option></select></label>
+              <label for="exemption" id="exemption-label">Exemption ($M)<input id="exemption" name="exemption" type="number" min="0" max="1000000" step="1" /></label>
+              <label for="top-share" id="top-share-label">Top share (%)<input id="top-share" name="topShare" type="number" min="0.01" max="100" step="0.1" /></label>
+              <label for="tax-rate" id="tax-rate-label">Annual rate (%)<input id="tax-rate" name="taxRate" type="number" min="0" max="20" step="0.1" /></label>
+            </div>
             <div class="bracket-editor" id="bracket-editor">
               <div class="bracket-editor-head">
                 <span>Graduated brackets</span>
@@ -321,18 +324,22 @@
               <label for="private-business-inclusion">Private-business included (%)<input id="private-business-inclusion" name="privateBusinessInclusionRate" type="number" min="0" max="100" step="5" /><small class="field-hint">Share of hard-to-value private-business wealth actually captured in the base after valuation discounts.</small></label>
             </div>
           </fieldset>
-          <fieldset>
+          <fieldset class="split-fieldset">
             <legend>Macro assumptions</legend>
-            <label for="asset-return">Annual asset return (%)<input id="asset-return" name="assetReturn" type="number" min="-50" max="50" step="0.5" /></label>
-            <label for="monetization">Deficit monetized (%)<input id="monetization" name="monetization" type="number" min="0" max="100" step="5" /></label>
-            <label for="buyer-depth">Buyer depth (% equity)<input id="buyer-depth" name="buyerDepth" type="number" min="0.1" max="200" step="0.1" /></label>
+            <div class="split-fieldset-grid">
+              <label for="asset-return">Annual asset return (%)<input id="asset-return" name="assetReturn" type="number" min="-50" max="50" step="0.5" /></label>
+              <label for="monetization">Deficit monetized (%)<input id="monetization" name="monetization" type="number" min="0" max="100" step="5" /></label>
+              <label for="buyer-depth">Buyer depth (% equity)<input id="buyer-depth" name="buyerDepth" type="number" min="0.1" max="200" step="0.1" /></label>
+            </div>
           </fieldset>
-          <fieldset>
+          <fieldset class="split-fieldset">
             <legend>Asset feedback</legend>
-            <label for="asset-hedge-share">New liquidity to assets (%)<input id="asset-hedge-share" name="assetHedgeShare" type="number" min="0" max="100" step="5" /></label>
-            <label for="housing-hedge-share">Asset flow to housing (%)<input id="housing-hedge-share" name="housingHedgeShare" type="number" min="0" max="100" step="5" /></label>
-            <label for="housing-supply">Housing supply response<input id="housing-supply" name="housingSupply" type="number" min="0" max="2" step="0.1" /></label>
-            <label for="rent-pass-through">Price gain passed to rent (%)<input id="rent-pass-through" name="rentPassThrough" type="number" min="0" max="100" step="5" /></label>
+            <div class="split-fieldset-grid">
+              <label for="asset-hedge-share">New liquidity to assets (%)<input id="asset-hedge-share" name="assetHedgeShare" type="number" min="0" max="100" step="5" /></label>
+              <label for="housing-hedge-share">Asset flow to housing (%)<input id="housing-hedge-share" name="housingHedgeShare" type="number" min="0" max="100" step="5" /></label>
+              <label for="housing-supply">Housing supply response<input id="housing-supply" name="housingSupply" type="number" min="0" max="2" step="0.1" /></label>
+              <label for="rent-pass-through">Price gain passed to rent (%)<input id="rent-pass-through" name="rentPassThrough" type="number" min="0" max="100" step="5" /></label>
+            </div>
           </fieldset>
           <details class="advanced-controls">
             <summary>Advanced simulation controls</summary>
@@ -354,7 +361,6 @@
           </details>
           <div class="form-actions">
             <button class="run-button" id="run-button" type="submit">Recalculate verdict</button>
-            <button class="link-button" id="copy-link-button" type="button">Copy link to this scenario</button>
             <p class="form-status" id="form-status" role="status">Loading baseline scenario…</p>
           </div>
         </form>
@@ -436,6 +442,6 @@
       <nav aria-label="Developer endpoints"><a href="/health">Health</a><a href="/api/status">Engine</a><a href="/api/baseline/us">U.S. baseline</a><a href="/api/scenarios/default">Scenario JSON</a></nav>
     </footer>
     <div class="toast-container" id="toast-container" aria-live="polite" aria-atomic="true"></div>
-    <script src="./app.js?v=10" type="module"></script>
+    <script src="./app.js?v=12" type="module"></script>
   </body>
 </html>

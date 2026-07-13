@@ -23,6 +23,7 @@ import {
 import { calibratePopulationToUs } from "./usBaseline.js";
 import { buildPolicyProjection } from "./projection.js";
 import { computeStrategyAccounting } from "./ledgerAudit.js";
+import { MODEL_CONSTANTS } from "./modelConstants.js";
 
 interface HouseholdFunding {
   readonly taxAssessed: number;
@@ -59,16 +60,7 @@ const SECTORS: readonly ConsumptionSector[] = [
   "services",
 ];
 
-const SUPPLY_SENSITIVITY: Readonly<Record<ConsumptionSector, number>> = {
-  housing: 1.2,
-  food: 0.6,
-  healthcare: 0.9,
-  transportation: 0.5,
-  energy: 1.1,
-  "durable-goods": 0.7,
-  discretionary: 0.35,
-  services: 0.5,
-};
+const SUPPLY_SENSITIVITY = MODEL_CONSTANTS.supplySensitivity;
 
 // Build the calibrated synthetic population a comparison runs against. Depends
 // only on the sampling dials (seed, sampleSize, representedHouseholds), so a
@@ -167,6 +159,10 @@ export const normalizeComparisonRequest = (
     ...DEFAULT_COMPARISON_REQUEST.behavior,
     ...request.behavior,
   },
+  model: {
+    ...DEFAULT_COMPARISON_REQUEST.model,
+    ...request.model,
+  },
 });
 
 // A graduated schedule is self-describing: its lowest absolute threshold is the
@@ -219,7 +215,7 @@ const runStrategy = (
       (household.adults * request.ubi.adultMonthlyBenefit +
         household.children * request.ubi.childMonthlyBenefit),
   );
-  const leakageRate = 0.002;
+  const leakageRate = MODEL_CONSTANTS.programLeakageRate;
   const programBudget =
     request.ubi.fundingRule === "revenue-constrained"
       ? Math.min(taxCollected, requestedUbi)
@@ -320,7 +316,7 @@ const runStrategy = (
     consumptionDemandChange += consumptionChange * household.weight;
     const shares = consumptionShares(household.percentile);
     const baselineConsumption =
-      household.annualIncome * (0.52 + household.marginalPropensityToConsume * 0.25);
+      household.annualIncome * baselineConsumptionShare(household.marginalPropensityToConsume);
     for (const sector of SECTORS) {
       sectorBaseline[sector] +=
         baselineConsumption * shares[sector] * household.weight;
@@ -339,8 +335,10 @@ const runStrategy = (
     householdIndex += 1;
   }
 
-  sectorChanges.healthcare += publicServicesSpending * 0.6;
-  sectorChanges.services += publicServicesSpending * 0.4;
+  sectorChanges.healthcare +=
+    publicServicesSpending * MODEL_CONSTANTS.publicServicesHealthcareShare;
+  sectorChanges.services +=
+    publicServicesSpending * MODEL_CONSTANTS.publicServicesServicesShare;
   consumptionDemandChange += publicServicesSpending;
 
   const paidFromCash = weightedSum(households, (household) =>
@@ -383,11 +381,13 @@ const runStrategy = (
     (total, sector) =>
       total +
       Math.max(0, sector.inflationPressure) *
-        0.35 *
+        MODEL_CONSTANTS.supplyConstraintShare *
         (sector.baselineDemand / Math.max(1, population.baselineAnnualConsumption)),
     0,
   );
-  const monetaryPolicyOffset = -(demandInflation + supplyConstraintInflation) * 0.4;
+  const monetaryPolicyOffset =
+    -(demandInflation + supplyConstraintInflation) *
+    request.model.monetaryPolicyOffsetShare;
   const estimatedInflationChange =
     demandInflation + supplyConstraintInflation + monetaryPolicyOffset;
   const householdsBorrowing = weightedSum(
@@ -399,8 +399,9 @@ const runStrategy = (
     (household) => (requireFunding(funding, household.id).equitySold > 0 ? 1 : 0),
   );
   const tolerance = Math.max(
-    0.01,
-    (population.aggregatePublicEquity + population.aggregateDeposits) * 1e-10,
+    MODEL_CONSTANTS.absoluteToleranceFloor,
+    (population.aggregatePublicEquity + population.aggregateDeposits) *
+      MODEL_CONSTANTS.convergenceEpsilon,
   );
   const accounting = computeStrategyAccounting({
     flows: {
@@ -455,7 +456,8 @@ const runStrategy = (
       totalEquitySales: totalBookSales,
       equityPriceChange: cascade.price - 1,
       cascadeTriggered:
-        cascade.totalForcedBookSales > Math.max(1, primaryBookSales * 0.1),
+        cascade.totalForcedBookSales >
+        Math.max(1, primaryBookSales * MODEL_CONSTANTS.cascade.triggerShare),
       cascadeIterations: cascade.iterations,
       housingSold: primaryHousingSales,
     },
@@ -488,7 +490,10 @@ const fundTax = (
   let borrowed = 0;
   let equitySold = 0;
   let housingSold = 0;
-  const cashBuffer = Math.max(5_000, household.annualIncome * 0.15);
+  const cashBuffer = Math.max(
+    MODEL_CONSTANTS.householdCashBufferFloor,
+    household.annualIncome * MODEL_CONSTANTS.householdCashBufferIncomeShare,
+  );
   const capacity = {
     cash: Math.max(0, household.assets.deposits - cashBuffer),
     borrow: Math.max(
@@ -544,9 +549,9 @@ const calculateCascade = (
   let price = 1;
   let iterations = 0;
 
-  for (let iteration = 0; iteration < 8; iteration += 1) {
+  for (let iteration = 0; iteration < MODEL_CONSTANTS.cascade.maxIterations; iteration += 1) {
     const nextPrice = Math.max(
-      0.2,
+      MODEL_CONSTANTS.cascade.priceFloor,
       1 -
         request.market.priceImpactCoefficient *
           ((primarySales + totalForcedBookSales) / marketDepth),
@@ -575,7 +580,10 @@ const calculateCascade = (
       const requiredBookSale = Math.min(
         equityRemaining,
         excessDebt /
-          Math.max(0.01, price * (1 - request.market.maximumCollateralLtv)),
+          Math.max(
+            MODEL_CONSTANTS.absoluteToleranceFloor,
+            price * (1 - request.market.maximumCollateralLtv),
+          ),
       );
       const repayment = requiredBookSale * price;
       forcedBookSales.set(household.id, alreadyForced + requiredBookSale);
@@ -587,7 +595,14 @@ const calculateCascade = (
       iterationRepayments += repayment * household.weight;
     }
 
-    if (iterationBookSales <= Math.max(0.01, totalEquity * 1e-10)) break;
+    if (
+      iterationBookSales <=
+      Math.max(
+        MODEL_CONSTANTS.absoluteToleranceFloor,
+        totalEquity * MODEL_CONSTANTS.convergenceEpsilon,
+      )
+    )
+      break;
     totalForcedBookSales += iterationBookSales;
     totalForcedRepayments += iterationRepayments;
     iterations = iteration + 1;
@@ -618,9 +633,18 @@ const summarizePopulation = (
   ),
   baselineAnnualConsumption: weightedSum(
     households,
-    (household) => household.annualIncome * (0.52 + household.marginalPropensityToConsume * 0.25),
+    (household) =>
+      household.annualIncome *
+      baselineConsumptionShare(household.marginalPropensityToConsume),
   ),
 });
+
+// Baseline household consumption as a share of income, rising with the
+// household's marginal propensity to consume (shared by runStrategy and the
+// population summary so both use one calibration).
+const baselineConsumptionShare = (marginalPropensityToConsume: number): number =>
+  MODEL_CONSTANTS.baselineConsumptionIncomeShare +
+  marginalPropensityToConsume * MODEL_CONSTANTS.baselineConsumptionMpcWeight;
 
 const buildWealthTaxPolicy = (
   request: ComparisonRequestV1,
@@ -736,16 +760,13 @@ const resolveEffectiveExemption = (
 const consumptionShares = (
   percentile: number,
 ): Readonly<Record<ConsumptionSector, number>> => {
-  const raw: Record<ConsumptionSector, number> = {
-    housing: 0.32 - percentile * 0.13,
-    food: 0.18 - percentile * 0.09,
-    healthcare: 0.1 + percentile * 0.02,
-    transportation: 0.12 - percentile * 0.02,
-    energy: 0.08 - percentile * 0.035,
-    "durable-goods": 0.07 + percentile * 0.015,
-    discretionary: 0.05 + percentile * 0.13,
-    services: 0.08 + percentile * 0.11,
-  };
+  const coefficients = MODEL_CONSTANTS.consumptionShareCoefficients;
+  const raw = Object.fromEntries(
+    SECTORS.map((sector) => [
+      sector,
+      coefficients[sector].base + percentile * coefficients[sector].slope,
+    ]),
+  ) as Record<ConsumptionSector, number>;
   const total = SECTORS.reduce((sum, sector) => sum + raw[sector], 0);
   return Object.fromEntries(
     SECTORS.map((sector) => [sector, raw[sector] / total]),

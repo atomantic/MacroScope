@@ -178,6 +178,11 @@ const captureDefaultFieldValues = () => {
   defaultFieldValues = readFieldValues();
 };
 
+// URL serialization compares against the fetched defaults, so it must stay a
+// no-op until those defaults have been captured — otherwise a click during the
+// initial fetch would treat every empty field as an override.
+const defaultsReady = () => Object.keys(defaultFieldValues).length > 0;
+
 const currentStrategy = () => byId("distribution-strategy").value;
 
 const scenarioQuery = () =>
@@ -196,6 +201,7 @@ const scenarioLink = () => {
 // Reflect the live form state in the address bar without adding history
 // entries, so a reload or copied URL reproduces the current scenario.
 const updateScenarioUrl = () => {
+  if (!defaultsReady()) return;
   const query = scenarioQuery();
   history.replaceState(null, "", `${location.pathname}${query ? `?${query}` : ""}${location.hash}`);
 };
@@ -213,10 +219,13 @@ const hydrateFormFromUrl = () => {
   for (const id of fieldIds) byId(id).value = decoded.fields[id];
   // Explicit field overrides make the state no longer a pristine preset.
   if (fieldIds.length > 0) activePreset = null;
-  if (decoded.strategy) byId("distribution-strategy").value = decoded.strategy;
+  // A stale/unknown strategy would blank the <select> and later crash
+  // renderDistribution (strategies[""]); ignore anything not in STRATEGIES.
+  const appliedStrategy = Boolean(decoded.strategy && STRATEGIES.includes(decoded.strategy));
+  if (appliedStrategy) byId("distribution-strategy").value = decoded.strategy;
   syncTargetControls();
-  // An unknown preset name applies nothing, so it must not force a recompute.
-  return appliedPreset || fieldIds.length > 0 || Boolean(decoded.strategy);
+  // An unknown preset name or strategy applies nothing, so it must not force a recompute.
+  return appliedPreset || fieldIds.length > 0 || appliedStrategy;
 };
 
 const copyText = async (text) => {
@@ -241,6 +250,7 @@ const copyText = async (text) => {
 };
 
 const copyScenarioLink = async () => {
+  if (!defaultsReady()) return;
   updateScenarioUrl();
   const ok = await copyText(scenarioLink());
   showToast(
@@ -658,6 +668,12 @@ const PRESETS = {
 const setPresetFields = (name) => {
   const preset = PRESETS[name];
   if (!preset) return;
+  // A preset is a complete starting scenario. Reset every dial to its default
+  // first so a dial the preset doesn't touch (e.g. an earlier loan-rate edit)
+  // can't linger and make the shareable `?preset=name` link irreproducible.
+  if (defaultsReady()) {
+    for (const spec of FIELD_SPECS) byId(spec.id).value = defaultFieldValues[spec.id];
+  }
   byId("target-mode").value = preset.targetMode;
   byId("top-share").value = preset.topShare;
   byId("exemption").value = preset.exemption;

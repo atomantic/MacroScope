@@ -38,12 +38,13 @@ describe("PortOS server", () => {
     const port = (server.address() as AddressInfo).port;
     const origin = `http://127.0.0.1:${port}`;
 
-    const [health, status, demo, baseline, backtest, shell] = await Promise.all([
+    const [health, status, demo, baseline, backtest, constants, shell] = await Promise.all([
       fetch(`${origin}/health`),
       fetch(`${origin}/api/status`),
       fetch(`${origin}/api/demo`),
       fetch(`${origin}/api/baseline/us`),
       fetch(`${origin}/api/validation/historical`),
+      fetch(`${origin}/api/model/constants`),
       fetch(origin),
     ]);
 
@@ -62,6 +63,12 @@ describe("PortOS server", () => {
       id: "us-2026-q1",
       households: 135_134_121,
     });
+    expect(constants.status).toBe(200);
+    const constantsPayload = await constants.json();
+    expect(Array.isArray(constantsPayload.constants)).toBe(true);
+    expect(constantsPayload.constants.some((entry: { tunable: boolean }) => entry.tunable)).toBe(
+      true,
+    );
     expect(await shell.text()).toContain("<title>MacroScope</title>");
     const shellMarkup = await fetch(origin).then((response) => response.text());
     expect(shellMarkup).toContain('id="buyer-depth"');
@@ -74,6 +81,9 @@ describe("PortOS server", () => {
     expect(shellMarkup).toContain('id="expatriation-share"');
     expect(shellMarkup).toContain('id="private-business-inclusion"');
     expect(shellMarkup).toContain('data-behavior-preset="scandinavian"');
+    expect(shellMarkup).toContain('id="wage-pass-through"');
+    expect(shellMarkup).toContain('id="monetary-offset"');
+    expect(shellMarkup).toContain('id="model-constants-body"');
   });
 
   it("validates and runs comparison requests over HTTP", async () => {
@@ -119,6 +129,39 @@ describe("PortOS server", () => {
     expect(malformedResponse.status).toBe(400);
     expect(await malformedResponse.json()).toEqual({
       error: "Request body contains invalid JSON.",
+    });
+  });
+
+  it("validates and runs sensitivity requests over HTTP", async () => {
+    const app = createApp();
+    const server = app.listen(0, "127.0.0.1");
+    servers.push(server);
+    await new Promise<void>((resolve) => server.once("listening", () => resolve()));
+    const port = (server.address() as AddressInfo).port;
+    const origin = `http://127.0.0.1:${port}`;
+    const defaults = await fetch(`${origin}/api/scenarios/default`).then((response) =>
+      response.json(),
+    );
+
+    const validResponse = await fetch(`${origin}/api/scenarios/sensitivity`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...defaults, sampleSize: 500, representedHouseholds: 5_000 }),
+    });
+    expect(validResponse.status).toBe(200);
+    const analysis = await validResponse.json();
+    expect(analysis.dials.length).toBeGreaterThan(0);
+    expect(["beneficial", "mixed", "harmful"]).toContain(analysis.base.verdict);
+    expect(analysis.runs).toBeGreaterThan(analysis.dials.length);
+
+    const invalidResponse = await fetch(`${origin}/api/scenarios/sensitivity`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sampleSize: 5 }),
+    });
+    expect(invalidResponse.status).toBe(400);
+    expect(await invalidResponse.json()).toMatchObject({
+      error: "Invalid comparison request.",
     });
   });
 

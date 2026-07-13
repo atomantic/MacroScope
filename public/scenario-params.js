@@ -34,6 +34,13 @@ export const SCENARIO_FIELD_SPECS = [
   { id: "sample-size", param: "n" },
   { id: "price-impact", param: "pi" },
   { id: "maximum-ltv", param: "ltv" },
+  // Promoted, tunable model constants (issue #8).
+  { id: "wage-pass-through", param: "wpt" },
+  { id: "loan-amortization", param: "lam" },
+  { id: "top-tax-incidence", param: "tti" },
+  { id: "monetary-offset", param: "mpo" },
+  { id: "asset-price-passthrough", param: "apt" },
+  { id: "verdict-harmful-inflation", param: "vhi" },
 ];
 
 export const PERSONA_FIELD_SPECS = [

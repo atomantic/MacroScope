@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f2efe7" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./styles.css?v=11" />
+    <link rel="stylesheet" href="./styles.css?v=12" />
     <title>MacroScope</title>
   </head>
   <body>
@@ -349,6 +349,15 @@
               <label for="price-impact">Price impact<input id="price-impact" name="priceImpact" type="number" min="0" max="2" step="0.05" /></label>
               <label for="maximum-ltv">Maximum LTV (%)<input id="maximum-ltv" name="maximumLtv" type="number" min="10" max="90" step="1" /></label>
             </div>
+            <p class="advanced-controls-note">Model constants — normally fixed calibration assumptions, exposed here as tunable dials. Defaults reproduce the calibrated baseline exactly; see the constants table under <a href="#caveats" class="caveat-link">Model boundaries</a> for the rationale and source behind each.</p>
+            <div>
+              <label for="wage-pass-through">Wage pass-through (%)<input id="wage-pass-through" name="wagePassThrough" type="number" min="0" max="100" step="1" /></label>
+              <label for="loan-amortization">Loan amortization (%/yr)<input id="loan-amortization" name="loanAmortization" type="number" min="0" max="100" step="1" /></label>
+              <label for="top-tax-incidence">Top-1% aggregate tax incidence (%)<input id="top-tax-incidence" name="topTaxIncidence" type="number" min="0" max="100" step="1" /></label>
+              <label for="monetary-offset">Monetary-policy offset (%)<input id="monetary-offset" name="monetaryOffset" type="number" min="0" max="100" step="1" /></label>
+              <label for="asset-price-passthrough">Asset-price inflation pass-through (%)<input id="asset-price-passthrough" name="assetPricePassThrough" type="number" min="0" max="100" step="1" /></label>
+              <label for="verdict-harmful-inflation">Verdict harmful inflation (%)<input id="verdict-harmful-inflation" name="verdictHarmfulInflation" type="number" min="5" max="200" step="1" /></label>
+            </div>
           </details>
           <div class="form-actions">
             <button class="run-button" id="run-button" type="submit">Recalculate verdict</button>
@@ -378,7 +387,13 @@
           <h3>Consumption sectors</h3>
           <div class="table-scroll"><table><thead><tr><th>Sector</th><th>Cash first</th><th>Borrow first</th><th>Sell first</th></tr></thead><tbody id="sector-body"></tbody></table></div>
         </div>
-        <div class="caveats" id="caveats"><h3>Model boundaries</h3><ul id="caveat-list"></ul></div>
+        <div class="caveats" id="caveats"><h3>Model boundaries</h3><ul id="caveat-list"></ul>
+          <div class="model-constants">
+            <h4>Model constants</h4>
+            <p class="model-constants-note">The load-bearing numeric assumptions behind every figure, each with a one-line rationale and source. Rows marked <span class="constant-tunable-badge">Tunable</span> can be changed under Advanced simulation controls.</p>
+            <div class="table-scroll"><table class="model-constants-table"><thead><tr><th>Constant</th><th>Default</th><th>Why / source</th></tr></thead><tbody id="model-constants-body"></tbody></table></div>
+          </div>
+        </div>
       </details>
 
       <section class="policy-references" id="policy-references" aria-labelledby="policy-references-heading">
@@ -427,6 +442,6 @@
       <nav aria-label="Developer endpoints"><a href="/health">Health</a><a href="/api/status">Engine</a><a href="/api/baseline/us">U.S. baseline</a><a href="/api/scenarios/default">Scenario JSON</a></nav>
     </footer>
     <div class="toast-container" id="toast-container" aria-live="polite" aria-atomic="true"></div>
-    <script src="./app.js?v=10" type="module"></script>
+    <script src="./app.js?v=12" type="module"></script>
   </body>
 </html>

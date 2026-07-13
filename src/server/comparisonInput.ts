@@ -2,7 +2,9 @@ import {
   DEFAULT_COMPARISON_REQUEST,
   type BenefitIndexation,
   type ComparisonRequestV1,
+  type ModelTunables,
 } from "../simulation/contracts.js";
+import { MODEL_TUNABLES } from "../simulation/modelConstants.js";
 import type { TaxBracket } from "../policies/schema.js";
 
 const MAX_BRACKETS = 12;
@@ -246,6 +248,8 @@ export const parseComparisonRequest = (input: unknown): ParsedComparisonRequest 
     errors.push("borrowShare plus sellShare must not exceed 1.");
   }
 
+  const model = readModelTunables(input.model, errors);
+
   if (errors.length > 0) return { errors };
   return {
     errors,
@@ -288,8 +292,34 @@ export const parseComparisonRequest = (input: unknown): ParsedComparisonRequest 
         expatriationShare,
         privateBusinessInclusionRate,
       },
+      model,
     },
   };
+};
+
+// Validate the promoted, tunable model constants against the ranges declared in
+// MODEL_TUNABLES (single source of truth shared with the UI). An omitted `model`
+// block, or any omitted field within it, falls back to the calibrated default so
+// a default request stays numerically identical to the pre-issue-#8 engine.
+const readModelTunables = (
+  raw: unknown,
+  errors: string[],
+): ModelTunables => {
+  const source = isRecord(raw) ? raw : {};
+  const model: Record<keyof ModelTunables, number> = {
+    ...DEFAULT_COMPARISON_REQUEST.model,
+  };
+  for (const spec of MODEL_TUNABLES) {
+    model[spec.key] = readNumber(
+      source,
+      spec.key,
+      DEFAULT_COMPARISON_REQUEST.model[spec.key],
+      spec.min,
+      spec.max,
+      errors,
+    );
+  }
+  return model;
 };
 
 const readNumber = (

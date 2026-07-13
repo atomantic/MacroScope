@@ -3,6 +3,7 @@ import { dirname, posix, resolve } from "node:path";
 import {
   DEFAULT_COMPARISON_REQUEST,
   HISTORICAL_BACKTEST,
+  MODEL_CONSTANT_DOCS,
   US_BASELINE,
   runComparison,
 } from "../dist/index.js";
@@ -73,4 +74,8 @@ await writeFile(
 await writeFile(
   resolve(data, "default-scenario.json"),
   `${JSON.stringify(runComparison(DEFAULT_COMPARISON_REQUEST))}\n`,
+);
+await writeFile(
+  resolve(data, "model-constants.json"),
+  `${JSON.stringify({ constants: MODEL_CONSTANT_DOCS })}\n`,
 );

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f2efe7" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./styles.css?v=9" />
+    <link rel="stylesheet" href="./styles.css?v=10" />
     <title>MacroScope</title>
   </head>
   <body>
@@ -346,7 +346,7 @@
             <div>
               <label for="wage-pass-through">Wage pass-through (%)<input id="wage-pass-through" name="wagePassThrough" type="number" min="0" max="100" step="1" /></label>
               <label for="loan-amortization">Loan amortization (%/yr)<input id="loan-amortization" name="loanAmortization" type="number" min="0" max="100" step="1" /></label>
-              <label for="top-tax-incidence">Top-tier tax incidence (%)<input id="top-tax-incidence" name="topTaxIncidence" type="number" min="0" max="100" step="1" /></label>
+              <label for="top-tax-incidence">Top-1% aggregate tax incidence (%)<input id="top-tax-incidence" name="topTaxIncidence" type="number" min="0" max="100" step="1" /></label>
               <label for="monetary-offset">Monetary-policy offset (%)<input id="monetary-offset" name="monetaryOffset" type="number" min="0" max="100" step="1" /></label>
               <label for="asset-price-passthrough">Asset-price inflation pass-through (%)<input id="asset-price-passthrough" name="assetPricePassThrough" type="number" min="0" max="100" step="1" /></label>
               <label for="verdict-harmful-inflation">Verdict harmful inflation (%)<input id="verdict-harmful-inflation" name="verdictHarmfulInflation" type="number" min="5" max="200" step="1" /></label>
@@ -436,6 +436,6 @@
       <nav aria-label="Developer endpoints"><a href="/health">Health</a><a href="/api/status">Engine</a><a href="/api/baseline/us">U.S. baseline</a><a href="/api/scenarios/default">Scenario JSON</a></nav>
     </footer>
     <div class="toast-container" id="toast-container" aria-live="polite" aria-atomic="true"></div>
-    <script src="./app.js?v=9" type="module"></script>
+    <script src="./app.js?v=10" type="module"></script>
   </body>
 </html>

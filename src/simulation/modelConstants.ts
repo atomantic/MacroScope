@@ -267,13 +267,13 @@ export const MODEL_TUNABLES: readonly TunableModelConstant[] = [
   },
   {
     key: "topTaxIncidenceShare",
-    label: "Top-tier tax incidence",
+    label: "Top-1% aggregate tax incidence",
     unit: "share",
     min: 0,
     max: 1,
     default: DEFAULT_MODEL_TUNABLES.topTaxIncidenceShare,
     rationale:
-      "Share of the year's collected wealth tax and debt-service cost borne by the top tier (the tax is calibrated to top-tier net worth).",
+      "Share of collected wealth tax and debt-service cost charged against the top-1% AGGREGATE real-wealth trajectory (the summary/chart top-1 line). Per-cohort winners-grid outcomes attribute tax precisely by each cohort's taxable base instead, so they do not move with this dial.",
     source: "Fed DFA wealth-concentration calibration.",
   },
   {

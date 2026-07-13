@@ -2,7 +2,9 @@ import {
   FIELD_SPECS,
   encodeScenarioParams,
   decodeScenarioParams,
-} from "./scenario-params.js";
+  // Versioned so a bumped app.js always pulls the matching FIELD_SPECS rather
+  // than a browser-cached copy that predates newly added fields.
+} from "./scenario-params.js?v=10";
 
 const STRATEGIES = ["cash-first", "borrow-first", "sell-first"];
 const LABELS = {

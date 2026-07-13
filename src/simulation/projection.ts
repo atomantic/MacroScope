@@ -285,6 +285,11 @@ export const buildPolicyProjection = (
     const policyRealResources = (bottomWageBase + bottom50UbiYear) / priceLevel;
     const baselineRealResources = baselineResources / baselinePriceLevel;
 
+    // topTaxIncidenceShare scopes ONLY this aggregate top-1% wealth trajectory
+    // (a reduced-form "how much of all collected tax lands on the top tier"
+    // proxy). Per-cohort outcomes in buildGroupOutcomes attribute tax precisely
+    // by each cohort's taxable base (groupRealWealthChange), so they intentionally
+    // do not read this dial — keeping default per-cohort output unchanged.
     const topTaxBurden = taxCollectedYear * request.model.topTaxIncidenceShare;
     const interestCost =
       privateTaxDebt * request.behavior.loanInterestRate * request.model.topTaxIncidenceShare;

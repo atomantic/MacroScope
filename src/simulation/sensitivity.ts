@@ -422,14 +422,24 @@ const findVerdictFlip = (
   // Refine the closest few endpoint flips by bisection to find the actual
   // threshold, then keep whichever flips with the smallest real dial change.
   candidates.sort((left, right) => left.normalizedDistance - right.normalizedDistance);
-  let best: { candidate: FlipCandidate; threshold: number; verdict: SensitivityVerdict } | null =
-    null;
+  let best:
+    | {
+        candidate: FlipCandidate;
+        threshold: number;
+        verdict: SensitivityVerdict;
+        distance: number;
+      }
+    | null = null;
   for (const candidate of candidates.slice(0, MAX_BISECTED_CANDIDATES)) {
     const refined = bisectFlip(baseRequest, base.verdict, candidate, evaluate);
+    // Normalize each candidate's change by ITS OWN dial's span so dials of
+    // different widths are compared on equal footing; comparing raw refined
+    // thresholds (or reusing one dial's span for both sides) would let a wider
+    // dial's larger absolute change look "smaller" than a narrow dial's.
     const span = Math.abs(candidate.dial.high - candidate.dial.low) || 1;
     const distance = Math.abs(refined.threshold - candidate.baseValue) / span;
-    if (!best || distance < Math.abs(best.threshold - best.candidate.baseValue) / span) {
-      best = { candidate, threshold: refined.threshold, verdict: refined.verdict };
+    if (!best || distance < best.distance) {
+      best = { candidate, threshold: refined.threshold, verdict: refined.verdict, distance };
     }
   }
   if (!best) return null;

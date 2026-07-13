@@ -98,6 +98,35 @@ describe("sensitivity tornado analysis", () => {
     expect(flipped.projection.verdict.rating).toBe(flip.toVerdict);
   });
 
+  it("reports the span-normalized smallest flipping dial, not merely a flipping one", () => {
+    // The chosen flip's change, normalized by its own dial's span, must be no
+    // larger than any other flipping dial's endpoint change (also span-
+    // normalized). Since each dial's bisected threshold is closer to base than
+    // its flipping endpoint, the true minimum can only be <= every candidate's
+    // endpoint distance — so a non-minimal choice (the bug this pins) would
+    // exceed some candidate's endpoint distance and fail here.
+    const analysis = runSensitivityAnalysis(request());
+    const flip = analysis.verdictFlip;
+    expect(flip).not.toBeNull();
+    if (!flip) throw new Error("expected a verdict flip");
+    const spanOf = (id: string): number => {
+      const spec = SENSITIVITY_DIALS.find((candidate) => candidate.id === id);
+      if (!spec) throw new Error(`missing dial spec for ${id}`);
+      return Math.abs(spec.high - spec.low) || 1;
+    };
+    const flipDistance = Math.abs(flip.value - flip.fromValue) / spanOf(flip.dialId);
+    for (const dial of analysis.dials) {
+      const endpoints = [dial.low, dial.high].filter(
+        (end) => end.verdict !== analysis.base.verdict,
+      );
+      if (endpoints.length === 0) continue;
+      const endpointDistance = Math.min(
+        ...endpoints.map((end) => Math.abs(end.value - dial.baseValue) / spanOf(dial.id)),
+      );
+      expect(flipDistance).toBeLessThanOrEqual(endpointDistance + 1e-9);
+    }
+  });
+
   it("reports no flip when the verdict is stable across every tested range", () => {
     // Current law: no wealth tax, no UBI. The bottom half is unaffected, so the
     // verdict cannot be moved by any single dial in its tested range.

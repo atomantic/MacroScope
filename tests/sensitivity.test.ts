@@ -45,11 +45,12 @@ describe("sensitivity tornado analysis", () => {
       if (!dial || !previous) throw new Error("missing dial");
       expect(previous.impact).toBeGreaterThanOrEqual(dial.impact);
     }
-    // Impact is the larger of the two endpoint deltas, and each direction agrees
-    // with the signed low→high swing.
+    // Impact is the magnitude of the low→high swing — the same span the tornado
+    // bar draws — and each direction agrees with the signed swing.
     for (const dial of analysis.dials) {
+      expect(dial.impact).toBeCloseTo(Math.abs(dial.swing), 12);
       expect(dial.impact).toBeCloseTo(
-        Math.max(Math.abs(dial.low.bottom50Delta), Math.abs(dial.high.bottom50Delta)),
+        Math.abs(dial.high.bottom50Delta - dial.low.bottom50Delta),
         12,
       );
       const expectedDirection =
@@ -58,12 +59,15 @@ describe("sensitivity tornado analysis", () => {
     }
   });
 
-  it("runs on the ~2N budget (base + two endpoints per dial, plus bounded flip search)", () => {
+  it("runs on a bounded budget (base + 2N endpoints + coarse flip grid + bounded bisection)", () => {
     const analysis = runSensitivityAnalysis(request());
-    const endpointRuns = 1 + SENSITIVITY_DIALS.length * 2;
-    expect(analysis.runs).toBeGreaterThanOrEqual(endpointRuns);
-    // At most three candidate dials are bisected (16 iterations each).
-    expect(analysis.runs).toBeLessThanOrEqual(endpointRuns + 3 * 16);
+    const N = SENSITIVITY_DIALS.length;
+    // base + 2 endpoints/dial + 3 interior flip-scan points/dial (grid of 5,
+    // reusing the 2 endpoints) is the floor with zero bisection.
+    const scanFloor = 1 + N * 2 + N * 3;
+    expect(analysis.runs).toBeGreaterThanOrEqual(scanFloor);
+    // Bisection refines at most 6 candidate dials at 14 iterations each.
+    expect(analysis.runs).toBeLessThanOrEqual(scanFloor + 6 * 14);
   });
 
   it("carries click-to-set form metadata for each dial and its endpoints", () => {

@@ -3,12 +3,49 @@ import express, {
   type Express,
 } from "express";
 import { resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { Worker } from "node:worker_threads";
 import { SCENARIO_SCHEMA_VERSION } from "../policies/schema.js";
 import { createDemoComparison } from "./demo.js";
-import { DEFAULT_COMPARISON_REQUEST } from "../simulation/contracts.js";
+import {
+  DEFAULT_COMPARISON_REQUEST,
+  type ComparisonRequestV1,
+} from "../simulation/contracts.js";
 import { runComparison } from "../simulation/scenarioRunner.js";
-import { runSensitivityAnalysis } from "../simulation/sensitivity.js";
+import {
+  runSensitivityAnalysis,
+  type SensitivityAnalysis,
+} from "../simulation/sensitivity.js";
 import { parseComparisonRequest } from "./comparisonInput.js";
+
+// The sensitivity sweep runs ~80 full comparisons — ~1.7s at 4,000 agents — so
+// running it inline would block the Express event loop (and /health, and every
+// other request) for that whole time. Offload it to a worker thread. The
+// compiled worker only exists in dist/, so under the vitest TS-source runner
+// (where a raw node:worker Worker can't load an un-transpiled .ts) we fall back
+// to running the same deterministic function inline; production always offloads.
+const sensitivityWorkerPath = fileURLToPath(
+  new URL("./sensitivityWorker.js", import.meta.url),
+);
+const canOffloadSensitivity = existsSync(sensitivityWorkerPath);
+
+const analyzeSensitivity = (
+  request: ComparisonRequestV1,
+): Promise<SensitivityAnalysis> => {
+  if (!canOffloadSensitivity) return Promise.resolve(runSensitivityAnalysis(request));
+  return new Promise<SensitivityAnalysis>((resolvePromise, reject) => {
+    const worker = new Worker(sensitivityWorkerPath, { workerData: request });
+    worker.once("message", (message: { result: SensitivityAnalysis }) => {
+      void worker.terminate();
+      resolvePromise(message.result);
+    });
+    worker.once("error", (error) => {
+      void worker.terminate();
+      reject(error);
+    });
+  });
+};
 import { US_BASELINE } from "../simulation/usBaseline.js";
 import { HISTORICAL_BACKTEST } from "../simulation/historicalValidation.js";
 
@@ -94,7 +131,7 @@ export const createApp = (options: AppOptions = {}): Express => {
     response.json(runComparison(parsed.value));
   });
 
-  app.post("/api/scenarios/sensitivity", (request, response) => {
+  app.post("/api/scenarios/sensitivity", async (request, response) => {
     const parsed = parseComparisonRequest(request.body);
     if (!parsed.value) {
       response.status(400).json({
@@ -103,7 +140,7 @@ export const createApp = (options: AppOptions = {}): Express => {
       });
       return;
     }
-    response.json(runSensitivityAnalysis(parsed.value));
+    response.json(await analyzeSensitivity(parsed.value));
   });
 
   app.use("/api", (_request, response) => {

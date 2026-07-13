@@ -285,8 +285,10 @@ export interface SensitivityAnalysis {
   };
   readonly dials: readonly SensitivityDialResult[];
   readonly verdictFlip: SensitivityFlip | null;
-  // Number of full scenario runs performed (base + perturbations + bisection),
-  // exposed so the ~2N run budget stays observable and testable.
+  // Number of full scenario runs performed (base + the 2N tornado endpoints +
+  // the coarse flip-scan grid + bounded bisection), exposed so the run budget
+  // stays observable and testable. Kept to a small bounded multiple of N so the
+  // sweep stays within a few seconds at 4,000 agents.
   readonly runs: number;
 }
 
@@ -296,11 +298,23 @@ interface HeadlineOutputs {
   readonly verdict: SensitivityVerdict;
 }
 
-// A small deterministic bisection is done per flipping dial to name the smallest
-// change that flips the verdict. Fixed iteration count keeps it deterministic
-// and bounds the run budget; only the closest candidate dials are refined.
-const BISECTION_ITERATIONS = 16;
-const MAX_BISECTED_CANDIDATES = 3;
+// Finding the smallest single-dial change that flips the verdict is a two-stage
+// deterministic search per dial:
+//   1. A coarse uniform grid across the dial's range (FLIP_SCAN_SAMPLES points,
+//      reusing the two tornado endpoints) locates the flip transition NEAREST
+//      the base value. A grid — rather than only the two endpoints — is required
+//      because verdicts are not monotonic in every dial, so a flip can live
+//      strictly inside the range with both endpoints agreeing with the base.
+//   2. A bisection within that localized bracket refines the exact threshold.
+// Candidates across dials are then compared by their span-normalized threshold
+// distance, searched in ascending order of a valid lower bound (the base-side
+// grid sample's distance) so the branch-and-bound can stop as soon as the
+// remaining lower bounds exceed the best threshold found — this cannot discard
+// the true minimum, unlike ranking by the endpoint distance (only an upper
+// bound). Fixed counts keep the whole search deterministic and bounded.
+const FLIP_SCAN_SAMPLES = 5;
+const BISECTION_ITERATIONS = 14;
+const MAX_FLIP_REFINEMENTS = 6;
 
 export const runSensitivityAnalysis = (
   request: ComparisonRequestV1 = DEFAULT_COMPARISON_REQUEST,
@@ -327,10 +341,11 @@ export const runSensitivityAnalysis = (
     const lowOutcome = outcomeFor(dial, baseRequest, dial.low, base, evaluate);
     const highOutcome = outcomeFor(dial, baseRequest, dial.high, base, evaluate);
     const swing = highOutcome.bottom50Delta - lowOutcome.bottom50Delta;
-    const impact = Math.max(
-      Math.abs(lowOutcome.bottom50Delta),
-      Math.abs(highOutcome.bottom50Delta),
-    );
+    // Impact ranks dials by how far the bottom-50 outcome travels across the
+    // dial's whole low→high range — the same span the tornado bar spans (its
+    // length is |highDelta - lowDelta|) — so the ranking and the rendered bar
+    // lengths always agree.
+    const impact = Math.abs(swing);
     return {
       id: dial.id,
       label: dial.label,
@@ -386,12 +401,17 @@ const outcomeFor = (
   };
 };
 
-interface FlipCandidate {
+// A flip transition bracketed to a single grid cell nearest the base value:
+// `near` (base-verdict side) → `far` (a different verdict). `lowerBound` is the
+// span-normalized distance from base to `near`, a valid lower bound on the true
+// threshold's distance (the threshold lies beyond `near`, further from base).
+interface FlipBracket {
   readonly dial: DialSpec;
   readonly baseValue: number;
-  readonly endpointValue: number;
-  readonly endpointVerdict: SensitivityVerdict;
-  readonly normalizedDistance: number;
+  readonly near: number;
+  readonly far: number;
+  readonly farVerdict: SensitivityVerdict;
+  readonly lowerBound: number;
 }
 
 const findVerdictFlip = (
@@ -401,84 +421,136 @@ const findVerdictFlip = (
   evaluate: (candidate: ComparisonRequestV1) => HeadlineOutputs,
 ): SensitivityFlip | null => {
   const specById = new Map(SENSITIVITY_DIALS.map((dial) => [dial.id, dial]));
-  const candidates: FlipCandidate[] = [];
+  const brackets: FlipBracket[] = [];
   for (const result of dials) {
     const dial = specById.get(result.id);
     if (!dial) continue;
-    const span = Math.abs(dial.high - dial.low) || 1;
-    for (const end of [result.low, result.high] as const) {
-      if (end.verdict === base.verdict) continue;
-      candidates.push({
-        dial,
-        baseValue: result.baseValue,
-        endpointValue: end.value,
-        endpointVerdict: end.verdict,
-        normalizedDistance: Math.abs(end.value - result.baseValue) / span,
-      });
-    }
+    const bracket = scanDialForFlip(dial, result, baseRequest, base.verdict, evaluate);
+    if (bracket) brackets.push(bracket);
   }
-  if (candidates.length === 0) return null;
+  if (brackets.length === 0) return null;
 
-  // Refine the closest few endpoint flips by bisection to find the actual
-  // threshold, then keep whichever flips with the smallest real dial change.
-  candidates.sort((left, right) => left.normalizedDistance - right.normalizedDistance);
+  // Branch-and-bound over the localized brackets: ascending lower bound, stop as
+  // soon as the remaining lower bounds can't beat the best refined threshold.
+  brackets.sort((left, right) => left.lowerBound - right.lowerBound);
   let best:
-    | {
-        candidate: FlipCandidate;
-        threshold: number;
-        verdict: SensitivityVerdict;
-        distance: number;
-      }
+    | { bracket: FlipBracket; threshold: number; verdict: SensitivityVerdict; distance: number }
     | null = null;
-  for (const candidate of candidates.slice(0, MAX_BISECTED_CANDIDATES)) {
-    const refined = bisectFlip(baseRequest, base.verdict, candidate, evaluate);
-    // Normalize each candidate's change by ITS OWN dial's span so dials of
-    // different widths are compared on equal footing; comparing raw refined
-    // thresholds (or reusing one dial's span for both sides) would let a wider
-    // dial's larger absolute change look "smaller" than a narrow dial's.
-    const span = Math.abs(candidate.dial.high - candidate.dial.low) || 1;
-    const distance = Math.abs(refined.threshold - candidate.baseValue) / span;
+  let refinements = 0;
+  for (const bracket of brackets) {
+    if (best && bracket.lowerBound >= best.distance) break;
+    if (refinements >= MAX_FLIP_REFINEMENTS) break;
+    refinements += 1;
+    const refined = bisectBracket(bracket, baseRequest, base.verdict, evaluate);
+    const span = Math.abs(bracket.dial.high - bracket.dial.low) || 1;
+    const distance = Math.abs(refined.threshold - bracket.baseValue) / span;
     if (!best || distance < best.distance) {
-      best = { candidate, threshold: refined.threshold, verdict: refined.verdict, distance };
+      best = { bracket, threshold: refined.threshold, verdict: refined.verdict, distance };
     }
   }
   if (!best) return null;
 
-  const { dial } = best.candidate;
+  const { dial } = best.bracket;
   return {
     dialId: dial.id,
     label: dial.label,
     formId: dial.form.id,
     value: best.threshold,
     formValue: best.threshold * dial.form.scale,
-    fromValue: best.candidate.baseValue,
+    fromValue: best.bracket.baseValue,
     fromVerdict: base.verdict,
     toVerdict: best.verdict,
-    sentence: flipSentence(
-      dial,
-      best.candidate.baseValue,
-      best.threshold,
-      base.verdict,
-      best.verdict,
-    ),
+    sentence: flipSentence(dial, best.bracket.baseValue, best.threshold, base.verdict, best.verdict),
   };
 };
 
-// Binary-search the boundary between the base value (base verdict) and the
-// endpoint value (a different verdict). Returns the value nearest the base at
-// which the verdict has already flipped, i.e. the smallest change that flips.
-const bisectFlip = (
+// Scan a dial across a coarse uniform grid (reusing the two tornado endpoints,
+// so only the interior points cost new runs) and return the flip transition
+// nearest the base value, or null when no sampled point leaves the base verdict.
+// The grid catches interior flips that endpoint-only checks miss, down to its
+// resolution (~1/(FLIP_SCAN_SAMPLES-1) of the dial's range). A flip occupying a
+// window narrower than one grid cell and touching no grid point can still be
+// missed — closing that fully would need dense per-dial sampling that blows the
+// bounded run budget, so it is an accepted limit of this reduced-form annotation.
+const scanDialForFlip = (
+  dial: DialSpec,
+  result: SensitivityDialResult,
   baseRequest: ComparisonRequestV1,
   baseVerdict: SensitivityVerdict,
-  candidate: FlipCandidate,
+  evaluate: (candidate: ComparisonRequestV1) => HeadlineOutputs,
+): FlipBracket | null => {
+  const span = Math.abs(dial.high - dial.low) || 1;
+  const samples: { value: number; verdict: SensitivityVerdict }[] = [];
+  for (let index = 0; index < FLIP_SCAN_SAMPLES; index += 1) {
+    const target = dial.low + ((dial.high - dial.low) * index) / (FLIP_SCAN_SAMPLES - 1);
+    // Reuse the already-evaluated endpoints; only interior points run the model.
+    if (index === 0) {
+      samples.push({ value: result.low.value, verdict: result.low.verdict });
+    } else if (index === FLIP_SCAN_SAMPLES - 1) {
+      samples.push({ value: result.high.value, verdict: result.high.verdict });
+    } else {
+      const perturbed = dial.apply(baseRequest, target);
+      samples.push({ value: dial.read(perturbed), verdict: evaluate(perturbed).verdict });
+    }
+  }
+  // Insert the base value (its verdict is known) so the walk outward from base
+  // has a guaranteed base-verdict anchor, then sort by dial value.
+  samples.push({ value: result.baseValue, verdict: baseVerdict });
+  samples.sort((left, right) => left.value - right.value);
+  const baseIndex = samples.findIndex(
+    (sample) => sample.value === result.baseValue && sample.verdict === baseVerdict,
+  );
+  if (baseIndex < 0) return null;
+
+  let bracket: FlipBracket | null = null;
+  const consider = (nearIndex: number, farIndex: number) => {
+    const near = samples[nearIndex];
+    const far = samples[farIndex];
+    if (!near || !far || far.verdict === baseVerdict) return;
+    const lowerBound = Math.abs(near.value - result.baseValue) / span;
+    if (!bracket || lowerBound < bracket.lowerBound) {
+      bracket = {
+        dial,
+        baseValue: result.baseValue,
+        near: near.value,
+        far: far.value,
+        farVerdict: far.verdict,
+        lowerBound,
+      };
+    }
+  };
+  // Walk right from base to the first non-base sample, and left likewise; the
+  // sample just before each transition (toward base) has the base verdict.
+  for (let index = baseIndex; index + 1 < samples.length; index += 1) {
+    if (samples[index + 1]?.verdict !== baseVerdict) {
+      consider(index, index + 1);
+      break;
+    }
+  }
+  for (let index = baseIndex; index - 1 >= 0; index -= 1) {
+    if (samples[index - 1]?.verdict !== baseVerdict) {
+      consider(index, index - 1);
+      break;
+    }
+  }
+  return bracket;
+};
+
+// Binary-search within a bracket [near (base verdict) → far (a different
+// verdict)] for the value nearest the base at which the verdict has already
+// flipped — the smallest change on that dial that flips.
+const bisectBracket = (
+  bracket: FlipBracket,
+  baseRequest: ComparisonRequestV1,
+  baseVerdict: SensitivityVerdict,
   evaluate: (candidate: ComparisonRequestV1) => HeadlineOutputs,
 ): { threshold: number; verdict: SensitivityVerdict } => {
-  let unflipped = candidate.baseValue; // verdict === baseVerdict here
-  let flipped = candidate.endpointValue; // verdict !== baseVerdict here
-  let flippedVerdict = candidate.endpointVerdict;
+  let unflipped = bracket.near;
+  let flipped = bracket.far;
+  let flippedVerdict = bracket.farVerdict;
   for (let iteration = 0; iteration < BISECTION_ITERATIONS; iteration += 1) {
     const mid = (unflipped + flipped) / 2;
-    const outcome = evaluate(candidate.dial.apply(baseRequest, mid));
+    const outcome = evaluate(bracket.dial.apply(baseRequest, mid));
     if (outcome.verdict === baseVerdict) {
       unflipped = mid;
     } else {

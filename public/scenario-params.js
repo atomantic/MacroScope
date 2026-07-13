@@ -35,17 +35,20 @@ export const FIELD_SPECS = [
 
 export const PRESET_PARAM = "preset";
 export const STRATEGY_PARAM = "strat";
+export const BRACKETS_PARAM = "br";
 export const DEFAULT_STRATEGY = "cash-first";
 
 // Serialize the current form state to a compact query string. When `preset` is
 // set the scenario is a pristine named preset and encodes as `?preset=name`;
-// otherwise only fields differing from `defaults` are emitted. The decile
-// strategy selector round-trips alongside either form.
+// otherwise only fields differing from `defaults` are emitted. A custom graduated
+// schedule (which has no single form field) rides along as `br` when present. The
+// decile strategy selector round-trips alongside either form.
 export const encodeScenarioParams = ({
   values,
   defaults,
   preset = null,
   strategy = DEFAULT_STRATEGY,
+  brackets = null,
 } = {}) => {
   const params = new URLSearchParams();
   if (preset) {
@@ -57,6 +60,9 @@ export const encodeScenarioParams = ({
         params.set(spec.param, String(value));
       }
     }
+    // Brackets only carry outside a pristine preset — a preset reconstructs its
+    // own schedule on decode, so emitting br there would be redundant.
+    if (brackets) params.set(BRACKETS_PARAM, brackets);
   }
   if (strategy && strategy !== DEFAULT_STRATEGY) params.set(STRATEGY_PARAM, strategy);
   return params.toString();
@@ -74,6 +80,7 @@ export const decodeScenarioParams = (search) => {
   return {
     preset: params.get(PRESET_PARAM),
     strategy: params.get(STRATEGY_PARAM),
+    brackets: params.get(BRACKETS_PARAM),
     fields,
   };
 };

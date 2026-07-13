@@ -41,6 +41,13 @@ export const buildPolicyProjection = (
   request: ComparisonRequestV1,
   strategies: Strategies,
   effectiveExemption: number = request.wealthTax.exemption,
+  // Average rate actually paid out of the taxable base in year one (assessed
+  // tax ÷ taxable base). For a flat schedule this equals wealthTax.rate; for a
+  // graduated schedule (Warren/Sanders) it is the blended effective rate, so
+  // the out-year base erosion below stays consistent with year-one collections
+  // instead of under-eroding at the lowest bracket rate. Defaults to the flat
+  // rate for callers that don't compute it.
+  effectiveTaxRate: number = request.wealthTax.rate,
 ): PolicyProjection => {
   const weights = strategyWeights(request);
   const blended = <T>(select: (outcome: StrategyOutcome) => T): number => {
@@ -354,7 +361,7 @@ export const buildPolicyProjection = (
           request.behavior.annualAssetReturn +
           Math.max(0, annualInflation - US_BASELINE.baselineInflation) *
             ASSET_PRICE_INFLATION_PASS_THROUGH) *
-        (1 - request.wealthTax.rate) *
+        (1 - effectiveTaxRate) *
         expatriationRetention,
     );
   }

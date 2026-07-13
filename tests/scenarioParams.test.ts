@@ -71,4 +71,26 @@ describe("scenario URL parameters", () => {
     });
     expect(new URLSearchParams(query).has(STRATEGY_PARAM)).toBe(false);
   });
+
+  it("round-trips a custom graduated schedule through the br param", () => {
+    const query = encodeScenarioParams({
+      values: { ...defaults },
+      defaults,
+      brackets: "50:2,1000:6",
+    });
+    expect(new URLSearchParams(query).get("br")).toBe("50:2,1000:6");
+    expect(decodeScenarioParams(query).brackets).toBe("50:2,1000:6");
+  });
+
+  it("omits brackets from a pristine preset link", () => {
+    // A preset reconstructs its own schedule on decode, so br must not ride along.
+    const query = encodeScenarioParams({
+      values: { ...defaults },
+      defaults,
+      preset: "warren-2020",
+      brackets: "50:2,1000:6",
+    });
+    expect(new URLSearchParams(query).has("br")).toBe(false);
+    expect(decodeScenarioParams(query).preset).toBe("warren-2020");
+  });
 });

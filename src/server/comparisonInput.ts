@@ -3,6 +3,11 @@ import {
   type BenefitIndexation,
   type ComparisonRequestV1,
 } from "../simulation/contracts.js";
+import type { TaxBracket } from "../policies/schema.js";
+
+const MAX_BRACKETS = 12;
+const MAX_BRACKET_THRESHOLD = 1_000_000_000_000;
+const MAX_BRACKET_RATE = 0.2;
 
 export interface ParsedComparisonRequest {
   readonly value?: ComparisonRequestV1;
@@ -82,6 +87,7 @@ export const parseComparisonRequest = (input: unknown): ParsedComparisonRequest 
     0.2,
     errors,
   );
+  const brackets = readBrackets(wealthTax.brackets, errors);
   const adultMonthlyBenefit = readNumber(
     ubi,
     "adultMonthlyBenefit",
@@ -248,7 +254,13 @@ export const parseComparisonRequest = (input: unknown): ParsedComparisonRequest 
       seed,
       sampleSize,
       representedHouseholds,
-      wealthTax: { targetMode, exemption, topShare, rate },
+      wealthTax: {
+        targetMode,
+        exemption,
+        topShare,
+        rate,
+        ...(brackets ? { brackets } : {}),
+      },
       ubi: {
         adultMonthlyBenefit,
         childMonthlyBenefit,
@@ -300,6 +312,54 @@ const readNumber = (
     errors.push(`${key} must be between ${minimum} and ${maximum}.`);
   }
   return raw;
+};
+
+const readBrackets = (
+  raw: unknown,
+  errors: string[],
+): readonly TaxBracket[] | undefined => {
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw)) {
+    errors.push("brackets must be an array of { threshold, rate } rows.");
+    return undefined;
+  }
+  if (raw.length === 0) return undefined;
+  if (raw.length > MAX_BRACKETS) {
+    errors.push(`brackets must not exceed ${MAX_BRACKETS} rows.`);
+    return undefined;
+  }
+  const parsed: TaxBracket[] = [];
+  let previousThreshold = -Infinity;
+  let previousRate = -Infinity;
+  for (const entry of raw) {
+    if (!isRecord(entry)) {
+      errors.push("Each bracket must be an object with threshold and rate.");
+      continue;
+    }
+    const threshold = readNumber(
+      entry,
+      "threshold",
+      Number.NaN,
+      0,
+      MAX_BRACKET_THRESHOLD,
+      errors,
+    );
+    const rate = readNumber(entry, "rate", Number.NaN, 0, MAX_BRACKET_RATE, errors);
+    if (!Number.isFinite(threshold) || !Number.isFinite(rate)) {
+      errors.push("Each bracket requires a finite threshold and rate.");
+      continue;
+    }
+    if (threshold <= previousThreshold) {
+      errors.push("Bracket thresholds must be strictly increasing.");
+    }
+    if (rate < previousRate) {
+      errors.push("Bracket rates must be nondecreasing across thresholds.");
+    }
+    previousThreshold = threshold;
+    previousRate = rate;
+    parsed.push({ threshold, rate });
+  }
+  return parsed.length > 0 ? parsed : undefined;
 };
 
 const readFundingRule = (

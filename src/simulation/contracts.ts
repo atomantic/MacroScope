@@ -1,4 +1,8 @@
-import { SCENARIO_SCHEMA_VERSION, type UbiFundingRule } from "../policies/schema.js";
+import {
+  SCENARIO_SCHEMA_VERSION,
+  type TaxBracket,
+  type UbiFundingRule,
+} from "../policies/schema.js";
 import { US_BASELINE } from "./usBaseline.js";
 
 export type PaymentStrategy = "cash-first" | "borrow-first" | "sell-first";
@@ -30,6 +34,11 @@ export interface ComparisonRequestV1 {
     readonly exemption: number;
     readonly topShare: number;
     readonly rate: number;
+    // Optional graduated schedule. When present and non-empty, thresholds are
+    // absolute wealth levels (dollars) with the lowest acting as the exemption,
+    // and this replaces the single flat `rate`. Named proposals such as Warren
+    // 2020 and Sanders 2020 use these. Omitted for the single-rate default.
+    readonly brackets?: readonly TaxBracket[];
   };
   readonly ubi: {
     readonly adultMonthlyBenefit: number;

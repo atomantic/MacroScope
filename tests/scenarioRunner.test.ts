@@ -269,4 +269,48 @@ describe("vertical-slice scenario runner", () => {
     expect(topOne.wealthTaxTarget.effectiveExemption).toBeGreaterThan(0);
     expect(billionaire.wealthTaxTarget.effectiveExemption).toBe(1_000_000_000);
   });
+
+  it("runs graduated schedules with the lowest threshold as the exemption", () => {
+    // Warren 2020: 2% over $50M, 6% over $1B — supplied out of order and with a
+    // stale top-share target that the schedule must override.
+    const warren = runComparison({
+      ...compactRequest(),
+      wealthTax: {
+        targetMode: "top-share",
+        topShare: 0.01,
+        exemption: 0,
+        rate: 0.02,
+        brackets: [
+          { threshold: 1_000_000_000, rate: 0.06 },
+          { threshold: 50_000_000, rate: 0.02 },
+        ],
+      },
+    });
+    expect(warren.wealthTaxTarget.mode).toBe("exemption");
+    expect(warren.wealthTaxTarget.effectiveExemption).toBe(50_000_000);
+
+    // The graduated top rate must collect strictly more than a flat 2% applied
+    // above the same $50M exemption, because wealth above $1B is taxed at 6%.
+    const flat = runComparison({
+      ...compactRequest(),
+      wealthTax: {
+        targetMode: "exemption",
+        topShare: 0.01,
+        exemption: 50_000_000,
+        rate: 0.02,
+      },
+    });
+    expect(warren.strategies["cash-first"].fiscal.taxAssessed).toBeGreaterThan(
+      flat.strategies["cash-first"].fiscal.taxAssessed,
+    );
+    expect(warren.strategies["cash-first"].accounting.passed).toBe(true);
+
+    // The out-year projection must erode the base at the graduated schedule's
+    // blended effective rate, not the (lower) flat 2% floor rate. With the same
+    // $50M exemption but a 6% top bracket, the graduated top-1% real wealth must
+    // fall at least as fast as under the flat 2%.
+    expect(warren.projection.summary.top1RealWealthChange).toBeLessThan(
+      flat.projection.summary.top1RealWealthChange,
+    );
+  });
 });

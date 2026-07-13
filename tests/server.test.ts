@@ -147,6 +147,39 @@ describe("PortOS server", () => {
     );
   });
 
+  it("accepts a monotonic graduated wealth-tax schedule", () => {
+    const parsed = parseComparisonRequest({
+      wealthTax: {
+        brackets: [
+          { threshold: 50_000_000, rate: 0.02 },
+          { threshold: 1_000_000_000, rate: 0.06 },
+        ],
+      },
+    });
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.value?.wealthTax.brackets).toEqual([
+      { threshold: 50_000_000, rate: 0.02 },
+      { threshold: 1_000_000_000, rate: 0.06 },
+    ]);
+  });
+
+  it("rejects non-monotonic bracket thresholds and rates", () => {
+    const errors = parseComparisonRequest({
+      wealthTax: {
+        brackets: [
+          { threshold: 1_000_000_000, rate: 0.06 },
+          { threshold: 50_000_000, rate: 0.02 },
+        ],
+      },
+    }).errors;
+    expect(errors).toEqual(
+      expect.arrayContaining([
+        "Bracket thresholds must be strictly increasing.",
+        "Bracket rates must be nondecreasing across thresholds.",
+      ]),
+    );
+  });
+
   it("bounds the taxpayer-response dials", () => {
     expect(
       parseComparisonRequest({

@@ -275,6 +275,40 @@ input:focus, select:focus { border-color: var(--green); box-shadow: 0 0 0 2px rg
 .form-status { margin: 0; color: var(--muted); font-size: 0.75rem; }
 .form-status.error { color: var(--red); }
 
+.policy-presets-real button { border-style: dashed; }
+.policy-presets-real button:hover { border-style: solid; }
+.preset-reference-link { margin-left: auto; color: var(--orange); font-size: 0.7rem; font-weight: 750; text-decoration: none; }
+.preset-reference-link:hover { color: var(--green); }
+
+.bracket-editor { margin-top: 14px; padding: 12px; border: 1px solid var(--line); background: var(--panel); }
+.bracket-editor-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; }
+.bracket-editor-head span { color: var(--orange); font-size: 0.68rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+.bracket-editor-head small { color: var(--muted); font-size: 0.68rem; }
+.bracket-rows { display: grid; gap: 8px; margin: 10px 0; }
+.bracket-rows:empty { margin: 0; }
+.bracket-row { display: flex; align-items: center; gap: 6px; }
+.bracket-row span { color: var(--muted); font-size: 0.72rem; font-weight: 700; white-space: nowrap; }
+.bracket-row input { width: auto; flex: 1 1 0; }
+.bracket-remove { padding: 8px 10px; border: 1px solid var(--line); background: var(--paper); color: var(--muted); cursor: pointer; font-size: 0.66rem; font-weight: 700; }
+.bracket-remove:hover { border-color: var(--red); color: var(--red); }
+.bracket-actions { display: flex; gap: 8px; }
+.bracket-actions button { padding: 8px 10px; border: 1px solid var(--line); background: var(--paper); color: var(--ink); cursor: pointer; font-size: 0.68rem; font-weight: 700; }
+.bracket-actions button:hover:not(:disabled) { border-color: var(--green); color: var(--green); }
+.bracket-actions button:disabled { opacity: 0.45; cursor: default; }
+.bracket-error { margin: 10px 0 0; color: var(--red); font-size: 0.72rem; font-weight: 700; }
+
+.policy-references { padding: 76px 0; border-bottom: 1px solid var(--ink); }
+.policy-references h2 { margin: 0 0 16px; font-size: clamp(1.8rem, 3.4vw, 3.2rem); letter-spacing: -0.03em; }
+.policy-references-intro { max-width: 62ch; margin: 0 0 32px; color: var(--muted); }
+.reference-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px; }
+.reference-card { display: flex; flex-direction: column; gap: 10px; padding: 20px; border: 1px solid var(--ink); background: var(--panel); }
+.reference-card[data-kind="proposal"] { border-left: 4px solid var(--green); }
+.reference-card[data-kind="history"] { border-left: 4px solid var(--orange); }
+.reference-card h3 { margin: 0; font-family: var(--display); font-size: 1.05rem; }
+.reference-card p { margin: 0; color: var(--muted); font-size: 0.82rem; line-height: 1.5; }
+.reference-card a { margin-top: auto; color: var(--orange); font-size: 0.72rem; font-weight: 750; text-decoration: none; }
+.reference-card a:hover { color: var(--green); }
+
 .toast-container { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 50; display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; }
 .toast { padding: 12px 18px; border: 1px solid var(--ink); background: var(--ink); color: var(--paper); font-size: 0.82rem; font-weight: 650; box-shadow: 0 8px 24px rgba(23, 33, 29, 0.22); opacity: 0; transform: translateY(10px); transition: opacity 0.24s ease, transform 0.24s ease; }
 .toast.visible { opacity: 1; transform: translateY(0); }
@@ -423,7 +457,7 @@ body[data-view="story"] #dashboard-view { display: none; }
   .headline-metrics { grid-template-columns: 1fr; }
   .headline-metrics article { padding: 22px 0; }
   .headline-metrics article + article { padding-left: 0; border-left: 0; border-top: 1px solid var(--line); }
-  .story-section, .causal-section, .theory-section, .stress-section, .validation-section, .verdict-reasons, .sources { padding: 56px 0; }
+  .story-section, .causal-section, .theory-section, .stress-section, .validation-section, .verdict-reasons, .sources, .policy-references { padding: 56px 0; }
   .section-intro, .section-intro.compact { grid-template-columns: 1fr; gap: 8px; }
   .section-intro > p:last-child { grid-column: auto; }
   figcaption { display: block; }

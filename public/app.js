@@ -597,24 +597,32 @@ document.querySelectorAll("[data-preset]").forEach((button) => {
 
 const STORY_SEEN_KEY = "macroscope-story-seen";
 
-// Dial `prepare` hooks run after the dial writes its field, before the rerun,
-// to keep hidden companion fields consistent so the visible dial always moves
-// the model (the story deliberately exposes one control per step).
-const forceExemptionTargeting = () => {
+// A step `setup` runs ONCE when the reader enters the step, establishing a
+// coherent, in-range baseline for the single dial that step exposes. Doing it on
+// entry (not per dial move) keeps the lone dial the only thing that changes
+// while it's dragged — so moves are reversible and history-independent, and a
+// companion field is never silently rewritten mid-interaction.
+const setupExemptionStep = (result) => {
+  // Start the dollar-exemption exploration from the current effective cutoff
+  // (works whether the chosen preset used top-share or a dollar exemption),
+  // rounded into the dial's range so control, copy, chart, and model all agree
+  // the moment the step opens.
+  const effectiveMillions = result.wealthTaxTarget.effectiveExemption / 1_000_000;
+  byId("exemption").value = String(clamp(Math.round(effectiveMillions), 0, 50));
   byId("target-mode").value = "exemption";
   syncTargetControls();
 };
-// borrow + sell must stay <= 100 (parser rule); the story doesn't expose sell,
-// so shrink it to make room as the borrow dial climbs past the remaining share.
-const capBorrowAgainstSell = () => {
-  const borrow = Number(byId("borrow-share").value);
-  const sell = Number(byId("sell-share").value);
-  if (borrow + sell > 100) byId("sell-share").value = String(Math.max(0, 100 - borrow));
+// The borrow dial is the only payment control the story exposes; fix the sell
+// share at zero so the dial spans the full 0–100% (cash = 100 − borrow) without
+// tripping the borrow+sell ≤ 100 rule, and so equal dial positions always model
+// the same split regardless of drag history.
+const setupBorrowStep = () => {
+  byId("sell-share").value = "0";
 };
 // The default revenue-constrained rule caps spending at tax receipts, so the
-// deficit — and thus monetization — is zero. Switch to fixed-benefit funding so
-// the monetization dial has a deficit to act on and inflation actually responds.
-const enableDeficitFunding = () => {
+// deficit — and thus monetization — is zero. Establish fixed-benefit funding on
+// entry so the monetization dial (and only it) drives the inflation response.
+const setupMonetizationStep = () => {
   byId("funding-rule").value = "fixed";
 };
 
@@ -634,16 +642,10 @@ const STORY_STEPS = [
     id: "who-pays",
     kicker: "Who the tax touches",
     title: "The tax hits only a sliver of households.",
+    setup: setupExemptionStep,
     body: (r) =>
       `With the line at ${compactMoney.format(r.wealthTaxTarget.effectiveExemption)} of net worth, wealth stacks up in the top decile — that is where the tax bites. Drag the exemption and watch which deciles fall above the line.`,
-    dial: {
-      field: "exemption",
-      label: "Exemption ($M net worth)",
-      min: 0,
-      max: 50,
-      step: 1,
-      prepare: forceExemptionTargeting,
-    },
+    dial: { field: "exemption", label: "Exemption ($M net worth)", min: 0, max: 50, step: 1 },
     viz: (host, r) => renderWealthStrip(host, r),
     readout: (r) =>
       `${compactMoney.format(r.projection.annualFlows.taxCollected)} collected in year one on wealth above the line.`,
@@ -652,9 +654,10 @@ const STORY_STEPS = [
     id: "how-they-pay",
     kicker: "How the wealthy pay",
     title: "They rarely sell. They borrow against their wealth.",
+    setup: setupBorrowStep,
     body: (r) =>
-      `A wealth-tax bill can be paid with cash, by selling assets, or by borrowing against them. The more the reader assumes is borrowed, the more new bank lending the policy triggers. Right now ${percent.format(r.projection.behaviorMix.borrowShare)} is borrowed.`,
-    dial: { field: "borrow-share", label: "Share paid by borrowing (%)", min: 0, max: 100, step: 5, prepare: capBorrowAgainstSell },
+      `A wealth-tax bill can be paid with cash or by borrowing against assets. The more the reader assumes is borrowed, the more new bank lending the policy triggers. Right now ${percent.format(r.projection.behaviorMix.borrowShare)} is borrowed.`,
+    dial: { field: "borrow-share", label: "Share paid by borrowing (%)", min: 0, max: 100, step: 5 },
     viz: (host, r) => renderPaymentSplit(host, r),
     readout: (r) =>
       `${compactMoney.format(r.projection.annualFlows.newPrivateLoans)} in new bank loans in year one — deposits created out of nothing.`,
@@ -663,9 +666,10 @@ const STORY_STEPS = [
     id: "loans-make-money",
     kicker: "Bank loans create money",
     title: "New loans expand the money supply.",
+    setup: setupBorrowStep,
     body: () =>
       "Taxing and transferring existing deposits just reshuffles money. New bank loans are different: they create fresh deposits. Keep moving the borrow dial and watch M2 respond over ten years.",
-    dial: { field: "borrow-share", label: "Share paid by borrowing (%)", min: 0, max: 100, step: 5, prepare: capBorrowAgainstSell },
+    dial: { field: "borrow-share", label: "Share paid by borrowing (%)", min: 0, max: 100, step: 5 },
     viz: (host, r) => renderStoryChart(host, "story-money-chart", moneyChartOptions(r.projection)),
     readout: (r) =>
       `M2 ends ${signedPercent(r.projection.summary.cumulativeM2Change)} versus the no-policy path.`,
@@ -674,9 +678,10 @@ const STORY_STEPS = [
     id: "prices-respond",
     kicker: "Prices respond",
     title: "More money chasing goods can lift prices.",
+    setup: setupMonetizationStep,
     body: (r) =>
-      `Whether new money shows up as inflation depends on how much of any deficit the central bank monetizes. Peak annual inflation in this run is ${formatRate(r.projection.summary.peakAnnualInflation)}. Turn the monetization dial to test it.`,
-    dial: { field: "monetization", label: "Deficit monetized (%)", min: 0, max: 100, step: 5, prepare: enableDeficitFunding },
+      `With a benefit funded partly by deficit, whether it shows up as inflation depends on how much the central bank monetizes. Peak annual inflation in this run is ${formatRate(r.projection.summary.peakAnnualInflation)}. Turn the monetization dial to test it.`,
+    dial: { field: "monetization", label: "Deficit monetized (%)", min: 0, max: 100, step: 5 },
     viz: (host, r) => renderStoryChart(host, "story-price-chart", moneyChartOptions(r.projection)),
     readout: (r) =>
       `Peak annual inflation ${formatRate(r.projection.summary.peakAnnualInflation)} — ${regimeFor(r.projection.summary.peakAnnualInflation)} regime.`,
@@ -804,6 +809,16 @@ const renderStory = () => {
   const stage = byId("story-stage");
   stage.replaceChildren();
 
+  // Establish this step's baseline once, on entry (before the dial is built).
+  // If setup — or the out-of-range clamp below — changed the form, rerun so
+  // copy, chart, and result reflect the baseline the dial now sits on.
+  let needsResync = false;
+  if (step.setup) {
+    const before = JSON.stringify(formRequest());
+    step.setup(latestResult);
+    if (JSON.stringify(formRequest()) !== before) needsResync = true;
+  }
+
   const copy = document.createElement("div");
   copy.className = "story-copy";
   const kicker = element("p", step.kicker);
@@ -837,18 +852,15 @@ const renderStory = () => {
     stage.append(presetWrap);
   }
 
-  let dialNeedsResync = false;
   if (step.dial) {
     const field = byId(step.dial.field);
     const inRange = clamp(Number(field.value), step.dial.min, step.dial.max);
-    // A preset can leave the field outside the dial's range (e.g. the $1B
-    // billionaire exemption against a $50M dial). Snap the field into range and
-    // resync the model so the dial, copy, chart, and result all agree instead
-    // of the control silently showing a clamped value the model doesn't use.
+    // Safety net for a dial without a setup (e.g. a benefit above the $3k dial
+    // max carried in from the dashboard): snap the field into range so the
+    // control can't display a value the model doesn't use.
     if (Number(field.value) !== inRange) {
       field.value = String(inRange);
-      if (step.dial.prepare) step.dial.prepare();
-      dialNeedsResync = true;
+      needsResync = true;
     }
     stage.append(buildStoryDial(step.dial));
   }
@@ -896,9 +908,9 @@ const renderStory = () => {
   // nodes update).
   storyState.dynamic = { bodyNode, viz: step.viz ? viz : null, readout, verdict: verdictRefs, errorNode };
 
-  // The model still reflects the pre-clamp value — rerun once to bring copy,
-  // chart, and verdict in line with the now-in-range dial.
-  if (dialNeedsResync) void storyRerun();
+  // Setup/clamp changed the model inputs — rerun once so copy, chart, and
+  // verdict reflect the baseline the dial now sits on.
+  if (needsResync) void storyRerun();
 
   renderStoryProgress();
   byId("story-counter").textContent = `Step ${storyState.index + 1} of ${STORY_STEPS.length}`;
@@ -927,7 +939,6 @@ const buildStoryDial = (dial) => {
   valueOut.textContent = String(current);
   const commit = debounce(async (value) => {
     field.value = String(value);
-    if (dial.prepare) dial.prepare();
     await storyRerun();
   }, 220);
   range.addEventListener("input", () => {
@@ -1050,10 +1061,11 @@ const initStory = () => {
   byId("story-skip").addEventListener("click", () => enterDashboard());
   byId("story-launch").addEventListener("click", () => enterStory(0));
 
-  // If the model never loaded, there is nothing to narrate — show the
-  // dashboard shell so its error status is visible.
+  // If the model never loaded, there is nothing to narrate — show the dashboard
+  // shell so its error status is visible. Do NOT persist the seen flag here: a
+  // transient outage must not skip the walkthrough on the next successful visit.
   if (!latestResult) {
-    enterDashboard();
+    document.body.dataset.view = "dashboard";
     byId("story-launch").hidden = true;
     return;
   }

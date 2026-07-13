@@ -387,11 +387,167 @@ const runScenario = async () => {
 const render = (result) => {
   renderVerdict(result.projection);
   renderCharts(result.projection);
+  renderWinners(result.projection);
   renderFlow(result.projection);
   renderTheory(result.projection.theoryTest, result.projection);
   renderStress(result.projection.stressTest);
   renderReasons(result.projection);
   renderDetails(result);
+  renderPersona(result);
+};
+
+const RATING_LABEL = {
+  "better-off": "Better off",
+  "worse-off": "Worse off",
+  mixed: "About even",
+};
+
+const renderWinners = (projection) => {
+  byId("winners-grid").replaceChildren(
+    ...projection.groupOutcomes.map((group) => winnerCard(group)),
+  );
+};
+
+const groupChange = (group) =>
+  group.primaryMetric === "real-wealth"
+    ? group.realWealthChange
+    : group.purchasingPowerChange;
+
+const groupMetricLabel = (group) =>
+  group.primaryMetric === "real-wealth" ? "real net worth" : "buying power";
+
+const winnerCard = (group) => {
+  const change = groupChange(group) ?? 0;
+  const card = document.createElement("article");
+  card.className = "winner-card";
+  card.dataset.rating = group.rating;
+  const head = document.createElement("div");
+  head.className = "winner-head";
+  head.append(element("h3", group.label));
+  const badge = element("span", RATING_LABEL[group.rating] ?? group.rating);
+  badge.className = "winner-badge";
+  head.append(badge);
+  card.append(head);
+  card.append(divergingBar(change));
+  const value = element("strong", `${signedPercent(change)} ${groupMetricLabel(group)}`);
+  value.className = "winner-value";
+  card.append(value);
+  const drivers = document.createElement("p");
+  drivers.className = "winner-drivers";
+  const taxText = group.annualTaxPaid > 0
+    ? `Pays ~${compactMoney.format(group.annualTaxPaid)}/yr tax`
+    : "Pays ~$0 tax";
+  drivers.textContent = `${taxText} · gets ~${money.format(group.annualUbiReceived)}/yr UBI · rent ${signedPercent(group.rentPremiumChange)}`;
+  card.append(drivers);
+  return card;
+};
+
+const divergingBar = (change) => {
+  const wrap = document.createElement("div");
+  wrap.className = "diverging-bar";
+  const track = document.createElement("div");
+  track.className = "bar-track";
+  const fill = document.createElement("div");
+  fill.className = `bar-fill ${change >= 0 ? "positive" : "negative"}`;
+  const magnitude = Math.min(1, Math.abs(change) / 0.25);
+  fill.style.width = `${(magnitude * 50).toFixed(1)}%`;
+  if (change >= 0) fill.style.left = "50%";
+  else fill.style.right = "50%";
+  track.append(fill);
+  wrap.append(track);
+  return wrap;
+};
+
+const personaGroupId = (netWorth, tenure) => {
+  const groups = baseline?.wealthGroups ?? [];
+  if (groups.length === 0) return tenure === "owner" ? "bottom-50-owner" : "bottom-50-renter";
+  const averages = groups.map((group) => group.netWorth / Math.max(1, group.households));
+  let index = 0;
+  for (let position = 0; position < averages.length - 1; position += 1) {
+    const cutoff = Math.sqrt(Math.max(1, averages[position]) * Math.max(1, averages[position + 1]));
+    if (netWorth >= cutoff) index = position + 1;
+  }
+  const idByBand = ["bottom-50", "middle-40", "top-10", "top-1", "top-0.1"];
+  const id = idByBand[Math.min(index, idByBand.length - 1)];
+  if (id === "bottom-50") return tenure === "owner" ? "bottom-50-owner" : "bottom-50-renter";
+  return id;
+};
+
+const renderPersona = (result) => {
+  if (!result) return;
+  const netWorth = Number(byId("persona-net-worth").value) || 0;
+  const adults = Math.max(1, Number(byId("persona-adults").value) || 1);
+  const children = Math.max(0, Number(byId("persona-children").value) || 0);
+  const tenure = byId("persona-tenure").value === "owner" ? "owner" : "renter";
+  persistPersona(netWorth, adults, children, tenure);
+  const outcomes = result.projection.groupOutcomes;
+  const targetId = personaGroupId(netWorth, tenure);
+  const group = outcomes.find((candidate) => candidate.id === targetId) ?? outcomes[0];
+  if (!group) return;
+  const request = result.assumptions;
+  const grossUbi =
+    12 * (adults * request.ubi.adultMonthlyBenefit + children * request.ubi.childMonthlyBenefit);
+  // Scale the household's gross benefit by the engine's cash-delivery ratio
+  // (funding scale, administration, leakage, cash-vs-services split) so the
+  // persona shows delivered cash, matching the per-cohort cards, not the gross
+  // schedule.
+  const requestedUbi = result.strategies?.["cash-first"]?.fiscal?.requestedUbi ?? 0;
+  const deliveryRatio = requestedUbi > 0
+    ? result.projection.annualFlows.ubiReceived / requestedUbi
+    : 0;
+  const annualUbi = grossUbi * deliveryRatio;
+  const exemption = result.wealthTaxTarget?.effectiveExemption ?? request.wealthTax.exemption;
+  const annualTax = Math.max(0, netWorth - exemption) * request.wealthTax.rate;
+  const change = groupChange(group) ?? 0;
+  const rentNote = Math.abs(group.rentPremiumChange) >= 0.0005
+    ? `, with modeled rent about ${signedPercent(group.rentPremiumChange)}`
+    : "";
+  const node = byId("persona-result");
+  node.dataset.rating = group.rating;
+  node.replaceChildren();
+  node.append(element("strong", `Nearest modeled cohort: ${group.label}.`));
+  node.append(
+    element(
+      "span",
+      `You'd pay about ${money.format(annualTax)} in wealth tax and receive about ${money.format(annualUbi)} per year in UBI. Over ten years you'd end with about ${signedPercent(change)} ${groupMetricLabel(group)} versus the no-policy path${rentNote}.`,
+    ),
+  );
+  const note = document.createElement("small");
+  note.append(document.createTextNode("This maps you to the nearest synthetic cohort — a conditional scenario, not personal advice. "));
+  const link = document.createElement("a");
+  link.href = "#caveats";
+  link.className = "caveat-link";
+  link.textContent = "Model limits.";
+  note.append(link);
+  node.append(note);
+};
+
+const PERSONA_PARAMS = {
+  netWorth: "persona_nw",
+  adults: "persona_adults",
+  children: "persona_children",
+  tenure: "persona_tenure",
+};
+
+const persistPersona = (netWorth, adults, children, tenure) => {
+  const params = new URLSearchParams(window.location.search);
+  params.set(PERSONA_PARAMS.netWorth, String(netWorth));
+  params.set(PERSONA_PARAMS.adults, String(adults));
+  params.set(PERSONA_PARAMS.children, String(children));
+  params.set(PERSONA_PARAMS.tenure, tenure);
+  history.replaceState(null, "", `${window.location.pathname}?${params.toString()}${window.location.hash}`);
+};
+
+const restorePersona = () => {
+  const params = new URLSearchParams(window.location.search);
+  const set = (key, id) => {
+    const value = params.get(PERSONA_PARAMS[key]);
+    if (value !== null && value !== "") byId(id).value = value;
+  };
+  set("netWorth", "persona-net-worth");
+  set("adults", "persona-adults");
+  set("children", "persona-children");
+  set("tenure", "persona-tenure");
 };
 
 const renderVerdict = (projection) => {
@@ -859,6 +1015,17 @@ byId("target-mode").addEventListener("change", syncTargetControls);
 document.querySelectorAll("[data-preset]").forEach((button) => {
   button.addEventListener("click", () => applyPreset(button.dataset.preset));
 });
+byId("persona-form").addEventListener("input", () => renderPersona(latestResult));
+byId("persona-form").addEventListener("submit", (event) => event.preventDefault());
+// Caveat links open the collapsed model-details panel so "see the limits"
+// always lands on the boundaries list rather than an unopened <details>.
+document.addEventListener("click", (event) => {
+  const link = event.target.closest?.(".caveat-link");
+  if (!link) return;
+  const details = byId("caveats")?.closest("details");
+  if (details) details.open = true;
+});
+restorePersona();
 
 // ---------------------------------------------------------------------------
 // Story mode — a guided, step-driven narrative that builds the argument one

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f2efe7" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./styles.css?v=7" />
+    <link rel="stylesheet" href="./styles.css?v=8" />
     <title>MacroScope</title>
   </head>
   <body>
@@ -69,6 +69,29 @@
           <strong id="metric-m2">—</strong>
           <small>cumulative change, year 10</small>
         </article>
+      </section>
+
+      <section class="winners-section" aria-labelledby="winners-heading">
+        <div class="section-intro">
+          <p class="kicker">Who wins, who loses</p>
+          <h2 id="winners-heading">Every group gets an explicit ten-year outcome.</h2>
+          <p>Each bar shows where a cohort ends versus the no-policy path, combining wealth tax paid, UBI received, purchasing power after inflation, and asset-price effects. Renters read on buying power; asset-holders read on real net worth. <a href="#caveats" class="caveat-link">See what the model does and doesn't capture.</a></p>
+        </div>
+        <div class="winners-grid" id="winners-grid" aria-label="Ten-year outcome by wealth group"></div>
+        <div class="persona-card">
+          <div class="persona-intro">
+            <p class="kicker">A household like mine</p>
+            <h3>Map your household onto the nearest modeled cohort.</h3>
+            <p>The model runs entirely in your browser; your inputs are saved to this page's link so you can bookmark or share the view. The card updates whenever you change a policy dial above or below.</p>
+          </div>
+          <form id="persona-form" aria-label="Describe your household">
+            <label for="persona-net-worth">Approximate net worth ($)<input id="persona-net-worth" name="personaNetWorth" type="number" min="-100000" step="1000" value="25000" /></label>
+            <label for="persona-adults">Adults<input id="persona-adults" name="personaAdults" type="number" min="1" max="10" step="1" value="2" /></label>
+            <label for="persona-children">Children<input id="persona-children" name="personaChildren" type="number" min="0" max="12" step="1" value="1" /></label>
+            <label for="persona-tenure">Home<select id="persona-tenure" name="personaTenure"><option value="renter">I rent</option><option value="owner">I own</option></select></label>
+          </form>
+          <div class="persona-result" id="persona-result" role="status">Enter a few details to see your modeled outcome.</div>
+        </div>
       </section>
 
       <section class="story-section" aria-labelledby="trajectory-heading">
@@ -330,7 +353,7 @@
           <h3>Consumption sectors</h3>
           <div class="table-scroll"><table><thead><tr><th>Sector</th><th>Cash first</th><th>Borrow first</th><th>Sell first</th></tr></thead><tbody id="sector-body"></tbody></table></div>
         </div>
-        <div class="caveats"><h3>Model boundaries</h3><ul id="caveat-list"></ul></div>
+        <div class="caveats" id="caveats"><h3>Model boundaries</h3><ul id="caveat-list"></ul></div>
       </details>
 
       <section class="sources" aria-labelledby="sources-heading">
@@ -346,6 +369,6 @@
       <nav aria-label="Developer endpoints"><a href="/health">Health</a><a href="/api/status">Engine</a><a href="/api/baseline/us">U.S. baseline</a><a href="/api/scenarios/default">Scenario JSON</a></nav>
     </footer>
     <div class="toast-container" id="toast-container" aria-live="polite" aria-atomic="true"></div>
-    <script src="./app.js?v=7" type="module"></script>
+    <script src="./app.js?v=8" type="module"></script>
   </body>
 </html>

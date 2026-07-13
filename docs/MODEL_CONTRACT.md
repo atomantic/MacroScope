@@ -101,4 +101,13 @@ The ten-year theory view deliberately separates an accounting result from behavi
 
 The view reports an owner-renter housing-position channel, not a claim that total wealth inequality must rise. Top-one-percent real wealth, bottom-half cash purchasing power, service spending, and administration remain separate outcomes. Service spending is not assigned an invented cash-equivalent welfare value.
 
+## Winners and losers by wealth group
+
+Each run also reports an explicit ten-year outcome for every calibrated cohort — bottom 50% renters and owners, the middle 40%, the top 10%, top 1%, and top 0.1% — so no group's result stays hidden inside a year-one decile average. Two reduced-form measures lead the story:
+
+- Renters (and the liquidity-constrained bottom half) read on **real purchasing power** after the modeled rent premium, reusing the owner-renter theory test's disposable-income path.
+- Asset-holding groups read on **real net worth versus the no-policy path**, computed as a channel decomposition relative to baseline net worth rather than a blanket deflation: policy-driven housing- and equity-price premia on those holdings, plus the real value inflation strips from fixed-nominal debt (which benefits leveraged owners), minus the erosion of fixed-nominal deposits, minus the group's cumulative real wealth tax.
+
+The engine's total collected tax is authoritative; it is apportioned across groups by each cohort's net worth above the effective exemption, so under a high exemption only the top groups carry a positive burden. UBI is modeled as near-universal per household. These per-group figures are transparent reduced-form summaries, not household-level forecasts, and a "household like mine" persona simply maps user-supplied net worth, size, and tenure onto the nearest of these cohorts.
+
 Wealth taxes can target net worth above a dollar exemption or a modeled top population share. Percentile targeting derives an effective exemption from the weighted synthetic population, so the cutoff is scenario-dependent. The funded budget is allocated among administration, cash transfers, and healthcare/social-service demand before household and sector outcomes are calculated.

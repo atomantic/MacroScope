@@ -5,8 +5,9 @@ import type {
   PolicyProjection,
   StrategyOutcome,
   StressCell,
+  WealthGroupOutcome,
 } from "./contracts.js";
-import { US_BASELINE } from "./usBaseline.js";
+import { US_BASELINE, type UsWealthGroupBaseline } from "./usBaseline.js";
 
 const YEARS = 10;
 const REAL_GROWTH = 0.01;
@@ -26,12 +27,20 @@ const M2_FLOOR = US_BASELINE.m2 * 0.1;
 const STRICT_HYPER_MONTHLY_RATE = 0.5;
 const STRICT_HYPER_ANNUAL_RATE = (1 + STRICT_HYPER_MONTHLY_RATE) ** 12 - 1;
 const BASELINE_RENTER_HOUSING_COST_SHARE = 0.31;
+// Reduced-form split of the bottom 50% between renters and owners. Renters skew
+// heavily to the bottom half; a half-and-half split keeps the winners/losers
+// contrast honest without inventing a within-group tenure distribution.
+const BOTTOM_HALF_RENTER_SHARE = 0.5;
+// A cohort ends "better off"/"worse off" once its leading real measure clears
+// this band around the no-policy path; inside it the result reads as mixed.
+const GROUP_OUTCOME_BAND = 0.005;
 
 type Strategies = Readonly<Record<PaymentStrategy, StrategyOutcome>>;
 
 export const buildPolicyProjection = (
   request: ComparisonRequestV1,
   strategies: Strategies,
+  effectiveExemption: number = request.wealthTax.exemption,
 ): PolicyProjection => {
   const weights = strategyWeights(request);
   const blended = <T>(select: (outcome: StrategyOutcome) => T): number => {
@@ -72,6 +81,38 @@ export const buildPolicyProjection = (
     (decile) => decile.averageUbiReceived,
   );
   const requestedUbi = blended((outcome) => outcome.fiscal.requestedUbi);
+
+  // Allocate each year's collected tax across the calibrated U.S. wealth groups
+  // by their net worth above the effective exemption. The engine's total tax is
+  // authoritative; this only apportions it so every cohort gets an explicit
+  // burden. Under a high exemption only the top groups carry a positive share.
+  const groupTaxShare = new Map<string, number>();
+  const groupTaxableBase = US_BASELINE.wealthGroups.map((group) => ({
+    id: group.id,
+    taxable: Math.max(0, group.netWorth - effectiveExemption * group.households),
+  }));
+  const totalTaxableBase = groupTaxableBase.reduce((sum, group) => sum + group.taxable, 0);
+  if (totalTaxableBase > 0) {
+    for (const group of groupTaxableBase) {
+      groupTaxShare.set(group.id, group.taxable / totalTaxableBase);
+    }
+  } else {
+    // A very high exemption (e.g. the "10% over $1B" preset) sits above every
+    // cohort's AVERAGE wealth, so no group-level base is positive — yet the
+    // synthetic top tail still pays. Attribute the whole burden to the
+    // wealthiest cohort rather than reporting $0 tax for everyone.
+    const wealthiest = [...US_BASELINE.wealthGroups].sort(
+      (left, right) =>
+        right.netWorth / Math.max(1, right.households) -
+        left.netWorth / Math.max(1, left.households),
+    )[0];
+    for (const group of groupTaxableBase) {
+      groupTaxShare.set(group.id, group.id === wealthiest?.id ? 1 : 0);
+    }
+  }
+  const cumulativeGroupTax = new Map<string, number>(
+    US_BASELINE.wealthGroups.map((group) => [group.id, 0]),
+  );
 
   // Reduced-form wealth-tax base dynamics: the taxable base compounds with the
   // selected nominal asset return plus partial pass-through of policy-driven
@@ -159,6 +200,9 @@ export const buildPolicyProjection = (
     // recognition lag), so year 1 always matches the strategy outcomes.
     const indexation = request.ubi.benefitIndexation === "cpi" ? priceLevel : 1;
     const taxCollectedYear = taxCollected * taxBaseMultiplier;
+    for (const [id, share] of groupTaxShare) {
+      cumulativeGroupTax.set(id, (cumulativeGroupTax.get(id) ?? 0) + taxCollectedYear * share);
+    }
     const newPrivateLoansYear = newPrivateLoans * taxBaseMultiplier;
     const requestedUbiYear = requestedUbi * indexation;
     const programBudgetYear =
@@ -335,6 +379,21 @@ export const buildPolicyProjection = (
   );
   const theoryTest = buildTheoryTest(request, theoryYears, finalYear.m2Index / 100 - 1);
 
+  const groupOutcomes = buildGroupOutcomes({
+    request,
+    ubiReceived,
+    taxCollected,
+    groupTaxShare,
+    cumulativeGroupTax,
+    policyPriceLevel: priceLevel,
+    baselinePriceLevel,
+    housingPremium: housingPriceIndex,
+    equityPremium: equityPriceIndex,
+    rentPremiumChange: rentPremiumIndex - 1,
+    bottom50PurchasingPowerChange,
+    renterDisposableChange: theoryTest.summary.bottomRenterDisposableIncomeChange,
+  });
+
   return {
     verdict,
     behaviorMix: {
@@ -365,6 +424,7 @@ export const buildPolicyProjection = (
         null,
     },
     years,
+    groupOutcomes,
     stressTest,
     theoryTest,
     interpretation: [
@@ -451,6 +511,163 @@ const buildTheoryTest = (
     },
     years,
   };
+};
+
+interface GroupOutcomeInputs {
+  readonly request: ComparisonRequestV1;
+  readonly ubiReceived: number;
+  readonly taxCollected: number;
+  readonly groupTaxShare: ReadonlyMap<string, number>;
+  readonly cumulativeGroupTax: ReadonlyMap<string, number>;
+  readonly policyPriceLevel: number;
+  readonly baselinePriceLevel: number;
+  readonly housingPremium: number;
+  readonly equityPremium: number;
+  readonly rentPremiumChange: number;
+  readonly bottom50PurchasingPowerChange: number;
+  readonly renterDisposableChange: number;
+}
+
+// Year-ten real net worth versus the no-policy path, as a channel decomposition
+// relative to the group's baseline net worth. This keeps the measure consistent
+// with the engine's existing homeowner-wealth and top-1% measures and, unlike a
+// blanket deflation of net worth, correctly credits leveraged owners for the
+// real value inflation strips from their fixed-nominal debt:
+//   + policy-driven housing- and equity-price premia on those holdings
+//   + inflationary erosion of fixed-nominal debt (helps leveraged owners)
+//   - inflationary erosion of fixed-nominal deposits (hurts cash holders)
+//   - the group's cumulative real wealth tax
+const groupRealWealthChange = (
+  group: UsWealthGroupBaseline,
+  cumulativeTax: number,
+  inputs: GroupOutcomeInputs,
+): number => {
+  const netWorth = Math.max(1, group.netWorth);
+  const excessInflation = inputs.policyPriceLevel / inputs.baselinePriceLevel - 1;
+  const housingGain = (inputs.housingPremium - 1) * (group.realEstate / netWorth);
+  const equityGain = (inputs.equityPremium - 1) * (group.publicEquity / netWorth);
+  const debtErosion = excessInflation * (group.liabilities / netWorth);
+  const cashErosion = -excessInflation * (group.deposits / netWorth);
+  // cumulativeTax is a flow scaled to the represented population; the group's
+  // net worth is a national baseline. Normalize the tax to national scale so the
+  // burden ratio is correct for any representedHouseholds.
+  const nationalTax = cumulativeTax / populationScale(inputs.request);
+  const realTaxBurden = -(nationalTax / inputs.policyPriceLevel) / netWorth;
+  return housingGain + equityGain + debtErosion + cashErosion + realTaxBurden;
+};
+
+// Ratio of the requested population to the national baseline. The engine's
+// collected-tax and delivered-UBI flows scale with representedHouseholds, while
+// the wealth-group baselines are national — so per-household and per-net-worth
+// figures must divide the flows back down by this factor.
+const populationScale = (request: ComparisonRequestV1): number =>
+  Math.max(1e-9, request.representedHouseholds / US_BASELINE.households);
+
+const rateGroupOutcome = (change: number): WealthGroupOutcome["rating"] =>
+  change > GROUP_OUTCOME_BAND
+    ? "better-off"
+    : change < -GROUP_OUTCOME_BAND
+      ? "worse-off"
+      : "mixed";
+
+const groupOf = (id: UsWealthGroupBaseline["id"]): UsWealthGroupBaseline => {
+  const group = US_BASELINE.wealthGroups.find((candidate) => candidate.id === id);
+  if (!group) throw new Error(`Missing wealth-group baseline for ${id}.`);
+  return group;
+};
+
+const buildGroupOutcomes = (inputs: GroupOutcomeInputs): WealthGroupOutcome[] => {
+  const scale = populationScale(inputs.request);
+  const representedHouseholds = inputs.request.representedHouseholds;
+  // Per-household averages so cohorts are comparable and the persona card can
+  // read them directly. UBI is modeled as near-universal per household; both the
+  // delivered UBI and the collected tax are flows over the represented
+  // population, so divide by represented (not national) household counts.
+  const perHouseholdUbi = inputs.ubiReceived / Math.max(1, representedHouseholds);
+  const perHouseholdTaxYearOne = (group: UsWealthGroupBaseline): number =>
+    (inputs.taxCollected * (inputs.groupTaxShare.get(group.id) ?? 0)) /
+    Math.max(1, group.households * scale);
+
+  const bottom50 = groupOf("bottom-50");
+  const renterHouseholds = bottom50.households * BOTTOM_HALF_RENTER_SHARE * scale;
+  const ownerHouseholds = bottom50.households * scale - renterHouseholds;
+  // The bottom half's taxable base (real estate, equity) sits with its owners;
+  // renters hold negligible taxable wealth. So when a low exemption reaches into
+  // the bottom half, attribute the whole group's tax to the owner cohort and
+  // leave renters at ~zero, rather than splitting the average across both.
+  const bottom50CumulativeTax = inputs.cumulativeGroupTax.get(bottom50.id) ?? 0;
+  const bottom50TaxYearOne = inputs.taxCollected * (inputs.groupTaxShare.get(bottom50.id) ?? 0);
+  const purchasingPowerLabel = (change: number): string =>
+    change >= 0 ? `+${(change * 100).toFixed(1)}% buying power` : `${(change * 100).toFixed(1)}% buying power`;
+  const wealthLabel = (change: number): string =>
+    change >= 0 ? `+${(change * 100).toFixed(1)}% real wealth` : `${(change * 100).toFixed(1)}% real wealth`;
+
+  const outcomes: WealthGroupOutcome[] = [];
+
+  // Bottom 50% renters: no meaningful net worth; their story is real disposable
+  // buying power after the modeled rent premium.
+  outcomes.push({
+    id: "bottom-50-renter",
+    label: "Bottom 50% renter",
+    households: renterHouseholds,
+    primaryMetric: "purchasing-power",
+    purchasingPowerChange: inputs.renterDisposableChange,
+    realWealthChange: null,
+    annualTaxPaid: 0,
+    annualUbiReceived: perHouseholdUbi,
+    rentPremiumChange: inputs.rentPremiumChange,
+    rating: rateGroupOutcome(inputs.renterDisposableChange),
+    headline: purchasingPowerLabel(inputs.renterDisposableChange),
+  });
+
+  // Bottom 50% owners: same transfers as renters, but leveraged home equity and
+  // inflation-eroded mortgages make real net worth the leading measure. They also
+  // carry the group's whole wealth-tax burden when a low exemption reaches it.
+  const ownerWealthChange = groupRealWealthChange(bottom50, bottom50CumulativeTax, inputs);
+  outcomes.push({
+    id: "bottom-50-owner",
+    label: "Bottom 50% owner",
+    households: ownerHouseholds,
+    primaryMetric: "real-wealth",
+    purchasingPowerChange: inputs.bottom50PurchasingPowerChange,
+    realWealthChange: ownerWealthChange,
+    annualTaxPaid: bottom50TaxYearOne / Math.max(1, ownerHouseholds),
+    annualUbiReceived: perHouseholdUbi,
+    rentPremiumChange: inputs.rentPremiumChange,
+    rating: rateGroupOutcome(ownerWealthChange),
+    headline: wealthLabel(ownerWealthChange),
+  });
+
+  const assetGroups: readonly {
+    readonly id: WealthGroupOutcome["id"];
+    readonly source: UsWealthGroupBaseline["id"];
+    readonly label: string;
+  }[] = [
+    { id: "middle-40", source: "next-40", label: "Middle 40%" },
+    { id: "top-10", source: "next-9", label: "Top 10%" },
+    { id: "top-1", source: "remaining-top-1", label: "Top 1%" },
+    { id: "top-0.1", source: "top-0.1", label: "Top 0.1%" },
+  ];
+  for (const spec of assetGroups) {
+    const group = groupOf(spec.source);
+    const cumulativeTax = inputs.cumulativeGroupTax.get(group.id) ?? 0;
+    const wealthChange = groupRealWealthChange(group, cumulativeTax, inputs);
+    outcomes.push({
+      id: spec.id,
+      label: spec.label,
+      households: group.households * scale,
+      primaryMetric: "real-wealth",
+      purchasingPowerChange: null,
+      realWealthChange: wealthChange,
+      annualTaxPaid: perHouseholdTaxYearOne(group),
+      annualUbiReceived: perHouseholdUbi,
+      rentPremiumChange: inputs.rentPremiumChange,
+      rating: rateGroupOutcome(wealthChange),
+      headline: wealthLabel(wealthChange),
+    });
+  }
+
+  return outcomes;
 };
 
 const strategyWeights = (request: ComparisonRequestV1) => ({

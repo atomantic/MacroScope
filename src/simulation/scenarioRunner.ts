@@ -104,7 +104,7 @@ export const runComparison = (
     },
     population,
     strategies,
-    projection: buildPolicyProjection(request, strategies),
+    projection: buildPolicyProjection(request, strategies, effectiveExemption),
     caveats: [
       "Results are conditional scenarios, not forecasts.",
       "Wealth-group totals are calibrated to the Federal Reserve DFA for 2026:Q1; within-group joint distributions remain stylized.",

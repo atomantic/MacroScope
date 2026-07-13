@@ -278,8 +278,13 @@ const renderFlow = (projection) => {
   const { behaviorMix, annualFlows, summary } = projection;
   const finalYear = annualFlows.finalYear;
   byId("flow-tax").textContent = compactMoney.format(annualFlows.taxCollected);
+  const baseTrend = finalYear && finalYear.taxCollected < annualFlows.taxCollected
+    ? "erodes"
+    : finalYear && finalYear.taxCollected > annualFlows.taxCollected
+      ? "grows"
+      : "holds steady";
   byId("flow-tax-detail").textContent = finalYear
-    ? `${compactMoney.format(finalYear.taxCollected)} by year ten as the taxed base ${finalYear.taxCollected < annualFlows.taxCollected ? "erodes" : "grows"}`
+    ? `${compactMoney.format(finalYear.taxCollected)} by year ten as the taxed base ${baseTrend}`
     : "on net worth above the exemption";
   byId("flow-mix").textContent = `${percent.format(behaviorMix.borrowShare)} borrow · ${percent.format(behaviorMix.sellShare)} sell`;
   byId("flow-loans").textContent = `${compactMoney.format(annualFlows.newPrivateLoans)} in new bank loans in year one${finalYear ? ` · ${compactMoney.format(finalYear.newPrivateLoans)} by year ten` : ""}`;
@@ -287,7 +292,10 @@ const renderFlow = (projection) => {
   byId("flow-balance").textContent = `${compactMoney.format(annualFlows.administrativeCost)} administration${annualFlows.governmentDeficit > 1 ? ` · ${compactMoney.format(annualFlows.governmentDeficit)} deficit` : " · no modeled deficit"}`;
   byId("flow-result").textContent = `${signedPercent(summary.bottom50PurchasingPowerChange)} buying power`;
   byId("flow-debt").textContent = `${compactMoney.format(summary.privateTaxDebt)} in private tax debt`;
-  byId("money-answer").innerHTML = `<strong>What this means:</strong><span>The tax-and-spending cycle itself reshuffles deposits. The selected borrowing behavior adds ${compactMoney.format(annualFlows.m2Injection)} to M2 in year one; selling assets does not create deposits economy-wide.</span>`;
+  const m2Sentence = annualFlows.m2Injection >= 0
+    ? `The selected borrowing behavior adds ${compactMoney.format(annualFlows.m2Injection)} to M2 in year one`
+    : `Unspent tax revenue parked at Treasury drains ${compactMoney.format(Math.abs(annualFlows.m2Injection))} from M2 in year one, outweighing loan-created deposits`;
+  byId("money-answer").innerHTML = `<strong>What this means:</strong><span>The tax-and-spending cycle itself reshuffles deposits. ${m2Sentence}; selling assets does not create deposits economy-wide.</span>`;
 };
 
 const renderTheory = (theory, projection) => {

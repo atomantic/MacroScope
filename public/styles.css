@@ -459,6 +459,75 @@ body[data-view="story"] #dashboard-view { display: none; }
   .story-nav button { padding: 11px 14px; font-size: 0.85rem; }
 }
 
+/* --- Live controls: sliders paired with the numeric field ----------------- */
+.visually-hidden {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0; border: 0;
+  clip: rect(0 0 0 0); clip-path: inset(50%);
+  overflow: hidden; white-space: nowrap;
+}
+.field-slider {
+  appearance: none; -webkit-appearance: none;
+  width: 100%; height: 5px; margin: 2px 0 0; padding: 0;
+  background: var(--line); border: 0; border-radius: 99px;
+  outline: none; cursor: pointer;
+}
+.field-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 17px; height: 17px; border-radius: 50%;
+  background: var(--green); border: 2px solid var(--paper); box-shadow: 0 0 0 1px var(--green); cursor: pointer;
+}
+.field-slider::-moz-range-thumb {
+  width: 15px; height: 15px; border-radius: 50%;
+  background: var(--green); border: 2px solid var(--paper); box-shadow: 0 0 0 1px var(--green); cursor: pointer;
+}
+.field-slider:focus-visible { box-shadow: 0 0 0 3px rgba(23, 105, 77, 0.2); }
+label.is-disabled .field-slider { pointer-events: none; opacity: 0.5; }
+input:disabled + .field-slider,
+.field-slider:disabled { pointer-events: none; opacity: 0.4; cursor: not-allowed; }
+
+.recalc-indicator {
+  display: inline-flex; align-items: center; gap: 7px;
+  color: var(--green); font-size: 0.72rem; font-weight: 750; letter-spacing: 0.02em;
+}
+.recalc-indicator::before {
+  content: ""; width: 11px; height: 11px; border-radius: 50%;
+  border: 2px solid var(--green-soft); border-top-color: var(--green);
+  animation: recalc-spin 0.7s linear infinite;
+}
+@keyframes recalc-spin { to { transform: rotate(360deg); } }
+
+#pin-button[aria-pressed="true"] { border-color: var(--green); color: var(--paper); background: var(--green); }
+
+/* --- Chart interactivity: crosshair, tooltip, ghosted pinned scenario ----- */
+.chart { position: relative; }
+.crosshair { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 4; pointer-events: none; }
+.chart-hit { fill: transparent; cursor: crosshair; }
+.chart svg:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.tooltip-box { fill: var(--ink); opacity: 0.96; }
+.tooltip-title { fill: var(--paper); font-family: var(--sans); font-size: 11px; font-weight: 800; }
+.tooltip-row { fill: var(--paper); font-family: var(--sans); font-size: 11px; }
+.tooltip-swatch { rx: 2; }
+.hover-point { stroke: var(--paper); stroke-width: 2; }
+.data-line.ghost { stroke-width: 2; stroke-dasharray: 5 5; opacity: 0.42; }
+.data-point.ghost { opacity: 0.4; }
+text.series-label.ghost, text.series-value.ghost { opacity: 0.55; }
+@media (prefers-reduced-motion: reduce) {
+  .recalc-indicator::before { animation: none; }
+}
+
+/* --- A/B comparison table ------------------------------------------------- */
+.pin-comparison { margin-top: 30px; border-top: 1px solid var(--line); padding-top: 24px; }
+.pin-comparison-head { margin-bottom: 14px; }
+.pin-comparison-head h3 { margin: 4px 0 6px; font-family: var(--display); font-size: 1.3rem; }
+.pin-comparison-head p { margin: 0; color: var(--muted); font-size: 0.82rem; }
+.pin-comparison-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.pin-comparison-table th, .pin-comparison-table td { padding: 9px 12px; text-align: right; border-bottom: 1px solid var(--line); }
+.pin-comparison-table th:first-child, .pin-comparison-table td:first-child { text-align: left; }
+.pin-comparison-table thead th { color: var(--muted); font-size: 0.68rem; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
+.pin-comparison-table td.delta-up { color: var(--green); font-weight: 700; }
+.pin-comparison-table td.delta-down { color: var(--red); font-weight: 700; }
+
 @media (max-width: 1000px) {
   .section-intro { grid-template-columns: 0.5fr 1.5fr; }
   .section-intro > p:last-child { grid-column: 2; }

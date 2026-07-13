@@ -1,11 +1,12 @@
 import {
   FIELD_SPECS,
   SCENARIO_FIELD_SPECS,
+  DEFAULT_STRATEGY,
   encodeScenarioParams,
   decodeScenarioParams,
   // Versioned so a bumped app.js always pulls the matching FIELD_SPECS rather
   // than a browser-cached copy that predates newly added fields.
-} from "./scenario-params.js?v=13";
+} from "./scenario-params.js?v=14";
 
 const STRATEGIES = ["cash-first", "borrow-first", "sell-first"];
 const LABELS = {
@@ -25,6 +26,19 @@ let defaultFieldValues = {};
 // Non-null while the form still matches a named preset exactly, so the URL can
 // stay the shareable `?preset=name` form. Cleared on any manual edit.
 let activePreset = null;
+// A/B "Scenario A": a frozen run whose lines ghost onto every chart and whose
+// outcomes anchor the comparison table. pinnedResult holds the computed run;
+// the *FieldValues/*Brackets/*Strategy re-serialize a runtime pin; pinnedFromUrl
+// carries a URL-restored pin verbatim so it round-trips without re-resolving a
+// preset back into explicit fields.
+let pinnedResult = null;
+let pinnedFieldValues = null;
+let pinnedBrackets = null;
+let pinnedStrategy = null;
+let pinnedFromUrl = null;
+// Stashed by hydrateFormFromUrl so restorePinnedFromUrl can compute the pinned
+// run once the engine is ready.
+let urlPinString = null;
 const isStaticSnapshot = document.documentElement.dataset.mode === "static";
 
 const money = new Intl.NumberFormat(undefined, {
@@ -70,8 +84,13 @@ const initialize = async () => {
       renderSources(baseline.sources);
       populateForm(defaults);
       captureDefaultFieldValues();
+      initSliders();
+      syncAllSliders();
       const hasScenarioParams = hydrateFormFromUrl();
+      // Pre-warm the engine worker so the first slider-driven run doesn't pay
+      // worker startup; comparisonChannel is the shared scenario-run channel.
       if (typeof Worker !== "undefined") comparisonChannel.warm();
+      await restorePinnedFromUrl();
       if (hasScenarioParams) {
         // A shared URL carries its own assumptions — recompute rather than
         // showing the prebuilt default snapshot.
@@ -105,7 +124,10 @@ const initialize = async () => {
     renderSources(baseline.sources);
     populateForm(defaults);
     captureDefaultFieldValues();
+    initSliders();
+    syncAllSliders();
     hydrateFormFromUrl();
+    await restorePinnedFromUrl();
     await runScenario();
   } catch (error) {
     setFormStatus(error instanceof Error ? error.message : "Unable to initialize.", true);
@@ -393,7 +415,29 @@ const scenarioQuery = () =>
     preset: activePreset,
     strategy: currentStrategy(),
     brackets: encodeBracketsParam(),
+    pin: pinnedQuery(),
   });
+
+// The pinned Scenario A serializes as a nested query string. A URL-restored pin
+// round-trips verbatim (so a preset-based pin need not be re-resolved into
+// explicit fields); a runtime pin re-encodes from its captured field snapshot.
+// A pinned scenario that happens to equal the defaults (default strategy, no
+// brackets) encodes to "" — which the outer `if (pin)` would drop, silently
+// losing Scenario A from a shared link. Emit an inert marker so the URL still
+// records that a pin is present; it decodes to zero field overrides (== defaults).
+const PIN_DEFAULT_MARKER = "d=1";
+const pinnedQuery = () => {
+  if (pinnedFromUrl) return pinnedFromUrl;
+  if (!pinnedFieldValues) return null;
+  return (
+    encodeScenarioParams({
+      values: pinnedFieldValues,
+      defaults: defaultFieldValues,
+      strategy: pinnedStrategy ?? DEFAULT_STRATEGY,
+      brackets: pinnedBrackets,
+    }) || PIN_DEFAULT_MARKER
+  );
+};
 
 const scenarioQueryWithView = () => {
   const params = new URLSearchParams(scenarioQuery());
@@ -424,6 +468,9 @@ const updateScenarioUrl = () => {
 // the URL carried scenario state, so callers know to recompute.
 const hydrateFormFromUrl = () => {
   const decoded = decodeScenarioParams(location.search);
+  // Stash any pinned Scenario A so restorePinnedFromUrl can compute it once the
+  // engine is ready; it does not itself alter the live form fields.
+  urlPinString = decoded.pin || null;
   const appliedPreset = Boolean(decoded.preset && PRESETS[decoded.preset]);
   if (appliedPreset) {
     setPresetFields(decoded.preset);
@@ -444,6 +491,7 @@ const hydrateFormFromUrl = () => {
   const appliedStrategy = Boolean(decoded.strategy && STRATEGIES.includes(decoded.strategy));
   if (appliedStrategy) byId("distribution-strategy").value = decoded.strategy;
   syncTargetControls();
+  syncAllSliders();
   // An unknown preset name or strategy applies nothing, so it must not force a recompute.
   return appliedPreset || fieldIds.length > 0 || appliedBrackets || appliedStrategy;
 };
@@ -642,21 +690,26 @@ const flushPendingSensitivity = () => {
   void refreshSensitivity(request);
 };
 
-const runScenario = async () => {
+// `auto` marks a slider-driven rerun: keep the button enabled (so keyboard users
+// never lose it mid-drag) and let the coordinator's subtle "recalculating…"
+// indicator carry the feedback instead of the button's busy label.
+const runScenario = async ({ auto = false } = {}) => {
   const request = formRequest();
   if (request.wealthTax.brackets) {
     const bracketError = validateBrackets(request.wealthTax.brackets);
     if (bracketError) {
       setBracketError(bracketError);
       setFormStatus(bracketError, true);
-      return;
+      return false;
     }
   }
   setBracketError(null);
   const button = byId("run-button");
-  button.disabled = true;
-  button.textContent = "Running the model…";
-  setFormStatus("Running the U.S. distribution and ten-year projection…");
+  if (!auto) {
+    button.disabled = true;
+    button.textContent = "Running the model…";
+    setFormStatus("Running the U.S. distribution and ten-year projection…");
+  }
   try {
     const payload = isStaticSnapshot
       ? await runLocalScenario(request)
@@ -673,9 +726,286 @@ const runScenario = async () => {
     setFormStatus(error instanceof Error ? error.message : "Scenario failed.", true);
     return false;
   } finally {
-    button.disabled = false;
-    button.textContent = "Recalculate verdict";
+    if (!auto) {
+      button.disabled = false;
+      button.textContent = "Recalculate verdict";
+    }
   }
+};
+
+// --- Debounced, coalescing auto-run --------------------------------------
+// A single in-flight run at a time; the newest field values are picked up when
+// it settles, so rapid slider drags can never pile up requests (last-wins).
+const dashState = { running: false, pending: false, promise: null };
+
+const setRecalculating = (on) => {
+  const indicator = byId("recalc-indicator");
+  if (indicator) indicator.hidden = !on;
+  byId("scenario-form")?.classList.toggle("is-recalculating", on);
+};
+
+const dashboardRerun = () => {
+  if (dashState.running) {
+    dashState.pending = true;
+    return dashState.promise;
+  }
+  dashState.promise = (async () => {
+    dashState.running = true;
+    setRecalculating(true);
+    let ok = true;
+    do {
+      dashState.pending = false;
+      ok = await runScenario({ auto: true });
+    } while (dashState.pending);
+    dashState.running = false;
+    setRecalculating(false);
+    return ok;
+  })();
+  return dashState.promise;
+};
+
+// 300ms per the acceptance criteria: fast enough to feel live, slow enough to
+// coalesce a drag into one run.
+let autoRunTimer = null;
+const scheduleAutoRun = () => {
+  clearTimeout(autoRunTimer);
+  autoRunTimer = setTimeout(() => void dashboardRerun(), 300);
+};
+
+// Compute one scenario without disturbing the live form: snapshot the fields and
+// bracket schedule, apply the requested (preset + field + bracket) state, run,
+// then restore. Used to reconstruct a URL-restored pinned Scenario A at load.
+const computeScenario = async ({ preset, fields, brackets, strategy: _strategy } = {}) => {
+  const savedFields = readFieldValues();
+  const savedBrackets = encodeBracketsParam();
+  try {
+    // Reset to the fetched defaults first: the pin encodes only its non-default
+    // overrides, so reconstructing it on top of the live form would let the live
+    // scenario's edits leak into Scenario A (every field the pin didn't set).
+    applyFieldValues(defaultFieldValues);
+    renderBrackets([]);
+    if (preset && PRESETS[preset]) setPresetFields(preset);
+    if (fields) {
+      for (const id of Object.keys(fields)) {
+        if (byId(id)) byId(id).value = fields[id];
+      }
+    }
+    const bracketRows = bracketsFromParam(brackets);
+    if (bracketRows.length > 0) renderBrackets(bracketRows);
+    syncTargetControls();
+    const request = formRequest();
+    if (request.wealthTax.brackets) {
+      if (validateBrackets(request.wealthTax.brackets)) return null;
+    }
+    return isStaticSnapshot
+      ? await runLocalScenario(request)
+      : await runServerScenario(request);
+  } catch {
+    return null;
+  } finally {
+    applyFieldValues(savedFields);
+    renderBrackets(bracketsFromParam(savedBrackets));
+    syncTargetControls();
+    syncAllSliders();
+  }
+};
+
+const restorePinnedFromUrl = async () => {
+  if (!urlPinString) return;
+  const decoded = decodeScenarioParams(`?${urlPinString}`);
+  const result = await computeScenario({
+    preset: decoded.preset,
+    fields: decoded.fields,
+    brackets: decoded.brackets,
+    strategy: decoded.strategy,
+  });
+  if (!result) {
+    urlPinString = null;
+    return;
+  }
+  pinnedResult = result;
+  pinnedFromUrl = urlPinString;
+  pinnedStrategy = decoded.strategy ?? DEFAULT_STRATEGY;
+  pinnedBrackets = decoded.brackets ?? null;
+  updatePinUi();
+};
+
+// --- Range sliders paired with the numeric fields -------------------------
+// Each bounded number input gains a redundant range slider. The number input
+// stays the labeled, keyboard-accessible control; the slider is an aria-hidden
+// pointer affordance that mirrors it two-way. Fields whose HTML max is
+// impractically large (or absent) opt in with data-slider-min/max.
+const fieldSliders = new Map();
+
+// Map a field's string value onto its slider, guarding against `Number(x) || min`
+// eating a legitimate 0 (e.g. asset-return has min -50, so 0 || -50 would park
+// the slider hard-left at -50%). Only genuinely non-numeric input falls back.
+const clampFieldValue = (raw, min, max) => {
+  const value = Number(raw);
+  return clamp(Number.isFinite(value) ? value : min, min, max);
+};
+
+const attachSlider = (input) => {
+  if (fieldSliders.has(input.id)) return;
+  const min = Number(input.dataset.sliderMin ?? input.getAttribute("min") ?? 0);
+  const max = Number(input.dataset.sliderMax ?? input.getAttribute("max"));
+  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min) return;
+  const step = input.dataset.sliderStep ?? input.getAttribute("step") ?? "any";
+  const range = document.createElement("input");
+  range.type = "range";
+  range.className = "field-slider";
+  range.min = String(min);
+  range.max = String(max);
+  range.step = String(step);
+  range.value = String(clampFieldValue(input.value, min, max));
+  range.tabIndex = -1;
+  range.setAttribute("aria-hidden", "true");
+  range.dataset.for = input.id;
+  input.insertAdjacentElement("afterend", range);
+  fieldSliders.set(input.id, range);
+  // Slider → number, plus the joint borrow/sell clamp. The bubbling form
+  // listener drives activePreset reset + debounced auto-run.
+  range.addEventListener("input", () => {
+    input.value = range.value;
+    applyJointConstraint(input);
+  });
+};
+
+const initSliders = () => {
+  const form = byId("scenario-form");
+  if (!form) return;
+  const inputs = [...form.querySelectorAll('input[type="number"]')].filter(
+    (input) =>
+      (input.getAttribute("min") !== null && input.getAttribute("max") !== null) ||
+      input.dataset.sliderMax !== undefined,
+  );
+  inputs.forEach(attachSlider);
+};
+
+const syncSlider = (id) => {
+  const range = fieldSliders.get(id);
+  const input = byId(id);
+  if (!range || !input) return;
+  const min = Number(range.min);
+  const max = Number(range.max);
+  // When the field holds a value the slider can't represent (e.g. the Billionaire
+  // preset's $1B exemption on a slider capped at $100M), disable the slider rather
+  // than parking it at an endpoint — a stray drag would otherwise yank the field
+  // from $1B down to $100M. It re-enables once the value returns to range.
+  const raw = Number(input.value);
+  range.disabled = Number.isFinite(raw) && (raw < min || raw > max);
+  range.value = String(clampFieldValue(input.value, min, max));
+};
+
+const syncAllSliders = () => {
+  for (const id of fieldSliders.keys()) syncSlider(id);
+};
+
+const applyFieldValues = (values) => {
+  for (const id of Object.keys(values)) {
+    if (byId(id)) byId(id).value = values[id];
+  }
+  syncAllSliders();
+};
+
+// The server already rejects borrow + sell > 100; mirror that client-side so the
+// paired sliders can never be dragged into an invalid combined split — the field
+// the user is not touching gives way.
+const applyJointConstraint = (target) => {
+  if (!target || (target.id !== "borrow-share" && target.id !== "sell-share")) return;
+  const borrow = Number(byId("borrow-share").value) || 0;
+  const sell = Number(byId("sell-share").value) || 0;
+  if (borrow + sell <= 100) return;
+  const otherId = target.id === "borrow-share" ? "sell-share" : "borrow-share";
+  const keep = target.id === "borrow-share" ? borrow : sell;
+  byId(otherId).value = String(Math.max(0, 100 - keep));
+  syncSlider(otherId);
+};
+
+// --- Pin / A-B compare ----------------------------------------------------
+const updatePinUi = () => {
+  const pinned = Boolean(pinnedResult);
+  const pinButton = byId("pin-button");
+  const clearButton = byId("clear-pin-button");
+  if (pinButton) {
+    pinButton.setAttribute("aria-pressed", String(pinned));
+    pinButton.textContent = pinned ? "Update pin (A)" : "Pin this scenario (A)";
+  }
+  if (clearButton) clearButton.hidden = !pinned;
+};
+
+const pinCurrentScenario = async () => {
+  // Flush any debounced/in-flight run first so latestResult reflects exactly the
+  // fields we're about to capture — otherwise a pin mid-debounce would freeze a
+  // stale result next to freshly-edited fields, and the URL would serialize a
+  // Scenario A that differs from the one shown.
+  clearTimeout(autoRunTimer);
+  const ok = await dashboardRerun();
+  if (!ok || !latestResult) {
+    showToast("Couldn't pin — resolve the current scenario first.", true);
+    return;
+  }
+  pinnedResult = latestResult;
+  pinnedFieldValues = readFieldValues();
+  pinnedBrackets = encodeBracketsParam();
+  pinnedStrategy = currentStrategy();
+  pinnedFromUrl = null;
+  updatePinUi();
+  render(latestResult);
+  updateScenarioUrl();
+  showToast("Scenario A pinned — ghosted lines now trace it on every chart.");
+};
+
+const clearPin = () => {
+  pinnedResult = null;
+  pinnedFieldValues = null;
+  pinnedBrackets = null;
+  pinnedStrategy = null;
+  pinnedFromUrl = null;
+  updatePinUi();
+  if (latestResult) render(latestResult);
+  updateScenarioUrl();
+  showToast("Scenario A cleared.");
+};
+
+const PIN_METRICS = [
+  { label: "Bottom 50% buying power", get: (r) => r.projection.summary.bottom50PurchasingPowerChange, kind: "pct" },
+  { label: "Peak annual inflation", get: (r) => r.projection.summary.peakAnnualInflation, kind: "rate" },
+  { label: "M2 money stock", get: (r) => r.projection.summary.cumulativeM2Change, kind: "pct" },
+  // housingPriceChange lives on the theory-test summary, not the top-level one.
+  { label: "Housing price", get: (r) => r.projection.theoryTest.summary.housingPriceChange, kind: "pct" },
+  { label: "Wealth Gini (after)", get: (r) => r.strategies["cash-first"].distribution.wealthGiniAfter, kind: "gini" },
+];
+
+const fmtMetric = (kind, value) =>
+  kind === "gini" ? value.toFixed(3) : kind === "rate" ? formatRate(value) : signedPercent(value);
+const fmtDelta = (kind, delta) =>
+  kind === "gini" ? `${delta > 0 ? "+" : ""}${delta.toFixed(3)}` : signedPoints(delta);
+
+const renderPinComparison = () => {
+  const wrap = byId("pin-comparison");
+  if (!wrap) return;
+  if (!pinnedResult || !latestResult) {
+    wrap.hidden = true;
+    return;
+  }
+  wrap.hidden = false;
+  byId("pin-comparison-body").replaceChildren(
+    ...PIN_METRICS.map((metric) => {
+      const liveValue = metric.get(latestResult);
+      const pinnedValue = metric.get(pinnedResult);
+      const delta = liveValue - pinnedValue;
+      const row = document.createElement("tr");
+      row.append(element("td", metric.label));
+      row.append(element("td", fmtMetric(metric.kind, pinnedValue)));
+      row.append(element("td", fmtMetric(metric.kind, liveValue)));
+      const deltaCell = element("td", fmtDelta(metric.kind, delta));
+      if (delta > 1e-9) deltaCell.classList.add("delta-up");
+      else if (delta < -1e-9) deltaCell.classList.add("delta-down");
+      row.append(deltaCell);
+      return row;
+    }),
+  );
 };
 
 const render = (result) => {
@@ -688,6 +1018,7 @@ const render = (result) => {
   renderReasons(result.projection);
   renderDetails(result);
   renderPersona(result);
+  renderPinComparison();
 };
 
 const RATING_LABEL = {
@@ -887,26 +1218,247 @@ const moneyChartOptions = (projection) => {
 };
 
 const renderCharts = (projection) => {
-  renderLineChart("power-chart", powerChartOptions(projection));
-  renderLineChart("money-chart", moneyChartOptions(projection));
+  renderLineChart("power-chart", {
+    ...powerChartOptions(projection),
+    ghost: pinnedResult ? powerChartOptions(pinnedResult.projection).series : null,
+    syncGroup: "trajectory",
+  });
+  renderLineChart("money-chart", {
+    ...moneyChartOptions(projection),
+    ghost: pinnedResult ? moneyChartOptions(pinnedResult.projection).series : null,
+    syncGroup: "trajectory",
+  });
   byId("money-chart-caption").textContent = `M2 and prices, indexed to 100 · peak inflation ${formatRate(projection.summary.peakAnnualInflation)}`;
+};
+
+// Shared per-chart state: previous live values (for transition tweening),
+// running animation handles (to cancel), and hover-sync registrations keyed by
+// chart id so small multiples can highlight the same year together.
+const chartPrev = new Map();
+const chartAnim = new Map();
+const chartHover = new Map();
+const prefersReducedMotion = () =>
+  window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+
+const setChartReadout = (text) => {
+  const node = byId("chart-readout");
+  if (node) node.textContent = text;
+};
+
+// Shape-equal series (same series count and lengths) can be tweened point-for-point.
+const sameSeriesShape = (from, to) =>
+  Array.isArray(from) &&
+  from.length === to.length &&
+  from.every((values, index) => values.length === to[index].length);
+
+// Interpolate each live line/point from its previous values to the new ones,
+// mapping through the current y-scale each frame. A hand-rolled rAF tween keeps
+// the "no charting dependency" constraint while animating between runs.
+const animateChart = (id, drawn, fromValues, toValues, x, y, duration = 380) => {
+  const existing = chartAnim.get(id);
+  if (existing) cancelAnimationFrame(existing);
+  const start = performance.now();
+  const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+  const step = (now) => {
+    const t = Math.min(1, (now - start) / duration);
+    const eased = ease(t);
+    drawn.forEach((entry, seriesIndex) => {
+      const from = fromValues[seriesIndex];
+      const to = toValues[seriesIndex];
+      const current = to.map((value, index) => {
+        const base = from[index] ?? value;
+        return base + (value - base) * eased;
+      });
+      entry.poly.setAttribute(
+        "points",
+        current.map((value, index) => `${x(index, current.length)},${y(value)}`).join(" "),
+      );
+      entry.circles.forEach((circle, index) => circle.setAttribute("cy", String(y(current[index]))));
+    });
+    if (t < 1) chartAnim.set(id, requestAnimationFrame(step));
+    else chartAnim.delete(id);
+  };
+  chartAnim.set(id, requestAnimationFrame(step));
+};
+
+// Crosshair + shared tooltip + keyboard/touch interaction, shared by the
+// scenario line charts and the backtest chart. Returns { setHover } so peers in
+// the same sync group can be driven from a sibling chart.
+const buildChartInteraction = (ctx) => {
+  const { svg, id, series, ghost, x, y, count, margin, width, height, valueSuffix = "", xLabel, syncGroup } = ctx;
+  const plotLeft = margin.left;
+  const plotRight = width - margin.right;
+
+  const crosshair = svgNode("line", {
+    class: "crosshair",
+    x1: plotLeft, y1: margin.top, x2: plotLeft, y2: height - margin.bottom,
+    visibility: "hidden",
+  });
+  svg.append(crosshair);
+  const hoverPoints = series.map((s) => {
+    const circle = svgNode("circle", { r: 4.5, class: `hover-point ${s.tone}`, visibility: "hidden" });
+    svg.append(circle);
+    return circle;
+  });
+  const tip = svgNode("g", { class: "tooltip", visibility: "hidden" });
+  svg.append(tip);
+
+  const rowsFor = (index) => {
+    const rows = series.map((s) => ({ label: s.label, tone: s.tone, value: s.values[index], ghost: false }));
+    if (ghost) {
+      ghost.forEach((s) => rows.push({ label: `${s.label} (A)`, tone: s.tone, value: s.values[index], ghost: true }));
+    }
+    return rows;
+  };
+
+  const renderTip = (index) => {
+    tip.replaceChildren();
+    const rows = rowsFor(index);
+    const lineHeight = 16;
+    const boxWidth = 184;
+    const boxHeight = 22 + rows.length * lineHeight + 6;
+    const cx = x(index);
+    let boxX = cx + 12;
+    if (boxX + boxWidth > plotRight) boxX = cx - 12 - boxWidth;
+    if (boxX < plotLeft) boxX = plotLeft;
+    const boxY = margin.top + 4;
+    tip.append(svgNode("rect", { x: boxX, y: boxY, width: boxWidth, height: boxHeight, rx: 6, class: "tooltip-box" }));
+    tip.append(svgNode("text", { x: boxX + 12, y: boxY + 18, class: "tooltip-title" }, xLabel(index)));
+    rows.forEach((row, rowIndex) => {
+      const rowY = boxY + 22 + (rowIndex + 1) * lineHeight;
+      tip.append(
+        svgNode("rect", {
+          x: boxX + 12, y: rowY - 8, width: 9, height: 9,
+          class: `tooltip-swatch ${row.tone}${row.ghost ? " ghost" : ""}`,
+        }),
+      );
+      tip.append(
+        svgNode(
+          "text",
+          { x: boxX + 27, y: rowY, class: `tooltip-row${row.ghost ? " ghost" : ""}` },
+          `${row.label}: ${row.value.toFixed(1)}${valueSuffix}`,
+        ),
+      );
+    });
+  };
+
+  let current = null;
+
+  const broadcast = (index) => {
+    if (!syncGroup) return;
+    for (const [otherId, entry] of chartHover) {
+      if (otherId === id || entry.group !== syncGroup) continue;
+      entry.setHover(index, true);
+    }
+  };
+
+  const hide = (silent) => {
+    current = null;
+    crosshair.setAttribute("visibility", "hidden");
+    tip.setAttribute("visibility", "hidden");
+    hoverPoints.forEach((circle) => circle.setAttribute("visibility", "hidden"));
+    if (!silent) broadcast(null);
+  };
+
+  const setHover = (index, silent = false) => {
+    if (index == null) {
+      hide(silent);
+      return;
+    }
+    const i = clamp(Math.round(index), 0, count - 1);
+    current = i;
+    const cx = x(i);
+    crosshair.setAttribute("x1", String(cx));
+    crosshair.setAttribute("x2", String(cx));
+    crosshair.setAttribute("visibility", "visible");
+    hoverPoints.forEach((circle, seriesIndex) => {
+      circle.setAttribute("cx", String(cx));
+      circle.setAttribute("cy", String(y(series[seriesIndex].values[i])));
+      circle.setAttribute("visibility", "visible");
+    });
+    renderTip(i);
+    tip.setAttribute("visibility", "visible");
+    if (!silent) {
+      const readoutRows = rowsFor(i).map((row) => `${row.label} ${row.value.toFixed(1)}${valueSuffix}`);
+      setChartReadout(`${xLabel(i)}: ${readoutRows.join(", ")}`);
+      broadcast(i);
+    }
+  };
+
+  const indexFromEvent = (event) => {
+    const point = svg.createSVGPoint();
+    point.x = event.clientX;
+    point.y = event.clientY;
+    const matrix = svg.getScreenCTM();
+    if (!matrix) return null;
+    const local = point.matrixTransform(matrix.inverse());
+    const ratio = (local.x - plotLeft) / Math.max(1, plotRight - plotLeft);
+    return clamp(Math.round(ratio * (count - 1)), 0, count - 1);
+  };
+
+  const hit = svgNode("rect", {
+    x: plotLeft, y: margin.top,
+    width: plotRight - plotLeft, height: height - margin.top - margin.bottom,
+    class: "chart-hit",
+  });
+  const onPointer = (event) => {
+    const index = indexFromEvent(event);
+    if (index != null) setHover(index);
+  };
+  // pointer* unifies mouse, touch, and pen.
+  hit.addEventListener("pointermove", onPointer);
+  hit.addEventListener("pointerdown", onPointer);
+  hit.addEventListener("pointerleave", () => setHover(null));
+  svg.append(hit);
+
+  svg.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+      event.preventDefault();
+      const base = current ?? -1;
+      setHover(clamp(base + (event.key === "ArrowRight" ? 1 : -1), 0, count - 1));
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      setHover(0);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      setHover(count - 1);
+    } else if (event.key === "Escape") {
+      setHover(null);
+    }
+  });
+  svg.addEventListener("blur", () => setHover(null));
+
+  if (syncGroup) chartHover.set(id, { group: syncGroup, setHover });
+  else chartHover.delete(id);
+
+  return { setHover };
 };
 
 const renderLineChart = (id, options) => {
   const root = byId(id);
+  const running = chartAnim.get(id);
+  if (running) {
+    cancelAnimationFrame(running);
+    chartAnim.delete(id);
+  }
   root.replaceChildren();
   const width = 720;
   const height = 300;
   const margin = { top: 24, right: 148, bottom: 38, left: 48 };
-  const allValues = options.series.flatMap((series) => series.values);
+  const ghost = options.ghost ?? null;
+  const allValues = [
+    ...options.series.flatMap((series) => series.values),
+    ...(ghost ? ghost.flatMap((series) => series.values) : []),
+  ];
   const low = Math.min(options.baseline, ...allValues);
   const high = Math.max(options.baseline, ...allValues);
   const padding = Math.max(4, (high - low) * 0.18);
   const yMin = Math.floor((low - padding) / 5) * 5;
   const yMax = Math.ceil((high + padding) / 5) * 5;
-  const x = (index, count) => margin.left + (index / Math.max(1, count - 1)) * (width - margin.left - margin.right);
+  const count = options.series[0].values.length;
+  const x = (index, seriesLength = count) => margin.left + (index / Math.max(1, seriesLength - 1)) * (width - margin.left - margin.right);
   const y = (value) => margin.top + ((yMax - value) / Math.max(1, yMax - yMin)) * (height - margin.top - margin.bottom);
-  const svg = svgNode("svg", { viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": options.description });
+  const svg = svgNode("svg", { viewBox: `0 0 ${width} ${height}`, role: "img", tabindex: "0", "aria-label": options.description });
   svg.append(svgNode("title", {}, options.description));
 
   for (let tick = 0; tick <= 4; tick += 1) {
@@ -921,6 +1473,14 @@ const renderLineChart = (id, options) => {
   });
   svg.append(svgNode("line", { x1: margin.left, y1: y(options.baseline), x2: width - margin.right, y2: y(options.baseline), class: "baseline-line" }));
 
+  // Ghost (pinned Scenario A) lines sit behind the live lines, dashed and faded.
+  if (ghost) {
+    ghost.forEach((series) => {
+      const points = series.values.map((value, index) => `${x(index, series.values.length)},${y(value)}`).join(" ");
+      svg.append(svgNode("polyline", { points, class: `data-line ghost ${series.tone}`, fill: "none" }));
+    });
+  }
+
   const labelPositions = options.series
     .map((series, index) => ({ index, y: y(series.values.at(-1)) }))
     .sort((left, right) => left.y - right.y);
@@ -933,20 +1493,40 @@ const renderLineChart = (id, options) => {
   if (topOverflow > 0) labelPositions.forEach((position) => { position.y += topOverflow; });
   const labelY = new Map(labelPositions.map((position) => [position.index, position.y]));
 
-  options.series.forEach((series, seriesIndex) => {
+  const drawn = options.series.map((series, seriesIndex) => {
     const points = series.values.map((value, index) => `${x(index, series.values.length)},${y(value)}`).join(" ");
-    svg.append(svgNode("polyline", { points, class: `data-line ${series.tone}`, fill: "none" }));
-    series.values.forEach((value, index) => {
+    const poly = svgNode("polyline", { points, class: `data-line ${series.tone}`, fill: "none" });
+    svg.append(poly);
+    const circles = series.values.map((value, index) => {
       const circle = svgNode("circle", { cx: x(index, series.values.length), cy: y(value), r: index === series.values.length - 1 ? 4 : 2.5, class: `data-point ${series.tone}` });
       circle.append(svgNode("title", {}, `${series.label}, year ${index}: ${value.toFixed(1)}${options.valueSuffix}`));
       svg.append(circle);
+      return circle;
     });
     const finalValue = series.values.at(-1);
     const finalLabelY = labelY.get(seriesIndex) ?? y(finalValue);
     svg.append(svgNode("text", { x: width - margin.right + 12, y: finalLabelY - 5, class: `series-label ${series.tone}` }, series.label));
     svg.append(svgNode("text", { x: width - margin.right + 12, y: finalLabelY + 13, class: "series-value" }, `${finalValue.toFixed(1)}${options.valueSuffix}`));
+    return { poly, circles };
   });
+
+  buildChartInteraction({
+    svg, id, series: options.series, ghost,
+    x, y, count, margin, width, height,
+    valueSuffix: options.valueSuffix ?? "",
+    xLabel: (index) => `Year ${index}`,
+    syncGroup: options.syncGroup ?? null,
+  });
+
   root.append(svg);
+
+  // Tween line positions from the previous run when the shape matches.
+  const previous = chartPrev.get(id);
+  const toValues = options.series.map((series) => series.values.slice());
+  if (previous && !prefersReducedMotion() && sameSeriesShape(previous, toValues)) {
+    animateChart(id, drawn, previous, toValues, x, y);
+  }
+  chartPrev.set(id, toValues);
 };
 
 const renderFlow = (projection) => {
@@ -986,6 +1566,15 @@ const renderTheory = (theory, projection) => {
   byId("theory-gap").textContent = signedPoints(summary.housingPositionGapChange);
   byId("theory-renter-result").textContent = `After cash transfers, administration, prices, and rent, modeled bottom-half renters end with ${signedPercent(summary.bottomRenterDisposableIncomeChange)} disposable buying power relative to the no-policy path.`;
   renderLineChart("theory-chart", {
+    ...theoryChartOptions(theory),
+    ghost: pinnedResult ? theoryChartOptions(pinnedResult.projection.theoryTest).series : null,
+    syncGroup: "theory",
+  });
+};
+
+const theoryChartOptions = (theory) => {
+  const { years } = theory;
+  return {
     description: `The middle-homeowner wealth index ends at ${years.at(-1).middleHomeownerWealthIndex.toFixed(1)}, renter housing burden at ${years.at(-1).bottomRenterHousingBurdenIndex.toFixed(1)}, and renter disposable income at ${years.at(-1).bottomRenterDisposableIncomeIndex.toFixed(1)}, with 100 representing no policy.`,
     series: [
       { label: "Middle homeowner wealth", values: years.map((year) => year.middleHomeownerWealthIndex), tone: "series-a" },
@@ -994,7 +1583,7 @@ const renderTheory = (theory, projection) => {
     ],
     baseline: 100,
     valueSuffix: "",
-  });
+  };
 };
 
 const renderStress = (stress) => {
@@ -1334,7 +1923,7 @@ const renderBacktestChart = (id, backtest) => {
   const x = (index) => margin.left + (index / Math.max(1, years.length - 1)) * (width - margin.left - margin.right);
   const y = (value) => margin.top + ((yMax - value) / Math.max(1, yMax - yMin)) * (height - margin.top - margin.bottom);
   const description = `Modeled inflation tracks actual CPI from ${years[0].year} to ${years.at(-1).year}; the modeled peak of ${series[0].values[years.findIndex((year) => year.year === backtest.modeledPeak.year)]?.toFixed(1)}% lands near the realized surge.`;
-  const svg = svgNode("svg", { viewBox: `0 0 ${width} ${height}`, role: "img", "aria-label": description });
+  const svg = svgNode("svg", { viewBox: `0 0 ${width} ${height}`, role: "img", tabindex: "0", "aria-label": description });
   svg.append(svgNode("title", {}, description));
 
   for (let tick = 0; tick <= 4; tick += 1) {
@@ -1371,6 +1960,15 @@ const renderBacktestChart = (id, backtest) => {
     svg.append(svgNode("text", { x: width - margin.right + 12, y: finalLabelY - 5, class: `series-label ${entry.tone}` }, entry.label));
     svg.append(svgNode("text", { x: width - margin.right + 12, y: finalLabelY + 13, class: "series-value" }, `${finalValue.toFixed(1)}%`));
   });
+
+  buildChartInteraction({
+    svg, id, series, ghost: null,
+    x: (index) => x(index), y, count: years.length, margin, width, height,
+    valueSuffix: "%",
+    xLabel: (index) => String(years[index].year),
+    syncGroup: null,
+  });
+
   root.append(svg);
 };
 
@@ -1467,14 +2065,14 @@ const setPresetFields = (name) => {
   if (preset.childBenefit !== undefined) byId("child-benefit").value = preset.childBenefit;
   if (preset.directCashShare !== undefined) byId("direct-cash-share").value = preset.directCashShare;
   syncTargetControls();
+  syncAllSliders();
 };
 
 const applyPreset = (name) => {
   if (!PRESETS[name]) return;
   setPresetFields(name);
   activePreset = name;
-  updateScenarioUrl();
-  void runScenario();
+  void dashboardRerun();
 };
 
 const applyBehaviorPreset = (name) => {
@@ -1492,9 +2090,9 @@ const applyBehaviorPreset = (name) => {
   byId("avoidance-elasticity").value = preset.avoidance;
   byId("expatriation-share").value = preset.expatriation;
   byId("private-business-inclusion").value = preset.inclusion;
+  syncAllSliders();
   activePreset = null;
-  updateScenarioUrl();
-  void runScenario();
+  void dashboardRerun();
 };
 
 const setFormStatus = (message, isError = false) => {
@@ -1505,18 +2103,48 @@ const setFormStatus = (message, isError = false) => {
 
 byId("scenario-form").addEventListener("submit", (event) => {
   event.preventDefault();
-  void runScenario();
+  void dashboardRerun();
 });
 byId("run-button").addEventListener("click", (event) => {
   event.preventDefault();
-  void runScenario();
+  void dashboardRerun();
 });
+// Sliders are built in initialize() (after the module fully evaluates, so `clamp`
+// and friends are defined) and once the fetched defaults have populated the form.
 // Any manual edit means the form no longer matches a named preset, so the URL
-// falls back to explicit field params. Programmatic .value writes don't fire this.
-byId("scenario-form").addEventListener("input", () => {
-  activePreset = null;
+// falls back to explicit field params, and the model auto-runs (debounced).
+// Programmatic .value writes don't fire this.
+// A graduated schedule mid-entry (threshold typed, rate still blank) would fail
+// validateBrackets and flash a red error on every keystroke; only auto-run once
+// every present bracket row is complete (an empty schedule is trivially complete).
+const bracketRowsComplete = () =>
+  readBracketRows().every(
+    (bracket) => !Number.isNaN(bracket.threshold) && !Number.isNaN(bracket.rate),
+  );
+byId("scenario-form").addEventListener("input", (event) => {
+  const target = event.target;
+  // Direct typing into a number field mirrors onto its slider (the slider's own
+  // handler covers the reverse); also enforce the joint borrow/sell clamp.
+  if (target instanceof HTMLInputElement && target.type === "number") {
+    applyJointConstraint(target);
+    syncSlider(target.id);
+  }
   updateScenarioUrl();
+  // Clearing a cell of an already-scheduled complete bracket must also cancel the
+  // pending run, or it fires with the now-incomplete row and flashes the error.
+  if (bracketRowsComplete()) scheduleAutoRun();
+  else clearTimeout(autoRunTimer);
 });
+// Selects fire change (not reliably input across browsers); auto-run on those too.
+byId("scenario-form").addEventListener("change", (event) => {
+  if (event.target instanceof HTMLSelectElement) {
+    activePreset = null;
+    if (bracketRowsComplete()) scheduleAutoRun();
+    else clearTimeout(autoRunTimer);
+  }
+});
+byId("pin-button").addEventListener("click", () => void pinCurrentScenario());
+byId("clear-pin-button").addEventListener("click", () => clearPin());
 byId("copy-link-button").addEventListener("click", () => void copyScenarioLink());
 byId("distribution-strategy").addEventListener("change", () => {
   renderDistribution();
@@ -2036,6 +2664,8 @@ const enterDashboard = () => {
   url.searchParams.set("view", "dashboard");
   window.history.replaceState(null, "", url);
   byId("story-launch").hidden = false;
+  // The story wrote form fields programmatically; realign the dashboard sliders.
+  syncAllSliders();
   window.scrollTo({ top: 0, behavior: "auto" });
 };
 

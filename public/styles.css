@@ -208,8 +208,15 @@ input:focus, select:focus { border-color: var(--green); box-shadow: 0 0 0 2px rg
 .run-button { padding: 12px 18px; border: 1px solid var(--ink); background: var(--ink); color: var(--paper); cursor: pointer; font-weight: 750; }
 .run-button:hover { background: var(--green); border-color: var(--green); }
 .run-button:disabled { opacity: 0.55; cursor: wait; }
+.link-button { padding: 12px 18px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; font-weight: 700; }
+.link-button:hover { border-color: var(--green); color: var(--green); }
 .form-status { margin: 0; color: var(--muted); font-size: 0.75rem; }
 .form-status.error { color: var(--red); }
+
+.toast-container { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 50; display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; }
+.toast { padding: 12px 18px; border: 1px solid var(--ink); background: var(--ink); color: var(--paper); font-size: 0.82rem; font-weight: 650; box-shadow: 0 8px 24px rgba(23, 33, 29, 0.22); opacity: 0; transform: translateY(10px); transition: opacity 0.24s ease, transform 0.24s ease; }
+.toast.visible { opacity: 1; transform: translateY(0); }
+.toast.error { background: var(--red); border-color: var(--red); }
 
 .model-details { padding-bottom: 0; }
 .model-details[open] { padding-bottom: 40px; }

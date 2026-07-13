@@ -256,18 +256,22 @@ const renderVerdict = (projection) => {
   byId("metric-m2").textContent = signedPercent(summary.cumulativeM2Change);
 };
 
-const renderCharts = (projection) => {
+const powerChartOptions = (projection) => {
   const years = projection.years;
-  renderLineChart("power-chart", {
-    description: `Over ten years, bottom-half purchasing power ends at ${years.at(-1).bottom50PurchasingPowerIndex.toFixed(1)} and top-one-percent real wealth ends at ${years.at(-1).top1RealWealthIndex.toFixed(1)}, with 100 representing the no-policy path.`,
+  return {
+    description: `Bottom-half purchasing power ends at ${years.at(-1).bottom50PurchasingPowerIndex.toFixed(1)} and top-one-percent real wealth at ${years.at(-1).top1RealWealthIndex.toFixed(1)}, with 100 representing the no-policy path.`,
     series: [
       { label: "Bottom 50% buying power", values: years.map((year) => year.bottom50PurchasingPowerIndex), tone: "series-a" },
       { label: "Top 1% real wealth", values: years.map((year) => year.top1RealWealthIndex), tone: "series-b" },
     ],
     baseline: 100,
     valueSuffix: "",
-  });
-  renderLineChart("money-chart", {
+  };
+};
+
+const moneyChartOptions = (projection) => {
+  const years = projection.years;
+  return {
     description: `M2 ends at index ${years.at(-1).m2Index.toFixed(1)} and the price level at ${(years.at(-1).priceLevel * 100).toFixed(1)}, with 100 before policy.`,
     series: [
       { label: "M2 money stock", values: years.map((year) => year.m2Index), tone: "series-c" },
@@ -275,7 +279,12 @@ const renderCharts = (projection) => {
     ],
     baseline: 100,
     valueSuffix: "",
-  });
+  };
+};
+
+const renderCharts = (projection) => {
+  renderLineChart("power-chart", powerChartOptions(projection));
+  renderLineChart("money-chart", moneyChartOptions(projection));
   byId("money-chart-caption").textContent = `M2 and prices, indexed to 100 · peak inflation ${formatRate(projection.summary.peakAnnualInflation)}`;
 };
 
@@ -530,7 +539,10 @@ const syncTargetControls = () => {
   byId("exemption-label").classList.toggle("is-disabled", topShareMode);
 };
 
-const applyPreset = (name) => {
+// Writes a named scenario preset into the shared form fields. Both the
+// dashboard preset buttons and the story mode reuse this; only the dashboard
+// re-runs the scenario immediately afterward.
+const applyPresetFields = (name) => {
   const presets = {
     "top-one": { targetMode: "top-share", topShare: 1, exemption: 10, rate: 1 },
     billionaire: { targetMode: "exemption", topShare: 1, exemption: 1000, rate: 10 },
@@ -538,7 +550,7 @@ const applyPreset = (name) => {
     universal: { targetMode: "exemption", topShare: 100, exemption: 0, rate: 1, adultBenefit: 1000, childBenefit: 500, directCashShare: 100 },
   };
   const preset = presets[name];
-  if (!preset) return;
+  if (!preset) return false;
   byId("target-mode").value = preset.targetMode;
   byId("top-share").value = preset.topShare;
   byId("exemption").value = preset.exemption;
@@ -547,7 +559,11 @@ const applyPreset = (name) => {
   if (preset.childBenefit !== undefined) byId("child-benefit").value = preset.childBenefit;
   if (preset.directCashShare !== undefined) byId("direct-cash-share").value = preset.directCashShare;
   syncTargetControls();
-  void runScenario();
+  return true;
+};
+
+const applyPreset = (name) => {
+  if (applyPresetFields(name)) void runScenario();
 };
 
 const setFormStatus = (message, isError = false) => {
@@ -663,32 +679,6 @@ const debounce = (fn, wait) => {
   return (...args) => {
     clearTimeout(timer);
     timer = setTimeout(() => fn(...args), wait);
-  };
-};
-
-const moneyChartOptions = (projection) => {
-  const years = projection.years;
-  return {
-    description: `M2 ends at index ${years.at(-1).m2Index.toFixed(1)} and the price level at ${(years.at(-1).priceLevel * 100).toFixed(1)}, with 100 before policy.`,
-    series: [
-      { label: "M2 money stock", values: years.map((year) => year.m2Index), tone: "series-c" },
-      { label: "Price level", values: years.map((year) => year.priceLevel * 100), tone: "series-d" },
-    ],
-    baseline: 100,
-    valueSuffix: "",
-  };
-};
-
-const powerChartOptions = (projection) => {
-  const years = projection.years;
-  return {
-    description: `Bottom-half purchasing power ends at ${years.at(-1).bottom50PurchasingPowerIndex.toFixed(1)} and top-one-percent real wealth at ${years.at(-1).top1RealWealthIndex.toFixed(1)}, with 100 representing the no-policy path.`,
-    series: [
-      { label: "Bottom 50% buying power", values: years.map((year) => year.bottom50PurchasingPowerIndex), tone: "series-a" },
-      { label: "Top 1% real wealth", values: years.map((year) => year.top1RealWealthIndex), tone: "series-b" },
-    ],
-    baseline: 100,
-    valueSuffix: "",
   };
 };
 
@@ -809,7 +799,7 @@ const renderStory = () => {
       const button = element("button", label);
       button.type = "button";
       button.addEventListener("click", async () => {
-        applyStoryPreset(preset);
+        applyPresetFields(preset);
         await storyRerun();
       });
       presetWrap.append(button);
@@ -902,27 +892,6 @@ const renderStoryProgress = () => {
       return dot;
     }),
   );
-};
-
-// Applies a preset by writing directly to the form fields (mirrors applyPreset
-// without triggering the dashboard's own scenario run).
-const applyStoryPreset = (name) => {
-  const presets = {
-    "top-one": { targetMode: "top-share", topShare: 1, exemption: 10, rate: 1 },
-    billionaire: { targetMode: "exemption", topShare: 1, exemption: 1000, rate: 10 },
-    "ten-million": { targetMode: "exemption", topShare: 1, exemption: 10, rate: 5 },
-    universal: { targetMode: "exemption", topShare: 100, exemption: 0, rate: 1, adultBenefit: 1000, childBenefit: 500, directCashShare: 100 },
-  };
-  const preset = presets[name];
-  if (!preset) return;
-  byId("target-mode").value = preset.targetMode;
-  byId("top-share").value = preset.topShare;
-  byId("exemption").value = preset.exemption;
-  byId("tax-rate").value = preset.rate;
-  if (preset.adultBenefit !== undefined) byId("adult-benefit").value = preset.adultBenefit;
-  if (preset.childBenefit !== undefined) byId("child-benefit").value = preset.childBenefit;
-  if (preset.directCashShare !== undefined) byId("direct-cash-share").value = preset.directCashShare;
-  syncTargetControls();
 };
 
 const storyRerun = async () => {

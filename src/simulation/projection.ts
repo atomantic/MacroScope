@@ -28,6 +28,18 @@ const BOTTOM_HALF_RENTER_SHARE = MODEL_CONSTANTS.bottomHalfRenterShare;
 // this band around the no-policy path; inside it the result reads as mixed.
 const GROUP_OUTCOME_BAND = MODEL_CONSTANTS.groupOutcomeBand;
 
+// Reduced-form growth/investment channel (issue #13). The capital stock is
+// tracked as an index relative to the no-policy path. Each year the actual
+// investment rate deviates from the replacement rate that just offsets
+// depreciation; a deviation of zero pins the index at 1, so REAL_GROWTH stays
+// the constant trend and the whole block reduces to prior behavior. Wages and
+// output per worker move with capital per worker via the capital share.
+const CAPITAL_DEPRECIATION = 0.06; // BEA private fixed-capital depreciation ≈ 5–6%/yr
+const CAPITAL_SHARE = 0.33; // capital's share of income; wage/output ∝ (K/L)^share
+// Keep wages and the GDP index finite even under an extreme, sustained savings
+// drag that would otherwise drive the capital index toward zero.
+const CAPITAL_INDEX_FLOOR = 0.05;
+
 type Strategies = Readonly<Record<PaymentStrategy, StrategyOutcome>>;
 
 export const buildPolicyProjection = (
@@ -130,6 +142,17 @@ export const buildPolicyProjection = (
   // the retention at 1 and reproduces the prior path.
   const expatriationRetention =
     (1 - request.behavior.expatriationShare) ** (1 / YEARS);
+
+  // Growth/investment channel state (issue #13). The savings dial turns the
+  // wealth tax's drag on the after-tax return to wealth into an investment
+  // shortfall; the demand dial pushes the other way with the transfer's fiscal
+  // impulse. Both national aggregates come from the represented flows scaled
+  // back to national terms with this factor. The drag itself is computed per
+  // year inside the loop from that year's collection (it evolves as the base
+  // erodes/grows).
+  const nationalScale = populationScale(request);
+  let capitalIndex = 1;
+  let capitalPerWorker = 1; // capitalIndex ** CAPITAL_SHARE; wage/output deviation
   const yearOneProgramBudget =
     request.ubi.fundingRule === "revenue-constrained"
       ? Math.min(requestedUbi, taxCollected)
@@ -194,6 +217,7 @@ export const buildPolicyProjection = (
       bottom50PurchasingPowerIndex: 100,
       top1RealWealthIndex: 100,
       confidenceIndex: confidence * 100,
+      gdpIndex: 100,
       regime: regimeForInflation(US_BASELINE.baselineInflation),
     },
   ];
@@ -277,10 +301,50 @@ export const buildPolicyProjection = (
     priceLevel *= 1 + annualInflation;
     baselinePriceLevel *= 1 + US_BASELINE.baselineInflation;
 
+    // Reduced-form growth/investment channel (issue #13). Investment deviates
+    // from the steady-state replacement rate: the wealth tax's drag on the
+    // after-tax return to wealth cuts it (savings channel), while the transfer's
+    // demand impulse — the REAL program budget as a share of national GDP —
+    // lifts it (demand channel). Deflate the (possibly CPI-indexed) nominal
+    // budget by the price level first, so a benefit that only grows with prices
+    // adds no real demand. With both dials at 0 the deviation is 0, so the
+    // mean-reverting capital index stays pinned at 1 and wages/output grow along
+    // the constant REAL_GROWTH trend exactly as before.
+    const realProgramBudget = programBudgetYear / priceLevel;
+    const demandImpulse =
+      realProgramBudget / nationalScale / US_BASELINE.nominalGdp;
+    // This year's drag: national tax ACTUALLY collected as a share of aggregate
+    // net worth — not the statutory rate — so it goes to ~0 when a high
+    // exemption reaches no one or avoidance guts compliance, and it tracks the
+    // base as it erodes or grows over the decade rather than freezing at
+    // year-one collections. Deflate the (nominal) collection by the price level
+    // first, exactly as the demand impulse does, so nominal appreciation /
+    // inflation of the base can't drive the drag toward 1 purely because prices
+    // rose. (taxCollectedYear already folds in avoidance, exemption reach, and
+    // the annual base multiplier.)
+    const collectionDrag = Math.min(
+      1,
+      taxCollectedYear / priceLevel / nationalScale / US_BASELINE.householdNetWorth,
+    );
+    const investmentDeviation =
+      -request.behavior.savingsResponseElasticity * collectionDrag +
+      request.behavior.demandGrowthOffset * demandImpulse;
+    capitalIndex = Math.max(
+      CAPITAL_INDEX_FLOOR,
+      capitalIndex - CAPITAL_DEPRECIATION * (capitalIndex - 1) + investmentDeviation,
+    );
+    const priorCapitalPerWorker = capitalPerWorker;
+    capitalPerWorker = capitalIndex ** CAPITAL_SHARE;
+    // Wages track capital per worker: scale the trend wage growth by the change
+    // in the capital-per-worker deviation. Factor is 1 whenever capital is on the
+    // baseline path.
+    const capitalWageFactor = capitalPerWorker / priorCapitalPerWorker;
+
     bottomWageBase *=
-      1 + REAL_GROWTH + US_BASELINE.baselineInflation +
-      Math.max(0, annualInflation - US_BASELINE.baselineInflation) *
-        request.model.wagePassThrough;
+      (1 + REAL_GROWTH + US_BASELINE.baselineInflation +
+        Math.max(0, annualInflation - US_BASELINE.baselineInflation) *
+          request.model.wagePassThrough) *
+      capitalWageFactor;
     baselineResources *= 1 + REAL_GROWTH + US_BASELINE.baselineInflation;
     const policyRealResources = (bottomWageBase + bottom50UbiYear) / priceLevel;
     const baselineRealResources = baselineResources / baselinePriceLevel;
@@ -347,6 +411,7 @@ export const buildPolicyProjection = (
         Math.max(1, baselineTopWealth / baselinePriceLevel) *
         100,
       confidenceIndex: confidence * 100,
+      gdpIndex: capitalPerWorker * 100,
       regime: regimeForInflation(annualInflation),
     });
 
@@ -378,11 +443,13 @@ export const buildPolicyProjection = (
   const peakAnnualInflation = Math.max(...years.slice(1).map((year) => year.annualInflation));
   const bottom50PurchasingPowerChange = finalYear.bottom50PurchasingPowerIndex / 100 - 1;
   const top1RealWealthChange = finalYear.top1RealWealthIndex / 100 - 1;
+  const gdpChange = finalYear.gdpIndex / 100 - 1;
   const publicBurdenPerHousehold = publicDebt / US_BASELINE.households;
   const verdict = makeVerdict({
     bottom50PurchasingPowerChange,
     peakAnnualInflation,
     publicBurdenPerHousehold,
+    gdpChange,
     borrowShare: weights.borrow,
     harmfulPeakInflation: request.model.verdictHarmfulInflation,
   });
@@ -433,6 +500,7 @@ export const buildPolicyProjection = (
       cumulativeM2Change: finalYear.m2Index / 100 - 1,
       bottom50PurchasingPowerChange,
       top1RealWealthChange,
+      gdpChange,
       privateTaxDebt,
       publicBurdenPerHousehold,
       firstHyperinflationYear:
@@ -449,6 +517,7 @@ export const buildPolicyProjection = (
       "Private loans remain liabilities of the wealthy borrowers. They become a burden on other households only if losses are later socialized through bailouts, guarantees, or inflationary deficit finance; this model assumes no such bailout.",
       "Purchasing-power results compare the bottom half with a no-policy baseline after prices; they include partial wage adjustment and an annual UBI flow.",
       "The asset-price and rent channel is not implied by the accounting identities. It activates only when the selected share of new liquidity seeks housing or equities, housing supply is constrained, and rents follow asset prices.",
+      "The growth channel weighs the real objection to a wealth tax: taxing wealth can lower saving and investment, shrinking the capital stock, wages, and GDP over the decade. The demand offset represents the opposite pull of transfers to high-spending households. Both are off by default; turn them up to see either steelman.",
     ],
   };
 };
@@ -878,6 +947,7 @@ const makeVerdict = (input: {
   bottom50PurchasingPowerChange: number;
   peakAnnualInflation: number;
   publicBurdenPerHousehold: number;
+  gdpChange: number;
   borrowShare: number;
   harmfulPeakInflation: number;
 }): PolicyProjection["verdict"] => {
@@ -891,11 +961,24 @@ const makeVerdict = (input: {
     input.peakAnnualInflation < v.beneficialPeakInflation &&
     input.publicBurdenPerHousehold < v.beneficialPublicBurdenPerHousehold;
   if (harmful) {
+    // Attribute the harm to its actual driver. Only call it growth-driven when
+    // inflation stays in the "stable" regime (below the 5% "elevated" band, i.e.
+    // essentially at baseline) and debt is low — so an elevated inflation that
+    // is itself pushing buying power under the harmful line isn't misreported as
+    // a growth effect just because GDP also dipped. In that quiet-macro corner a
+    // materially negative GDP path is the credible cause of the harm.
+    const growthDriven =
+      input.peakAnnualInflation < 0.05 &&
+      input.publicBurdenPerHousehold < 10_000 &&
+      input.gdpChange <= -0.02;
     return {
       rating: "harmful",
-      headline: "The inflation or debt cost overwhelms the transfer gain.",
-      explanation:
-        "Under these assumptions, the bottom half ends with less relative buying power or the financing path enters a high-risk inflation/debt regime.",
+      headline: growthDriven
+        ? "The wealth-tax drag on investment and wages outweighs the transfer gain."
+        : "The inflation or debt cost overwhelms the transfer gain.",
+      explanation: growthDriven
+        ? "Under these assumptions the tax reduces saving and investment enough to shrink the capital stock and wages, so the bottom half ends with less real buying power even without a modeled inflation or debt crisis."
+        : "Under these assumptions, the bottom half ends with less relative buying power or the financing path enters a high-risk inflation/debt regime.",
     };
   }
   if (beneficial) {

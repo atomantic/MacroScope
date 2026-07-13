@@ -64,6 +64,17 @@ describe("scenario URL parameters", () => {
     expect(decoded.fields["persona-tenure"]).toBe("owner");
   });
 
+  it("round-trips the growth-channel dials so shared links preserve them", () => {
+    const values = { ...defaults, "savings-response": "0.8", "demand-offset": "1.2" };
+    const query = encodeScenarioParams({ values, defaults });
+    const params = new URLSearchParams(query);
+    expect(params.get("sr")).toBe("0.8");
+    expect(params.get("dg")).toBe("1.2");
+    const decoded = decodeScenarioParams(query);
+    expect(decoded.fields["savings-response"]).toBe("0.8");
+    expect(decoded.fields["demand-offset"]).toBe("1.2");
+  });
+
   it("encodes a pristine preset as ?preset=name without field params", () => {
     const values = { ...defaults, "tax-rate": "10" };
     const query = encodeScenarioParams({ values, defaults, preset: "billionaire" });

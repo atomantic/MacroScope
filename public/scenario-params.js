@@ -30,6 +30,8 @@ export const SCENARIO_FIELD_SPECS = [
   { id: "housing-hedge-share", param: "hh" },
   { id: "housing-supply", param: "hs" },
   { id: "rent-pass-through", param: "rp" },
+  { id: "savings-response", param: "sr" },
+  { id: "demand-offset", param: "dg" },
   { id: "seed", param: "seed" },
   { id: "sample-size", param: "n" },
   { id: "price-impact", param: "pi" },

@@ -353,6 +353,13 @@
               <label for="buyer-depth">Buyer depth (% equity)<input id="buyer-depth" name="buyerDepth" type="number" min="0.1" max="200" step="0.1" /></label>
             </div>
           </fieldset>
+          <fieldset class="behavior-fieldset">
+            <legend>Growth channel</legend>
+            <div class="behavior-grid">
+              <label for="savings-response">Savings response elasticity<input id="savings-response" name="savingsResponseElasticity" type="number" min="0" max="3" step="0.1" /><small class="field-hint">How much the wealth tax's drag on the after-tax return to wealth cuts investment, shrinking capital, wages, and GDP over the decade. 0 leaves growth on trend; ~0.5–1 spans the Penn-Wharton / Tax Foundation dynamic-scoring range.</small></label>
+              <label for="demand-offset">Demand growth offset<input id="demand-offset" name="demandGrowthOffset" type="number" min="0" max="3" step="0.1" /><small class="field-hint">How strongly the transfer's demand impulse (program budget as a share of GDP) feeds investment and output the other way. 0 turns the offset off; raise it to model redistribution to high-spending households lifting demand.</small></label>
+            </div>
+          </fieldset>
           <fieldset class="split-fieldset">
             <legend>Asset feedback</legend>
             <div class="split-fieldset-grid">

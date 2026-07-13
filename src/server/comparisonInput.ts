@@ -244,6 +244,22 @@ export const parseComparisonRequest = (input: unknown): ParsedComparisonRequest 
     1,
     errors,
   );
+  const savingsResponseElasticity = readNumber(
+    behavior,
+    "savingsResponseElasticity",
+    DEFAULT_COMPARISON_REQUEST.behavior.savingsResponseElasticity,
+    0,
+    3,
+    errors,
+  );
+  const demandGrowthOffset = readNumber(
+    behavior,
+    "demandGrowthOffset",
+    DEFAULT_COMPARISON_REQUEST.behavior.demandGrowthOffset,
+    0,
+    3,
+    errors,
+  );
   if (borrowShare + sellShare > 1) {
     errors.push("borrowShare plus sellShare must not exceed 1.");
   }
@@ -291,6 +307,8 @@ export const parseComparisonRequest = (input: unknown): ParsedComparisonRequest 
         avoidanceElasticity,
         expatriationShare,
         privateBusinessInclusionRate,
+        savingsResponseElasticity,
+        demandGrowthOffset,
       },
       model,
     },

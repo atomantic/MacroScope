@@ -79,6 +79,15 @@ export const buildPolicyProjection = (
   // out of the base each year (so cumulative tax paid compounds against it).
   // Year 1 reproduces the strategy outcomes exactly (multiplier = 1).
   let taxBaseMultiplier = 1;
+  // Expatriation drains a cumulative share of the taxable base over the decade
+  // (issue #6). It acts on the aggregate taxed base (taxBaseMultiplier below),
+  // which equals top-tier wealth whenever a positive exemption confines the tax
+  // to the top; under a universal (zero-exemption) tax it approximates the whole
+  // taxed base leaving. Spread geometrically so each year retains an equal
+  // fraction and the base has lost expatriationShare by year ten. Share 0 leaves
+  // the retention at 1 and reproduces the prior path.
+  const expatriationRetention =
+    (1 - request.behavior.expatriationShare) ** (1 / YEARS);
   const yearOneProgramBudget =
     request.ubi.fundingRule === "revenue-constrained"
       ? Math.min(requestedUbi, taxCollected)
@@ -301,7 +310,8 @@ export const buildPolicyProjection = (
           request.behavior.annualAssetReturn +
           Math.max(0, annualInflation - US_BASELINE.baselineInflation) *
             ASSET_PRICE_INFLATION_PASS_THROUGH) *
-        (1 - request.wealthTax.rate),
+        (1 - request.wealthTax.rate) *
+        expatriationRetention,
     );
   }
 

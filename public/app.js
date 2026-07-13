@@ -1,3 +1,9 @@
+import {
+  FIELD_SPECS,
+  encodeScenarioParams,
+  decodeScenarioParams,
+} from "./scenario-params.js";
+
 const STRATEGIES = ["cash-first", "borrow-first", "sell-first"];
 const LABELS = {
   "cash-first": "Cash first",
@@ -9,6 +15,13 @@ let latestResult = null;
 let baseline = null;
 let historicalBacktest = null;
 let representedHouseholds = 0;
+// Display-unit snapshot of the default form values, captured once after the
+// fetched defaults populate the form. Serialization emits only fields that
+// differ from this, keeping shared URLs short.
+let defaultFieldValues = {};
+// Non-null while the form still matches a named preset exactly, so the URL can
+// stay the shareable `?preset=name` form. Cleared on any manual edit.
+let activePreset = null;
 const isStaticSnapshot = document.documentElement.dataset.mode === "static";
 
 const money = new Intl.NumberFormat(undefined, {
@@ -52,11 +65,19 @@ const initialize = async () => {
       byId("baseline-label").textContent = `${baseline.label} · ${baseline.vintage} Fed wealth data · ${compactNumber(baseline.households)} households`;
       renderSources(baseline.sources);
       populateForm(defaults);
-      latestResult = snapshot;
-      render(snapshot);
-      byId("scenario-summary").textContent = scenarioSummary(defaults, snapshot);
-      setFormStatus("Default scenario shown. Change any assumption and recalculate — the model runs in your browser.");
+      captureDefaultFieldValues();
+      const hasScenarioParams = hydrateFormFromUrl();
       if (typeof Worker !== "undefined") ensureEngineWorker();
+      if (hasScenarioParams) {
+        // A shared URL carries its own assumptions — recompute rather than
+        // showing the prebuilt default snapshot.
+        await runScenario();
+      } else {
+        latestResult = snapshot;
+        render(snapshot);
+        byId("scenario-summary").textContent = scenarioSummary(defaults, snapshot);
+        setFormStatus("Default scenario shown. Change any assumption and recalculate — the model runs in your browser.");
+      }
       return;
     }
     const [healthResponse, defaultResponse, baselineResponse, backtestResponse] = await Promise.all([
@@ -78,6 +99,8 @@ const initialize = async () => {
     byId("baseline-label").textContent = `${baseline.label} · ${baseline.vintage} Fed wealth data · ${compactNumber(baseline.households)} households`;
     renderSources(baseline.sources);
     populateForm(defaults);
+    captureDefaultFieldValues();
+    hydrateFormFromUrl();
     await runScenario();
   } catch (error) {
     setFormStatus(error instanceof Error ? error.message : "Unable to initialize.", true);
@@ -114,6 +137,10 @@ const populateForm = (request) => {
   byId("asset-hedge-share").value = request.behavior.assetHedgeShare * 100;
   byId("housing-hedge-share").value = request.behavior.housingHedgeShare * 100;
   byId("rent-pass-through").value = request.behavior.rentPassThrough * 100;
+  byId("avoidance-elasticity").value = request.behavior.avoidanceElasticity * 100;
+  byId("expatriation-share").value = request.behavior.expatriationShare * 100;
+  byId("private-business-inclusion").value =
+    request.behavior.privateBusinessInclusionRate * 100;
   syncTargetControls();
 };
 
@@ -151,8 +178,116 @@ const formRequest = () => ({
     assetHedgeShare: Number(byId("asset-hedge-share").value) / 100,
     housingHedgeShare: Number(byId("housing-hedge-share").value) / 100,
     rentPassThrough: Number(byId("rent-pass-through").value) / 100,
+    avoidanceElasticity: Number(byId("avoidance-elasticity").value) / 100,
+    expatriationShare: Number(byId("expatriation-share").value) / 100,
+    privateBusinessInclusionRate:
+      Number(byId("private-business-inclusion").value) / 100,
   },
 });
+
+// --- Deep-linkable scenario URLs -----------------------------------------
+const readFieldValues = () =>
+  Object.fromEntries(FIELD_SPECS.map((spec) => [spec.id, byId(spec.id).value]));
+
+const captureDefaultFieldValues = () => {
+  defaultFieldValues = readFieldValues();
+};
+
+// URL serialization compares against the fetched defaults, so it must stay a
+// no-op until those defaults have been captured — otherwise a click during the
+// initial fetch would treat every empty field as an override.
+const defaultsReady = () => Object.keys(defaultFieldValues).length > 0;
+
+const currentStrategy = () => byId("distribution-strategy").value;
+
+const scenarioQuery = () =>
+  encodeScenarioParams({
+    values: readFieldValues(),
+    defaults: defaultFieldValues,
+    preset: activePreset,
+    strategy: currentStrategy(),
+  });
+
+const scenarioLink = () => {
+  const query = scenarioQuery();
+  return `${location.origin}${location.pathname}${query ? `?${query}` : ""}${location.hash}`;
+};
+
+// Reflect the live form state in the address bar without adding history
+// entries, so a reload or copied URL reproduces the current scenario.
+const updateScenarioUrl = () => {
+  if (!defaultsReady()) return;
+  const query = scenarioQuery();
+  history.replaceState(null, "", `${location.pathname}${query ? `?${query}` : ""}${location.hash}`);
+};
+
+// Apply any scenario encoded in the current URL to the form. Returns true when
+// the URL carried scenario state, so callers know to recompute.
+const hydrateFormFromUrl = () => {
+  const decoded = decodeScenarioParams(location.search);
+  const appliedPreset = Boolean(decoded.preset && PRESETS[decoded.preset]);
+  if (appliedPreset) {
+    setPresetFields(decoded.preset);
+    activePreset = decoded.preset;
+  }
+  const fieldIds = Object.keys(decoded.fields);
+  for (const id of fieldIds) byId(id).value = decoded.fields[id];
+  // Explicit field overrides make the state no longer a pristine preset.
+  if (fieldIds.length > 0) activePreset = null;
+  // A stale/unknown strategy would blank the <select> and later crash
+  // renderDistribution (strategies[""]); ignore anything not in STRATEGIES.
+  const appliedStrategy = Boolean(decoded.strategy && STRATEGIES.includes(decoded.strategy));
+  if (appliedStrategy) byId("distribution-strategy").value = decoded.strategy;
+  syncTargetControls();
+  // An unknown preset name or strategy applies nothing, so it must not force a recompute.
+  return appliedPreset || fieldIds.length > 0 || appliedStrategy;
+};
+
+const copyText = async (text) => {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Fall through to the execCommand path (blocked permission, insecure origin).
+    }
+  }
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.style.position = "fixed";
+  area.style.opacity = "0";
+  document.body.append(area);
+  area.select();
+  const ok = document.execCommand?.("copy") ?? false;
+  area.remove();
+  return ok;
+};
+
+const copyScenarioLink = async () => {
+  if (!defaultsReady()) return;
+  updateScenarioUrl();
+  const ok = await copyText(scenarioLink());
+  showToast(
+    ok ? "Scenario link copied to clipboard." : "Copy blocked — the link is in your address bar.",
+    !ok,
+  );
+};
+
+let toastTimer = null;
+const showToast = (message, isError = false) => {
+  const container = byId("toast-container");
+  if (!container) return;
+  const toast = element("div", message);
+  toast.className = `toast${isError ? " error" : ""}`;
+  container.replaceChildren(toast);
+  requestAnimationFrame(() => toast.classList.add("visible"));
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    toast.classList.remove("visible");
+    setTimeout(() => toast.remove(), 300);
+  }, 3600);
+};
 
 let engineWorker = null;
 let engineWorkerFailed = false;
@@ -232,6 +367,7 @@ const runScenario = async () => {
     latestResult = payload;
     render(payload);
     byId("scenario-summary").textContent = scenarioSummary(request, payload);
+    updateScenarioUrl();
     setFormStatus(`Updated from ${integer.format(payload.population.sampledHouseholds)} weighted household agents${isStaticSnapshot ? ", computed in your browser" : ""}.`);
   } catch (error) {
     setFormStatus(error instanceof Error ? error.message : "Scenario failed.", true);
@@ -628,15 +764,22 @@ const syncTargetControls = () => {
   byId("exemption-label").classList.toggle("is-disabled", topShareMode);
 };
 
-const applyPreset = (name) => {
-  const presets = {
-    "top-one": { targetMode: "top-share", topShare: 1, exemption: 10, rate: 1 },
-    billionaire: { targetMode: "exemption", topShare: 1, exemption: 1000, rate: 10 },
-    "ten-million": { targetMode: "exemption", topShare: 1, exemption: 10, rate: 5 },
-    universal: { targetMode: "exemption", topShare: 100, exemption: 0, rate: 1, adultBenefit: 1000, childBenefit: 500, directCashShare: 100 },
-  };
-  const preset = presets[name];
+const PRESETS = {
+  "top-one": { targetMode: "top-share", topShare: 1, exemption: 10, rate: 1 },
+  billionaire: { targetMode: "exemption", topShare: 1, exemption: 1000, rate: 10 },
+  "ten-million": { targetMode: "exemption", topShare: 1, exemption: 10, rate: 5 },
+  universal: { targetMode: "exemption", topShare: 100, exemption: 0, rate: 1, adultBenefit: 1000, childBenefit: 500, directCashShare: 100 },
+};
+
+const setPresetFields = (name) => {
+  const preset = PRESETS[name];
   if (!preset) return;
+  // A preset is a complete starting scenario. Reset every dial to its default
+  // first so a dial the preset doesn't touch (e.g. an earlier loan-rate edit)
+  // can't linger and make the shareable `?preset=name` link irreproducible.
+  if (defaultsReady()) {
+    for (const spec of FIELD_SPECS) byId(spec.id).value = defaultFieldValues[spec.id];
+  }
   byId("target-mode").value = preset.targetMode;
   byId("top-share").value = preset.topShare;
   byId("exemption").value = preset.exemption;
@@ -645,6 +788,30 @@ const applyPreset = (name) => {
   if (preset.childBenefit !== undefined) byId("child-benefit").value = preset.childBenefit;
   if (preset.directCashShare !== undefined) byId("direct-cash-share").value = preset.directCashShare;
   syncTargetControls();
+};
+
+const applyPreset = (name) => {
+  if (!PRESETS[name]) return;
+  setPresetFields(name);
+  activePreset = name;
+  void runScenario();
+};
+
+const applyBehaviorPreset = (name) => {
+  // Reduced-form literature anchors (issue #6): full compliance captures the
+  // model's 100%-remittance assumption, the Scandinavian case reflects the low
+  // avoidance elasticities in Seim (2017), and the French ISF case reflects the
+  // heavier avoidance and expatriation documented by Pichet (2007).
+  const presets = {
+    "full-compliance": { avoidance: 0, expatriation: 0, inclusion: 100 },
+    scandinavian: { avoidance: 7, expatriation: 4, inclusion: 85 },
+    "french-isf": { avoidance: 20, expatriation: 15, inclusion: 60 },
+  };
+  const preset = presets[name];
+  if (!preset) return;
+  byId("avoidance-elasticity").value = preset.avoidance;
+  byId("expatriation-share").value = preset.expatriation;
+  byId("private-business-inclusion").value = preset.inclusion;
   void runScenario();
 };
 
@@ -662,9 +829,21 @@ byId("run-button").addEventListener("click", (event) => {
   event.preventDefault();
   void runScenario();
 });
-byId("distribution-strategy").addEventListener("change", renderDistribution);
+// Any manual edit means the form no longer matches a named preset, so the URL
+// falls back to explicit field params. Programmatic .value writes don't fire this.
+byId("scenario-form").addEventListener("input", () => {
+  activePreset = null;
+});
+byId("copy-link-button").addEventListener("click", () => void copyScenarioLink());
+byId("distribution-strategy").addEventListener("change", () => {
+  renderDistribution();
+  updateScenarioUrl();
+});
 byId("target-mode").addEventListener("change", syncTargetControls);
 document.querySelectorAll("[data-preset]").forEach((button) => {
   button.addEventListener("click", () => applyPreset(button.dataset.preset));
+});
+document.querySelectorAll("[data-behavior-preset]").forEach((button) => {
+  button.addEventListener("click", () => applyBehaviorPreset(button.dataset.behaviorPreset));
 });
 void initialize();

@@ -113,6 +113,7 @@ export const runComparison = (
       "Housing sales remain a national, closed-economy transfer channel; the ten-year owner-renter view adds reduced-form price, supply, and rent feedback rather than regional market clearing.",
       "Wealth Gini values treat negative net worth as zero for the inequality calculation.",
       `The ten-year path is a transparent reduced-form projection with ${request.ubi.benefitIndexation === "cpi" ? "CPI-indexed policy benefits (one-year recognition lag)" : "fixed nominal policy benefits"}, a wealth-tax base that compounds with asset returns and erodes with taxes paid, partial wage adjustment, and no private-loan bailout.`,
+      "Taxpayer-response dials act on the aggregate taxed base as reduced-form revenue multipliers: avoidance and the private-business inclusion rate scale year-one collections directly, while expatriation erodes the base gradually over the decade (equivalent to top-tier wealth leaving whenever a positive exemption makes the taxed base top-tier). The ten-year inflation stress grid holds year-one revenue flat, so it reflects avoidance and inclusion but not the gradual expatriation decay.",
       "Cash purchasing-power measures do not assign a dollar welfare value to healthcare or social services delivered in kind.",
       "Percentile targeting resolves an effective exemption from the synthetic weighted population, so its dollar cutoff varies with calibration and sample size.",
       "Accounting checks replay each strategy's aggregate sector-level flows through the double-entry ledger and cross-check them against independent per-household deposit sums; intra-household asset trades net out within the household sector.",
@@ -150,12 +151,14 @@ const runStrategy = (
   request: ComparisonRequestV1,
   strategy: PaymentStrategy,
 ): StrategyOutcome => {
+  const complianceFactor = avoidanceComplianceFactor(request);
   const funding = new Map<string, HouseholdFunding>();
   for (const household of households) {
-    const tax = assessWealthTax(
-      { assets: household.assets, liabilities: household.liabilities },
-      policy,
-    ).annualTax;
+    const tax =
+      assessWealthTax(
+        { assets: household.assets, liabilities: household.liabilities },
+        policy,
+      ).annualTax * complianceFactor;
     funding.set(household.id, fundTax(household, tax, strategy, request));
   }
 
@@ -588,7 +591,10 @@ const buildWealthTaxPolicy = (
     governmentBonds: { inclusionRate: 1, valuationFactor: 1 },
     publicEquity: { inclusionRate: 1, valuationFactor: 1 },
     housing: { inclusionRate: 1, valuationFactor: 1 },
-    privateBusiness: { inclusionRate: 0.7, valuationFactor: 1 },
+    privateBusiness: {
+      inclusionRate: request.behavior.privateBusinessInclusionRate,
+      valuationFactor: 1,
+    },
     retirementAssets: { inclusionRate: 0, valuationFactor: 1 },
   },
   liabilities: {
@@ -599,6 +605,18 @@ const buildWealthTaxPolicy = (
   installments: 4,
   allowDeferral: true,
 });
+
+// Avoidance and evasion erode the reported taxable base in proportion to the
+// statutory rate (issue #6). avoidanceElasticity is the fraction of the base
+// lost per percentage point of rate, so a 2% rate at elasticity 0.1 loses 20%
+// of the base. Because the single-bracket tax is linear in the post-exemption
+// base, scaling the assessed tax by this factor is exactly a base reduction.
+// Elasticity 0 reproduces the full-compliance revenue.
+const avoidanceComplianceFactor = (request: ComparisonRequestV1): number =>
+  Math.max(
+    0,
+    1 - request.behavior.avoidanceElasticity * request.wealthTax.rate * 100,
+  );
 
 const resolveEffectiveExemption = (
   households: readonly SyntheticHousehold[],

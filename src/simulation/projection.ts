@@ -79,6 +79,11 @@ export const buildPolicyProjection = (
     request.ubi.fundingRule === "revenue-constrained"
       ? Math.min(requestedUbi, taxCollected)
       : requestedUbi;
+  const yearOneSurplus = Math.max(0, taxCollected - yearOneProgramBudget);
+  const yearOneM2Injection =
+    newPrivateLoans +
+    governmentDeficit * request.behavior.deficitMonetizationShare -
+    yearOneSurplus;
   let finalYearFlows = {
     taxCollected,
     ubiReceived,
@@ -86,9 +91,7 @@ export const buildPolicyProjection = (
     administrativeCost,
     newPrivateLoans,
     governmentDeficit,
-    m2Injection:
-      newPrivateLoans +
-      governmentDeficit * request.behavior.deficitMonetizationShare,
+    m2Injection: yearOneM2Injection,
   };
 
   let m2 = US_BASELINE.m2;
@@ -150,6 +153,9 @@ export const buildPolicyProjection = (
     const budgetScale = programBudgetYear / Math.max(1, yearOneProgramBudget);
     const rawDeficitYear = Math.max(0, programBudgetYear - taxCollectedYear);
     const governmentDeficitYear = rawDeficitYear < 1_000_000 ? 0 : rawDeficitYear;
+    // Revenue collected beyond the program budget stays at Treasury, removing
+    // deposits from M2 until spent — a drain symmetric to the monetized deficit.
+    const surplusYear = Math.max(0, taxCollectedYear - programBudgetYear);
     const bottom50UbiYear = bottom50AnnualUbi * budgetScale;
 
     const repayments = privateTaxDebt * ANNUAL_LOAN_AMORTIZATION;
@@ -157,7 +163,8 @@ export const buildPolicyProjection = (
     publicDebt += governmentDeficitYear;
     const moneyInjection =
       newPrivateLoansYear - repayments +
-      governmentDeficitYear * request.behavior.deficitMonetizationShare;
+      governmentDeficitYear * request.behavior.deficitMonetizationShare -
+      surplusYear;
     const moneyGrowth = moneyInjection / Math.max(1, m2);
     m2 += moneyInjection;
 
@@ -302,7 +309,12 @@ export const buildPolicyProjection = (
     publicBurdenPerHousehold,
     borrowShare: weights.borrow,
   });
-  const stressTest = buildStressTest(strategies, newPrivateLoans, taxCollected);
+  const stressTest = buildStressTest(
+    strategies,
+    newPrivateLoans,
+    taxCollected,
+    request.ubi.benefitIndexation ?? "none",
+  );
   const theoryTest = buildTheoryTest(request, theoryYears, finalYear.m2Index / 100 - 1);
 
   return {
@@ -320,9 +332,7 @@ export const buildPolicyProjection = (
       newPrivateLoans,
       assetSales,
       governmentDeficit,
-      m2Injection:
-        newPrivateLoans +
-        governmentDeficit * request.behavior.deficitMonetizationShare,
+      m2Injection: yearOneM2Injection,
       finalYear: finalYearFlows,
     },
     summary: {
@@ -483,6 +493,7 @@ const buildStressTest = (
   strategies: Strategies,
   newPrivateLoans: number,
   taxCollected: number,
+  benefitIndexation: "none" | "cpi",
 ): PolicyProjection["stressTest"] => {
   const ubiMultipliers = [0.5, 1, 2, 4, 8] as const;
   const monetizationShares = [0, 0.25, 0.5, 0.75, 1] as const;
@@ -495,6 +506,7 @@ const buildStressTest = (
         taxCollected,
         newPrivateLoans,
         monetizationShare,
+        benefitIndexation,
         demandInflation:
           strategies["cash-first"].macro.estimatedInflationChange * multiplier,
       });
@@ -515,6 +527,7 @@ const buildStressTest = (
       taxCollected,
       newPrivateLoans,
       monetizationShare: 1,
+      benefitIndexation,
       demandInflation:
         strategies["cash-first"].macro.estimatedInflationChange * multiplier,
     });
@@ -545,14 +558,22 @@ const stressPeak = (input: {
   taxCollected: number;
   newPrivateLoans: number;
   monetizationShare: number;
+  benefitIndexation: "none" | "cpi";
   demandInflation: number;
 }): number => {
   let m2 = US_BASELINE.m2;
   let confidence = 1;
   let privateDebt = 0;
+  let priceLevel = 1;
   let peak: number = US_BASELINE.baselineInflation;
-  const deficit = Math.max(0, input.requestedUbi * 1.012 - input.taxCollected);
   for (let year = 1; year <= YEARS; year += 1) {
+    // CPI-indexed benefits grow the stressed outlay with the prior year's
+    // price level (same one-year recognition lag as the main projection).
+    const indexation = input.benefitIndexation === "cpi" ? priceLevel : 1;
+    const deficit = Math.max(
+      0,
+      input.requestedUbi * indexation * 1.012 - input.taxCollected,
+    );
     const repayments = privateDebt * ANNUAL_LOAN_AMORTIZATION;
     privateDebt = Math.max(0, privateDebt + input.newPrivateLoans - repayments);
     const injection =
@@ -567,6 +588,7 @@ const stressPeak = (input: {
     });
     confidence = stress.confidence;
     m2 += injection;
+    priceLevel *= 1 + stress.inflation;
     peak = Math.max(peak, stress.inflation);
   }
   return peak;

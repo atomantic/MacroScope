@@ -779,7 +779,7 @@ const renderStory = () => {
   const kicker = element("p", step.kicker);
   kicker.className = "kicker";
   copy.append(kicker);
-  const title = element("h1", typeof step.title === "function" ? step.title(latestResult) : step.title);
+  const title = element("h1", step.title);
   title.id = "story-title";
   copy.append(title);
   const bodyNode = element("p", step.body(latestResult));

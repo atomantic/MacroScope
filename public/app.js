@@ -763,12 +763,15 @@ const powerChartOptions = (projection) => {
 
 const moneyChartOptions = (projection) => {
   const years = projection.years;
+  // gdpIndex is a newer field; tolerate a stale cached snapshot / engine that
+  // predates it (its no-policy path is a flat 100) so the chart never throws.
+  const gdp = (year) => year.gdpIndex ?? 100;
   return {
-    description: `M2 ends at index ${years.at(-1).m2Index.toFixed(1)}, the price level at ${(years.at(-1).priceLevel * 100).toFixed(1)}, and real GDP per worker at ${years.at(-1).gdpIndex.toFixed(1)}, with 100 before policy.`,
+    description: `M2 ends at index ${years.at(-1).m2Index.toFixed(1)}, the price level at ${(years.at(-1).priceLevel * 100).toFixed(1)}, and real GDP per worker at ${gdp(years.at(-1)).toFixed(1)} (100 = the no-policy path, which itself grows on trend).`,
     series: [
       { label: "M2 money stock", values: years.map((year) => year.m2Index), tone: "series-c" },
       { label: "Price level", values: years.map((year) => year.priceLevel * 100), tone: "series-d" },
-      { label: "Real GDP / worker", values: years.map((year) => year.gdpIndex), tone: "series-a" },
+      { label: "Real GDP / worker vs no policy", values: years.map(gdp), tone: "series-a" },
     ],
     baseline: 100,
     valueSuffix: "",

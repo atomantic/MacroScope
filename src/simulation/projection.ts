@@ -317,11 +317,14 @@ export const buildPolicyProjection = (
     // net worth — not the statutory rate — so it goes to ~0 when a high
     // exemption reaches no one or avoidance guts compliance, and it tracks the
     // base as it erodes or grows over the decade rather than freezing at
-    // year-one collections. (taxCollectedYear already folds in avoidance,
-    // exemption reach, and the annual base multiplier.)
+    // year-one collections. Deflate the (nominal) collection by the price level
+    // first, exactly as the demand impulse does, so nominal appreciation /
+    // inflation of the base can't drive the drag toward 1 purely because prices
+    // rose. (taxCollectedYear already folds in avoidance, exemption reach, and
+    // the annual base multiplier.)
     const collectionDrag = Math.min(
       1,
-      taxCollectedYear / nationalScale / US_BASELINE.householdNetWorth,
+      taxCollectedYear / priceLevel / nationalScale / US_BASELINE.householdNetWorth,
     );
     const investmentDeviation =
       -request.behavior.savingsResponseElasticity * collectionDrag +
@@ -933,13 +936,16 @@ const makeVerdict = (input: {
     input.peakAnnualInflation < 0.1 &&
     input.publicBurdenPerHousehold < 10_000;
   if (harmful) {
-    // Attribute the harm to its actual driver. When neither inflation nor debt
-    // is elevated but the bottom half still ends worse off, the growth/wage
-    // drag from the savings channel — not the financing path — is what did it;
-    // blaming inflation or debt would misdescribe the result.
-    const inflationOrDebtDriven =
-      input.peakAnnualInflation >= 0.2 || input.publicBurdenPerHousehold >= 50_000;
-    const growthDriven = !inflationOrDebtDriven && input.gdpChange <= -0.02;
+    // Attribute the harm to its actual driver. Only call it growth-driven when
+    // inflation is genuinely benign (below the "high" regime, not merely below
+    // the 20% crisis line) and debt is low, so an elevated-but-sub-crisis
+    // inflation that is really doing the damage isn't misreported as a growth
+    // effect just because GDP also dipped. In that quiet-macro corner a
+    // materially negative GDP path is the credible cause of the harm.
+    const growthDriven =
+      input.peakAnnualInflation < 0.1 &&
+      input.publicBurdenPerHousehold < 10_000 &&
+      input.gdpChange <= -0.02;
     return {
       rating: "harmful",
       headline: growthDriven

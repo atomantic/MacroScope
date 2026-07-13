@@ -10,6 +10,7 @@ import { runComparison } from "../simulation/scenarioRunner.js";
 import { parseComparisonRequest } from "./comparisonInput.js";
 import { US_BASELINE } from "../simulation/usBaseline.js";
 import { HISTORICAL_BACKTEST } from "../simulation/historicalValidation.js";
+import { MODEL_CONSTANT_DOCS } from "../simulation/modelConstants.js";
 
 export interface AppOptions {
   readonly startedAt?: number;
@@ -78,6 +79,10 @@ export const createApp = (options: AppOptions = {}): Express => {
 
   app.get("/api/validation/historical", (_request, response) => {
     response.json(HISTORICAL_BACKTEST);
+  });
+
+  app.get("/api/model/constants", (_request, response) => {
+    response.json({ constants: MODEL_CONSTANT_DOCS });
   });
 
   app.post("/api/scenarios/compare", (request, response) => {

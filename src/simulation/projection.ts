@@ -8,32 +8,25 @@ import type {
   WealthGroupOutcome,
 } from "./contracts.js";
 import { US_BASELINE, type UsWealthGroupBaseline } from "./usBaseline.js";
+import { MODEL_CONSTANTS } from "./modelConstants.js";
 
-const YEARS = 10;
-const REAL_GROWTH = 0.01;
-const ANNUAL_LOAN_AMORTIZATION = 0.1;
-// Share of policy-driven excess inflation assumed to pass through into the
-// nominal prices of the taxed asset base each year.
-const ASSET_PRICE_INFLATION_PASS_THROUGH = 0.5;
-// Numerical ceiling on modeled annual inflation. Far above the strict
-// hyperinflation threshold (50%/month ≈ 129x/year) so regime classification
-// is unaffected, but keeps indexed-benefit feedback loops finite over the
-// ten-year horizon for every API-accepted input combination.
-const MAX_ANNUAL_INFLATION = 10_000;
-// Treasury surplus drains cannot destroy the whole money stock: in reality a
-// sustained surplus retires debt or is respent. This reduced-form floor keeps
-// M2 (and everything derived from it) positive for every accepted input.
-const M2_FLOOR = US_BASELINE.m2 * 0.1;
-const STRICT_HYPER_MONTHLY_RATE = 0.5;
-const STRICT_HYPER_ANNUAL_RATE = (1 + STRICT_HYPER_MONTHLY_RATE) ** 12 - 1;
-const BASELINE_RENTER_HOUSING_COST_SHARE = 0.31;
-// Reduced-form split of the bottom 50% between renters and owners. Renters skew
-// heavily to the bottom half; a half-and-half split keeps the winners/losers
-// contrast honest without inventing a within-group tenure distribution.
-const BOTTOM_HALF_RENTER_SHARE = 0.5;
+// Load-bearing model assumptions are documented in ./modelConstants.ts; these
+// aliases keep the projection math readable. Rationale and sources live there.
+const YEARS = MODEL_CONSTANTS.projectionYears;
+const REAL_GROWTH = MODEL_CONSTANTS.realWageGrowth;
+const MAX_ANNUAL_INFLATION = MODEL_CONSTANTS.maxAnnualInflation;
+// Treasury surplus drains cannot destroy the whole money stock, so M2 (and
+// everything derived from it) is floored at a share of its baseline.
+const M2_FLOOR = US_BASELINE.m2 * MODEL_CONSTANTS.m2FloorShare;
+const STRICT_HYPER_MONTHLY_RATE = MODEL_CONSTANTS.strictHyperMonthlyRate;
+const STRICT_HYPER_ANNUAL_RATE =
+  (1 + STRICT_HYPER_MONTHLY_RATE) ** 12 - 1;
+const BASELINE_RENTER_HOUSING_COST_SHARE =
+  MODEL_CONSTANTS.baselineRenterHousingCostShare;
+const BOTTOM_HALF_RENTER_SHARE = MODEL_CONSTANTS.bottomHalfRenterShare;
 // A cohort ends "better off"/"worse off" once its leading real measure clears
 // this band around the no-policy path; inside it the result reads as mixed.
-const GROUP_OUTCOME_BAND = 0.005;
+const GROUP_OUTCOME_BAND = MODEL_CONSTANTS.groupOutcomeBand;
 
 // Reduced-form growth/investment channel (issue #13). The capital stock is
 // tracked as an index relative to the no-policy path. Each year the actual
@@ -90,7 +83,8 @@ export const buildPolicyProjection = (
     0,
     -blended((outcome) => outcome.fiscal.governmentBalance),
   );
-  const governmentDeficit = rawGovernmentDeficit < 1_000_000 ? 0 : rawGovernmentDeficit;
+  const governmentDeficit =
+    rawGovernmentDeficit < MODEL_CONSTANTS.deficitRoundingFloor ? 0 : rawGovernmentDeficit;
   const demandInflation = blended(
     (outcome) => outcome.macro.estimatedInflationChange,
   );
@@ -186,7 +180,9 @@ export const buildPolicyProjection = (
   let privateTaxDebt = 0;
   let publicDebt = 0;
   let confidence = 1;
-  let bottomWageBase = (US_BASELINE.annualPce * 0.3) / (US_BASELINE.households * 0.5);
+  let bottomWageBase =
+    (US_BASELINE.annualPce * MODEL_CONSTANTS.bottomHalfConsumptionShare) /
+    (US_BASELINE.households * MODEL_CONSTANTS.bottomHalfPopulationShare);
   let baselineResources = bottomWageBase;
   const initialBottomResources = bottomWageBase;
   let topWealth = topOnePercentWealth();
@@ -242,13 +238,14 @@ export const buildPolicyProjection = (
         : requestedUbiYear;
     const budgetScale = programBudgetYear / Math.max(1, yearOneProgramBudget);
     const rawDeficitYear = Math.max(0, programBudgetYear - taxCollectedYear);
-    const governmentDeficitYear = rawDeficitYear < 1_000_000 ? 0 : rawDeficitYear;
+    const governmentDeficitYear =
+      rawDeficitYear < MODEL_CONSTANTS.deficitRoundingFloor ? 0 : rawDeficitYear;
     // Revenue collected beyond the program budget stays at Treasury, removing
     // deposits from M2 until spent — a drain symmetric to the monetized deficit.
     const surplusYear = Math.max(0, taxCollectedYear - programBudgetYear);
     const bottom50UbiYear = bottom50AnnualUbi * budgetScale;
 
-    const repayments = privateTaxDebt * ANNUAL_LOAN_AMORTIZATION;
+    const repayments = privateTaxDebt * request.model.loanAmortizationRate;
     privateTaxDebt = Math.max(0, privateTaxDebt + newPrivateLoansYear - repayments);
     publicDebt += governmentDeficitYear;
     const moneyInjection = Math.max(
@@ -270,10 +267,11 @@ export const buildPolicyProjection = (
     const equityDemand = liquiditySeekingAssets - housingDemand;
     const housingPricePressure =
       (housingDemand / Math.max(1, housingWealth)) /
-      (0.25 + request.market.housingSupplyElasticity);
+      (MODEL_CONSTANTS.housingSupplyElasticityFloor +
+        request.market.housingSupplyElasticity);
     const equityPricePressure =
       (equityDemand / Math.max(1, publicEquityWealth)) *
-      (1 + request.market.priceImpactCoefficient * 4);
+      (1 + request.market.priceImpactCoefficient * MODEL_CONSTANTS.equityPriceImpactAmplifier);
     housingPriceIndex *= 1 + housingPricePressure;
     equityPriceIndex *= 1 + equityPricePressure;
     rentPremiumIndex *=
@@ -289,7 +287,9 @@ export const buildPolicyProjection = (
       // or a melting nominal benefit reduces demand pressure while an indexed
       // benefit sustains it. Year 1: budgetScale = priceLevel = 1.
       demandInflation:
-        demandInflation * Math.exp(-(year - 1) / 3) * (budgetScale / priceLevel),
+        demandInflation *
+        Math.exp(-(year - 1) / MODEL_CONSTANTS.demandShockDecayYears) *
+        (budgetScale / priceLevel),
       moneyGrowth,
       monetizedDeficitRatio:
         (governmentDeficitYear * request.behavior.deficitMonetizationShare) /
@@ -342,14 +342,21 @@ export const buildPolicyProjection = (
 
     bottomWageBase *=
       (1 + REAL_GROWTH + US_BASELINE.baselineInflation +
-        Math.max(0, annualInflation - US_BASELINE.baselineInflation) * 0.55) *
+        Math.max(0, annualInflation - US_BASELINE.baselineInflation) *
+          request.model.wagePassThrough) *
       capitalWageFactor;
     baselineResources *= 1 + REAL_GROWTH + US_BASELINE.baselineInflation;
     const policyRealResources = (bottomWageBase + bottom50UbiYear) / priceLevel;
     const baselineRealResources = baselineResources / baselinePriceLevel;
 
-    const topTaxBurden = taxCollectedYear * 0.8;
-    const interestCost = privateTaxDebt * request.behavior.loanInterestRate * 0.8;
+    // topTaxIncidenceShare scopes ONLY this aggregate top-1% wealth trajectory
+    // (a reduced-form "how much of all collected tax lands on the top tier"
+    // proxy). Per-cohort outcomes in buildGroupOutcomes attribute tax precisely
+    // by each cohort's taxable base (groupRealWealthChange), so they intentionally
+    // do not read this dial — keeping default per-cohort output unchanged.
+    const topTaxBurden = taxCollectedYear * request.model.topTaxIncidenceShare;
+    const interestCost =
+      privateTaxDebt * request.behavior.loanInterestRate * request.model.topTaxIncidenceShare;
     topWealth = Math.max(
       0,
       topWealth * (1 + request.behavior.annualAssetReturn) - topTaxBurden - interestCost,
@@ -425,7 +432,7 @@ export const buildPolicyProjection = (
         (1 +
           request.behavior.annualAssetReturn +
           Math.max(0, annualInflation - US_BASELINE.baselineInflation) *
-            ASSET_PRICE_INFLATION_PASS_THROUGH) *
+            request.model.assetPriceInflationPassThrough) *
         (1 - effectiveTaxRate) *
         expatriationRetention,
     );
@@ -444,12 +451,14 @@ export const buildPolicyProjection = (
     publicBurdenPerHousehold,
     gdpChange,
     borrowShare: weights.borrow,
+    harmfulPeakInflation: request.model.verdictHarmfulInflation,
   });
   const stressTest = buildStressTest(
     strategies,
     newPrivateLoans,
     taxCollected,
     request.ubi.benefitIndexation ?? "none",
+    request.model.loanAmortizationRate,
   );
   const theoryTest = buildTheoryTest(request, theoryYears, finalYear.m2Index / 100 - 1);
 
@@ -534,10 +543,12 @@ const buildTheoryTest = (
     years.slice(1).reduce((sum, year) => sum + year.liquiditySeekingAssets, 0) /
     Math.max(1, years.length - 1);
 
-  const hasMonetaryLink = cumulativeM2Change > 0.005;
-  const hasAssetLink = housingPriceChange > 0.005 || equityPriceChange > 0.005;
-  const hasRenterHarm = bottomRenterHousingBurdenChange > 0.005;
-  const hasWiderPositionGap = housingPositionGapChange > 0.01;
+  const { linkThreshold, positionGapThreshold } = MODEL_CONSTANTS.theoryTest;
+  const hasMonetaryLink = cumulativeM2Change > linkThreshold;
+  const hasAssetLink =
+    housingPriceChange > linkThreshold || equityPriceChange > linkThreshold;
+  const hasRenterHarm = bottomRenterHousingBurdenChange > linkThreshold;
+  const hasWiderPositionGap = housingPositionGapChange > positionGapThreshold;
   const rating =
     hasMonetaryLink && hasAssetLink && hasRenterHarm && hasWiderPositionGap
       ? "active"
@@ -790,21 +801,25 @@ export const inflationFromStress = (input: InflationStressInput): {
   inflation: number;
   confidence: number;
 } => {
-  const financingStress = Math.max(0, input.moneyGrowth - 0.025);
+  const kernel = MODEL_CONSTANTS.inflationKernel;
+  const financingStress = Math.max(0, input.moneyGrowth - kernel.financingStressThreshold);
   const confidenceLoss = Math.max(
     0,
-    financingStress * 0.22 + input.monetizedDeficitRatio * 0.35 - 0.015,
+    financingStress * kernel.financingConfidenceWeight +
+      input.monetizedDeficitRatio * kernel.monetizedConfidenceWeight -
+      kernel.confidenceLossBuffer,
   );
-  const confidence = Math.max(0.05, input.priorConfidence - confidenceLoss);
-  const velocityPressure = (1 - confidence) ** 2 * 1.5;
+  const confidence = Math.max(kernel.minimumConfidence, input.priorConfidence - confidenceLoss);
+  const velocityPressure =
+    (1 - confidence) ** kernel.velocityExponent * kernel.velocityCoefficient;
   const inflation = Math.min(
     MAX_ANNUAL_INFLATION,
     Math.max(
-      -0.02,
+      kernel.inflationFloor,
       input.baselineInflation +
         input.demandInflation +
-        financingStress * 0.35 +
-        input.monetizedDeficitRatio * 0.25 +
+        financingStress * kernel.financingInflationWeight +
+        input.monetizedDeficitRatio * kernel.monetizedInflationWeight +
         velocityPressure,
     ),
   );
@@ -816,9 +831,10 @@ const buildStressTest = (
   newPrivateLoans: number,
   taxCollected: number,
   benefitIndexation: "none" | "cpi",
+  loanAmortizationRate: number,
 ): PolicyProjection["stressTest"] => {
-  const ubiMultipliers = [0.5, 1, 2, 4, 8] as const;
-  const monetizationShares = [0, 0.25, 0.5, 0.75, 1] as const;
+  const ubiMultipliers = MODEL_CONSTANTS.stress.ubiMultipliers;
+  const monetizationShares = MODEL_CONSTANTS.stress.monetizationShares;
   const requestedUbi = strategies["cash-first"].fiscal.requestedUbi;
   const cells: StressCell[] = [];
   for (const multiplier of ubiMultipliers) {
@@ -829,6 +845,7 @@ const buildStressTest = (
         newPrivateLoans,
         monetizationShare,
         benefitIndexation,
+        loanAmortizationRate,
         demandInflation:
           strategies["cash-first"].macro.estimatedInflationChange * multiplier,
       });
@@ -843,13 +860,18 @@ const buildStressTest = (
   }
 
   let firstUbiMultiplierAtFullMonetization: number | null = null;
-  for (let multiplier = 1; multiplier <= 4_096; multiplier *= 2) {
+  for (
+    let multiplier = 1;
+    multiplier <= MODEL_CONSTANTS.stress.maxSearchMultiplier;
+    multiplier *= 2
+  ) {
     const peak = stressPeak({
       requestedUbi: requestedUbi * multiplier,
       taxCollected,
       newPrivateLoans,
       monetizationShare: 1,
       benefitIndexation,
+      loanAmortizationRate,
       demandInflation:
         strategies["cash-first"].macro.estimatedInflationChange * multiplier,
     });
@@ -869,7 +891,7 @@ const buildStressTest = (
       annualInflationEquivalent: STRICT_HYPER_ANNUAL_RATE,
       explanation:
         firstUbiMultiplierAtFullMonetization === null
-          ? "No strict hyperinflation breach occurs even at 4,096× the selected UBI under this reduced-form stress test."
+          ? `No strict hyperinflation breach occurs even at ${MODEL_CONSTANTS.stress.maxSearchMultiplier.toLocaleString("en-US")}× the selected UBI under this reduced-form stress test.`
           : `The first tested strict breach occurs around ${firstUbiMultiplierAtFullMonetization}× the selected UBI only when its unfunded portion is fully monetized and confidence is allowed to erode.`,
     },
   };
@@ -881,6 +903,7 @@ const stressPeak = (input: {
   newPrivateLoans: number;
   monetizationShare: number;
   benefitIndexation: "none" | "cpi";
+  loanAmortizationRate: number;
   demandInflation: number;
 }): number => {
   let m2 = US_BASELINE.m2;
@@ -892,11 +915,11 @@ const stressPeak = (input: {
     // CPI-indexed benefits grow the stressed outlay with the prior year's
     // price level (same one-year recognition lag as the main projection).
     const indexation = input.benefitIndexation === "cpi" ? priceLevel : 1;
-    const outlay = input.requestedUbi * indexation * 1.012;
+    const outlay = input.requestedUbi * indexation * (1 + MODEL_CONSTANTS.stress.outlayGrowth);
     const deficit = Math.max(0, outlay - input.taxCollected);
     // Same Treasury-surplus drain and M2 floor as the main projection loop.
     const surplus = Math.max(0, input.taxCollected - outlay);
-    const repayments = privateDebt * ANNUAL_LOAN_AMORTIZATION;
+    const repayments = privateDebt * input.loanAmortizationRate;
     privateDebt = Math.max(0, privateDebt + input.newPrivateLoans - repayments);
     const injection = Math.max(
       input.newPrivateLoans - repayments +
@@ -926,15 +949,17 @@ const makeVerdict = (input: {
   publicBurdenPerHousehold: number;
   gdpChange: number;
   borrowShare: number;
+  harmfulPeakInflation: number;
 }): PolicyProjection["verdict"] => {
+  const v = MODEL_CONSTANTS.verdict;
   const harmful =
-    input.bottom50PurchasingPowerChange < -0.02 ||
-    input.peakAnnualInflation >= 0.2 ||
-    input.publicBurdenPerHousehold >= 50_000;
+    input.bottom50PurchasingPowerChange < v.harmfulPurchasingPowerDrop ||
+    input.peakAnnualInflation >= input.harmfulPeakInflation ||
+    input.publicBurdenPerHousehold >= v.harmfulPublicBurdenPerHousehold;
   const beneficial =
-    input.bottom50PurchasingPowerChange >= 0.02 &&
-    input.peakAnnualInflation < 0.1 &&
-    input.publicBurdenPerHousehold < 10_000;
+    input.bottom50PurchasingPowerChange >= v.beneficialPurchasingPowerGain &&
+    input.peakAnnualInflation < v.beneficialPeakInflation &&
+    input.publicBurdenPerHousehold < v.beneficialPublicBurdenPerHousehold;
   if (harmful) {
     // Attribute the harm to its actual driver. Only call it growth-driven when
     // inflation stays in the "stable" regime (below the 5% "elevated" band, i.e.
@@ -960,7 +985,7 @@ const makeVerdict = (input: {
     return {
       rating: "beneficial",
       headline:
-        input.borrowShare > 0.5
+        input.borrowShare > v.fragileBorrowShare
           ? "The bottom half gains, but borrowing makes the result more fragile."
           : "The bottom half gains buying power without a modeled inflation crisis.",
       explanation:
@@ -979,19 +1004,22 @@ const regimeForInflation = (annualInflation: number): InflationRegime => {
   if (annualToMonthly(annualInflation) >= STRICT_HYPER_MONTHLY_RATE) {
     return "hyperinflation";
   }
-  if (annualInflation >= 5) return "extreme";
-  if (annualInflation >= 0.5) return "crisis";
-  if (annualInflation >= 0.1) return "high";
-  if (annualInflation >= 0.05) return "elevated";
+  const regime = MODEL_CONSTANTS.regimeThresholds;
+  if (annualInflation >= regime.extreme) return "extreme";
+  if (annualInflation >= regime.crisis) return "crisis";
+  if (annualInflation >= regime.high) return "high";
+  if (annualInflation >= regime.elevated) return "elevated";
   return "stable";
 };
 
-const annualToMonthly = (annualRate: number): number =>
-  Math.max(-0.99, (1 + Math.max(-0.99, annualRate)) ** (1 / 12) - 1);
+const annualToMonthly = (annualRate: number): number => {
+  const floor = MODEL_CONSTANTS.minPeriodRate;
+  return Math.max(floor, (1 + Math.max(floor, annualRate)) ** (1 / 12) - 1);
+};
 
 const topOnePercentWealth = (): number =>
   US_BASELINE.wealthGroups
-    .filter((group) => group.percentileMinimum >= 0.99)
+    .filter((group) => group.percentileMinimum >= MODEL_CONSTANTS.topOnePercentPercentile)
     .reduce((sum, group) => sum + group.netWorth, 0);
 
 const totalHousingWealth = (): number =>

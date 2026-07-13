@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f2efe7" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./styles.css?v=11" />
+    <link rel="stylesheet" href="./styles.css?v=13" />
     <title>MacroScope</title>
   </head>
   <body>
@@ -274,12 +274,14 @@
             <button class="preset-share-button" id="copy-link-button" type="button">Copy scenario link</button>
             <a class="preset-reference-link" href="#policy-references">See real-world precedents ↓</a>
           </div>
-          <fieldset>
+          <fieldset class="wealth-tax-fieldset">
             <legend>Wealth tax</legend>
-            <label for="target-mode">Target by<select id="target-mode" name="targetMode"><option value="exemption">Dollar exemption</option><option value="top-share">Top wealth share</option></select></label>
-            <label for="exemption" id="exemption-label">Exemption ($M)<input id="exemption" name="exemption" type="number" min="0" max="1000000" step="1" /></label>
-            <label for="top-share" id="top-share-label">Top share (%)<input id="top-share" name="topShare" type="number" min="0.01" max="100" step="0.1" /></label>
-            <label for="tax-rate" id="tax-rate-label">Annual rate (%)<input id="tax-rate" name="taxRate" type="number" min="0" max="20" step="0.1" /></label>
+            <div class="wealth-tax-controls">
+              <label for="target-mode">Target by<select id="target-mode" name="targetMode"><option value="exemption">Dollar exemption</option><option value="top-share">Top wealth share</option></select></label>
+              <label for="exemption" id="exemption-label">Exemption ($M)<input id="exemption" name="exemption" type="number" min="0" max="1000000" step="1" /></label>
+              <label for="top-share" id="top-share-label">Top share (%)<input id="top-share" name="topShare" type="number" min="0.01" max="100" step="0.1" /></label>
+              <label for="tax-rate" id="tax-rate-label">Annual rate (%)<input id="tax-rate" name="taxRate" type="number" min="0" max="20" step="0.1" /></label>
+            </div>
             <div class="bracket-editor" id="bracket-editor">
               <div class="bracket-editor-head">
                 <span>Graduated brackets</span>
@@ -322,11 +324,13 @@
               <label for="private-business-inclusion">Private-business included (%)<input id="private-business-inclusion" name="privateBusinessInclusionRate" type="number" min="0" max="100" step="5" /><small class="field-hint">Share of hard-to-value private-business wealth actually captured in the base after valuation discounts.</small></label>
             </div>
           </fieldset>
-          <fieldset>
+          <fieldset class="split-fieldset">
             <legend>Macro assumptions</legend>
-            <label for="asset-return">Annual asset return (%)<input id="asset-return" name="assetReturn" type="number" min="-50" max="50" step="0.5" /></label>
-            <label for="monetization">Deficit monetized (%)<input id="monetization" name="monetization" type="number" min="0" max="100" step="5" /></label>
-            <label for="buyer-depth">Buyer depth (% equity)<input id="buyer-depth" name="buyerDepth" type="number" min="0.1" max="200" step="0.1" /></label>
+            <div class="split-fieldset-grid">
+              <label for="asset-return">Annual asset return (%)<input id="asset-return" name="assetReturn" type="number" min="-50" max="50" step="0.5" /></label>
+              <label for="monetization">Deficit monetized (%)<input id="monetization" name="monetization" type="number" min="0" max="100" step="5" /></label>
+              <label for="buyer-depth">Buyer depth (% equity)<input id="buyer-depth" name="buyerDepth" type="number" min="0.1" max="200" step="0.1" /></label>
+            </div>
           </fieldset>
           <fieldset class="behavior-fieldset">
             <legend>Growth channel</legend>
@@ -335,12 +339,14 @@
               <label for="demand-offset">Demand growth offset<input id="demand-offset" name="demandGrowthOffset" type="number" min="0" max="3" step="0.1" /><small class="field-hint">How strongly the transfer's demand impulse (program budget as a share of GDP) feeds investment and output the other way. 0 turns the offset off; raise it to model redistribution to high-spending households lifting demand.</small></label>
             </div>
           </fieldset>
-          <fieldset>
+          <fieldset class="split-fieldset">
             <legend>Asset feedback</legend>
-            <label for="asset-hedge-share">New liquidity to assets (%)<input id="asset-hedge-share" name="assetHedgeShare" type="number" min="0" max="100" step="5" /></label>
-            <label for="housing-hedge-share">Asset flow to housing (%)<input id="housing-hedge-share" name="housingHedgeShare" type="number" min="0" max="100" step="5" /></label>
-            <label for="housing-supply">Housing supply response<input id="housing-supply" name="housingSupply" type="number" min="0" max="2" step="0.1" /></label>
-            <label for="rent-pass-through">Price gain passed to rent (%)<input id="rent-pass-through" name="rentPassThrough" type="number" min="0" max="100" step="5" /></label>
+            <div class="split-fieldset-grid">
+              <label for="asset-hedge-share">New liquidity to assets (%)<input id="asset-hedge-share" name="assetHedgeShare" type="number" min="0" max="100" step="5" /></label>
+              <label for="housing-hedge-share">Asset flow to housing (%)<input id="housing-hedge-share" name="housingHedgeShare" type="number" min="0" max="100" step="5" /></label>
+              <label for="housing-supply">Housing supply response<input id="housing-supply" name="housingSupply" type="number" min="0" max="2" step="0.1" /></label>
+              <label for="rent-pass-through">Price gain passed to rent (%)<input id="rent-pass-through" name="rentPassThrough" type="number" min="0" max="100" step="5" /></label>
+            </div>
           </fieldset>
           <details class="advanced-controls">
             <summary>Advanced simulation controls</summary>
@@ -349,6 +355,15 @@
               <label for="sample-size">Sample size<select id="sample-size" name="sampleSize"><option value="1000">1,000</option><option value="4000">4,000</option><option value="8000">8,000</option></select></label>
               <label for="price-impact">Price impact<input id="price-impact" name="priceImpact" type="number" min="0" max="2" step="0.05" /></label>
               <label for="maximum-ltv">Maximum LTV (%)<input id="maximum-ltv" name="maximumLtv" type="number" min="10" max="90" step="1" /></label>
+            </div>
+            <p class="advanced-controls-note">Model constants — normally fixed calibration assumptions, exposed here as tunable dials. Defaults reproduce the calibrated baseline exactly; see the constants table under <a href="#caveats" class="caveat-link">Model boundaries</a> for the rationale and source behind each.</p>
+            <div>
+              <label for="wage-pass-through">Wage pass-through (%)<input id="wage-pass-through" name="wagePassThrough" type="number" min="0" max="100" step="1" /></label>
+              <label for="loan-amortization">Loan amortization (%/yr)<input id="loan-amortization" name="loanAmortization" type="number" min="0" max="100" step="1" /></label>
+              <label for="top-tax-incidence">Top-1% aggregate tax incidence (%)<input id="top-tax-incidence" name="topTaxIncidence" type="number" min="0" max="100" step="1" /></label>
+              <label for="monetary-offset">Monetary-policy offset (%)<input id="monetary-offset" name="monetaryOffset" type="number" min="0" max="100" step="1" /></label>
+              <label for="asset-price-passthrough">Asset-price inflation pass-through (%)<input id="asset-price-passthrough" name="assetPricePassThrough" type="number" min="0" max="100" step="1" /></label>
+              <label for="verdict-harmful-inflation">Verdict harmful inflation (%)<input id="verdict-harmful-inflation" name="verdictHarmfulInflation" type="number" min="5" max="200" step="1" /></label>
             </div>
           </details>
           <div class="form-actions">
@@ -379,7 +394,13 @@
           <h3>Consumption sectors</h3>
           <div class="table-scroll"><table><thead><tr><th>Sector</th><th>Cash first</th><th>Borrow first</th><th>Sell first</th></tr></thead><tbody id="sector-body"></tbody></table></div>
         </div>
-        <div class="caveats" id="caveats"><h3>Model boundaries</h3><ul id="caveat-list"></ul></div>
+        <div class="caveats" id="caveats"><h3>Model boundaries</h3><ul id="caveat-list"></ul>
+          <div class="model-constants">
+            <h4>Model constants</h4>
+            <p class="model-constants-note">The load-bearing numeric assumptions behind every figure, each with a one-line rationale and source. Rows marked <span class="constant-tunable-badge">Tunable</span> can be changed under Advanced simulation controls.</p>
+            <div class="table-scroll"><table class="model-constants-table"><thead><tr><th>Constant</th><th>Default</th><th>Why / source</th></tr></thead><tbody id="model-constants-body"></tbody></table></div>
+          </div>
+        </div>
       </details>
 
       <section class="policy-references" id="policy-references" aria-labelledby="policy-references-heading">
@@ -428,6 +449,6 @@
       <nav aria-label="Developer endpoints"><a href="/health">Health</a><a href="/api/status">Engine</a><a href="/api/baseline/us">U.S. baseline</a><a href="/api/scenarios/default">Scenario JSON</a></nav>
     </footer>
     <div class="toast-container" id="toast-container" aria-live="polite" aria-atomic="true"></div>
-    <script src="./app.js?v=11" type="module"></script>
+    <script src="./app.js?v=13" type="module"></script>
   </body>
 </html>

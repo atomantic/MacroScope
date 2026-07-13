@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f2efe7" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./styles.css?v=4" />
+    <link rel="stylesheet" href="./styles.css?v=5" />
     <title>MacroScope</title>
   </head>
   <body>
@@ -194,12 +194,31 @@
             <button type="button" data-preset="ten-million">5% over $10M</button>
             <button type="button" data-preset="universal">Universal 1% + UBI</button>
           </div>
+          <div class="policy-presets policy-presets-real" aria-label="Real-world policy presets">
+            <span>Or a real proposal</span>
+            <button type="button" data-preset="warren-2020">Warren 2020</button>
+            <button type="button" data-preset="sanders-2020">Sanders 2020</button>
+            <button type="button" data-preset="current-law">Current law (no tax)</button>
+            <a class="preset-reference-link" href="#policy-references">See real-world precedents ↓</a>
+          </div>
           <fieldset>
             <legend>Wealth tax</legend>
             <label for="target-mode">Target by<select id="target-mode" name="targetMode"><option value="exemption">Dollar exemption</option><option value="top-share">Top wealth share</option></select></label>
             <label for="exemption" id="exemption-label">Exemption ($M)<input id="exemption" name="exemption" type="number" min="0" max="1000000" step="1" /></label>
             <label for="top-share" id="top-share-label">Top share (%)<input id="top-share" name="topShare" type="number" min="0.01" max="100" step="0.1" /></label>
-            <label for="tax-rate">Annual rate (%)<input id="tax-rate" name="taxRate" type="number" min="0" max="20" step="0.1" /></label>
+            <label for="tax-rate" id="tax-rate-label">Annual rate (%)<input id="tax-rate" name="taxRate" type="number" min="0" max="20" step="0.1" /></label>
+            <div class="bracket-editor" id="bracket-editor">
+              <div class="bracket-editor-head">
+                <span>Graduated brackets</span>
+                <small id="bracket-mode-note">Off — a single flat rate applies above the exemption.</small>
+              </div>
+              <div id="bracket-rows" class="bracket-rows"></div>
+              <div class="bracket-actions">
+                <button type="button" id="add-bracket">Add bracket</button>
+                <button type="button" id="clear-brackets">Use single rate</button>
+              </div>
+              <p class="bracket-error" id="bracket-error" role="alert" hidden></p>
+            </div>
           </fieldset>
           <fieldset>
             <legend>Redistribution</legend>
@@ -269,6 +288,39 @@
         <div class="caveats"><h3>Model boundaries</h3><ul id="caveat-list"></ul></div>
       </details>
 
+      <section class="policy-references" id="policy-references" aria-labelledby="policy-references-heading">
+        <p class="kicker">Real-world policy references</p>
+        <h2 id="policy-references-heading">Named proposals and historical precedents.</h2>
+        <p class="policy-references-intro">The presets above encode the published parameters of actual proposals. These cards are reference material, not simulations — compare the model's output against what named plans specified and what wealth taxes actually did abroad.</p>
+        <div class="reference-grid">
+          <article class="reference-card" data-kind="proposal">
+            <h3>Warren 2020 — Ultra-Millionaire Tax</h3>
+            <p>Senator Elizabeth Warren's plan set a graduated annual tax: <strong>2% on net worth above $50M</strong> and <strong>6% above $1B</strong> (raised from an initial 3% surtax on billionaires). Estimated by Saez and Zucman to raise roughly $3.75T over ten years.</p>
+            <a href="https://elizabethwarren.com/plans/ultra-millionaire-tax" target="_blank" rel="noreferrer">Warren campaign — Ultra-Millionaire Tax</a>
+          </article>
+          <article class="reference-card" data-kind="proposal">
+            <h3>Sanders 2020 — Tax on Extreme Wealth</h3>
+            <p>Senator Bernie Sanders proposed an eight-bracket schedule for married couples rising from <strong>1% above $32M</strong> to <strong>8% above $10B</strong> (thresholds halved for single filers). Saez and Zucman estimated about $4.35T over ten years.</p>
+            <a href="https://berniesanders.com/issues/tax-extreme-wealth/" target="_blank" rel="noreferrer">Sanders campaign — Tax on Extreme Wealth</a>
+          </article>
+          <article class="reference-card" data-kind="history">
+            <h3>France — ISF (repealed 2017)</h3>
+            <p>France levied the impôt de solidarité sur la fortune on net wealth for decades before replacing it with a real-estate-only tax (IFI) in 2018. Studies of the pre-repeal period documented meaningful expatriation of high-net-worth taxpayers and contested revenue relative to administrative cost.</p>
+            <a href="https://www.oecd.org/tax/the-role-and-design-of-net-wealth-taxes-in-the-oecd-9789264290303-en.htm" target="_blank" rel="noreferrer">OECD — Role and Design of Net Wealth Taxes</a>
+          </article>
+          <article class="reference-card" data-kind="history">
+            <h3>Still operating — Norway, Switzerland, Spain</h3>
+            <p>Three European systems still run annual net-wealth taxes. Switzerland's cantonal tax is long-standing and yields comparatively high revenue with low thresholds; Norway and Spain tax net wealth above exemptions but at rates far below the Warren/Sanders proposals, which shapes their observed behavioral response.</p>
+            <a href="https://www.oecd.org/tax/the-role-and-design-of-net-wealth-taxes-in-the-oecd-9789264290303-en.htm" target="_blank" rel="noreferrer">OECD — Role and Design of Net Wealth Taxes</a>
+          </article>
+          <article class="reference-card" data-kind="history">
+            <h3>Sweden — repealed 2007</h3>
+            <p>Sweden taxed net wealth until abolishing the levy in 2007 amid concerns about capital flight, valuation difficulty, and revenue that fell short of expectations. Its experience is frequently cited in debates over whether a broad-based wealth tax is administrable.</p>
+            <a href="https://www.oecd.org/tax/the-role-and-design-of-net-wealth-taxes-in-the-oecd-9789264290303-en.htm" target="_blank" rel="noreferrer">OECD — Role and Design of Net Wealth Taxes</a>
+          </article>
+        </div>
+      </section>
+
       <section class="sources" aria-labelledby="sources-heading">
         <p class="kicker">Calibration and definitions</p>
         <h2 id="sources-heading">Built on official U.S. data.</h2>
@@ -280,6 +332,6 @@
       <span>Conditional, transparent scenarios — not forecasts or financial advice.</span>
       <nav aria-label="Developer endpoints"><a href="/health">Health</a><a href="/api/status">Engine</a><a href="/api/baseline/us">U.S. baseline</a><a href="/api/scenarios/default">Scenario JSON</a></nav>
     </footer>
-    <script src="./app.js?v=5" defer></script>
+    <script src="./app.js?v=6" defer></script>
   </body>
 </html>

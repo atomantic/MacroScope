@@ -47,12 +47,19 @@ const initialize = async () => {
       byId("service-status-text").textContent = "In-browser model";
       byId("baseline-label").textContent = `${baseline.label} · ${baseline.vintage} Fed wealth data · ${compactNumber(baseline.households)} households`;
       renderSources(baseline.sources);
-      populateForm(defaults);
+      const urlState = readStateFromUrl();
+      populateForm(urlState ? mergeRequest(defaults, urlState) : defaults);
+      if (typeof Worker !== "undefined") ensureEngineWorker();
+      if (urlState) {
+        // A shared link carries a specific scenario — compute it rather than
+        // showing the generic published snapshot.
+        await runScenario();
+        return;
+      }
       latestResult = snapshot;
       render(snapshot);
       byId("scenario-summary").textContent = scenarioSummary(defaults, snapshot);
       setFormStatus("Default scenario shown. Change any assumption and recalculate — the model runs in your browser.");
-      if (typeof Worker !== "undefined") ensureEngineWorker();
       return;
     }
     const [healthResponse, defaultResponse, baselineResponse] = await Promise.all([
@@ -70,7 +77,8 @@ const initialize = async () => {
     byId("service-status-text").textContent = health.status;
     byId("baseline-label").textContent = `${baseline.label} · ${baseline.vintage} Fed wealth data · ${compactNumber(baseline.households)} households`;
     renderSources(baseline.sources);
-    populateForm(defaults);
+    const urlState = readStateFromUrl();
+    populateForm(urlState ? mergeRequest(defaults, urlState) : defaults);
     await runScenario();
   } catch (error) {
     setFormStatus(error instanceof Error ? error.message : "Unable to initialize.", true);
@@ -107,44 +115,187 @@ const populateForm = (request) => {
   byId("asset-hedge-share").value = request.behavior.assetHedgeShare * 100;
   byId("housing-hedge-share").value = request.behavior.housingHedgeShare * 100;
   byId("rent-pass-through").value = request.behavior.rentPassThrough * 100;
+  renderBrackets(request.wealthTax.brackets);
   syncTargetControls();
 };
 
-const formRequest = () => ({
-  schemaVersion: 1,
-  seed: Number(byId("seed").value),
-  sampleSize: Number(byId("sample-size").value),
-  representedHouseholds,
-  wealthTax: {
-    targetMode: byId("target-mode").value,
-    exemption: Number(byId("exemption").value) * 1_000_000,
-    topShare: Number(byId("top-share").value) / 100,
-    rate: Number(byId("tax-rate").value) / 100,
-  },
-  ubi: {
-    adultMonthlyBenefit: Number(byId("adult-benefit").value),
-    childMonthlyBenefit: Number(byId("child-benefit").value),
-    fundingRule: byId("funding-rule").value,
-    benefitIndexation: byId("benefit-indexation").value,
-    directCashShare: Number(byId("direct-cash-share").value) / 100,
-    administrativeShare: Number(byId("administrative-share").value) / 100,
-  },
-  market: {
-    buyerDepthRatio: Number(byId("buyer-depth").value) / 100,
-    priceImpactCoefficient: Number(byId("price-impact").value),
-    maximumCollateralLtv: Number(byId("maximum-ltv").value) / 100,
-    housingSupplyElasticity: Number(byId("housing-supply").value),
-  },
-  behavior: {
-    borrowShare: Number(byId("borrow-share").value) / 100,
-    sellShare: Number(byId("sell-share").value) / 100,
-    annualAssetReturn: Number(byId("asset-return").value) / 100,
-    loanInterestRate: Number(byId("loan-rate").value) / 100,
-    deficitMonetizationShare: Number(byId("monetization").value) / 100,
-    assetHedgeShare: Number(byId("asset-hedge-share").value) / 100,
-    housingHedgeShare: Number(byId("housing-hedge-share").value) / 100,
-    rentPassThrough: Number(byId("rent-pass-through").value) / 100,
-  },
+const formRequest = () => {
+  const brackets = readBracketRows();
+  return {
+    schemaVersion: 1,
+    seed: Number(byId("seed").value),
+    sampleSize: Number(byId("sample-size").value),
+    representedHouseholds,
+    wealthTax: {
+      targetMode: byId("target-mode").value,
+      exemption: Number(byId("exemption").value) * 1_000_000,
+      topShare: Number(byId("top-share").value) / 100,
+      rate: Number(byId("tax-rate").value) / 100,
+      ...(brackets.length > 0 ? { brackets } : {}),
+    },
+    ubi: {
+      adultMonthlyBenefit: Number(byId("adult-benefit").value),
+      childMonthlyBenefit: Number(byId("child-benefit").value),
+      fundingRule: byId("funding-rule").value,
+      benefitIndexation: byId("benefit-indexation").value,
+      directCashShare: Number(byId("direct-cash-share").value) / 100,
+      administrativeShare: Number(byId("administrative-share").value) / 100,
+    },
+    market: {
+      buyerDepthRatio: Number(byId("buyer-depth").value) / 100,
+      priceImpactCoefficient: Number(byId("price-impact").value),
+      maximumCollateralLtv: Number(byId("maximum-ltv").value) / 100,
+      housingSupplyElasticity: Number(byId("housing-supply").value),
+    },
+    behavior: {
+      borrowShare: Number(byId("borrow-share").value) / 100,
+      sellShare: Number(byId("sell-share").value) / 100,
+      annualAssetReturn: Number(byId("asset-return").value) / 100,
+      loanInterestRate: Number(byId("loan-rate").value) / 100,
+      deficitMonetizationShare: Number(byId("monetization").value) / 100,
+      assetHedgeShare: Number(byId("asset-hedge-share").value) / 100,
+      housingHedgeShare: Number(byId("housing-hedge-share").value) / 100,
+      rentPassThrough: Number(byId("rent-pass-through").value) / 100,
+    },
+  };
+};
+
+// --- Graduated bracket editor -------------------------------------------------
+// Rows hold absolute thresholds in $M and rates in %. When at least one row is
+// present the schedule replaces the flat rate, and its lowest threshold acts as
+// the exemption (mirroring the server's normalizeWealthTax).
+const makeBracketRow = (thresholdMillions = "", ratePercent = "") => {
+  const row = document.createElement("div");
+  row.className = "bracket-row";
+  const threshold = document.createElement("input");
+  threshold.type = "number";
+  threshold.min = "0";
+  threshold.step = "1";
+  threshold.className = "bracket-threshold";
+  threshold.placeholder = "Above $M";
+  threshold.setAttribute("aria-label", "Bracket threshold in millions of dollars");
+  threshold.value = thresholdMillions;
+  const rate = document.createElement("input");
+  rate.type = "number";
+  rate.min = "0";
+  rate.max = "20";
+  rate.step = "0.1";
+  rate.className = "bracket-rate";
+  rate.placeholder = "Rate %";
+  rate.setAttribute("aria-label", "Bracket annual rate in percent");
+  rate.value = ratePercent;
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "bracket-remove";
+  remove.textContent = "Remove";
+  remove.setAttribute("aria-label", "Remove this bracket");
+  remove.addEventListener("click", () => {
+    row.remove();
+    syncBracketMode();
+  });
+  row.append(element("span", "$"), threshold, element("span", "M →"), rate, element("span", "%"), remove);
+  return row;
+};
+
+const renderBrackets = (brackets) => {
+  const container = byId("bracket-rows");
+  container.replaceChildren(
+    ...(brackets ?? []).map((bracket) =>
+      makeBracketRow(bracket.threshold / 1_000_000, round4(bracket.rate * 100)),
+    ),
+  );
+  setBracketError(null);
+  syncBracketMode();
+};
+
+const readBracketRows = () =>
+  [...byId("bracket-rows").querySelectorAll(".bracket-row")].map((row) => ({
+    threshold: Number(row.querySelector(".bracket-threshold").value) * 1_000_000,
+    rate: Number(row.querySelector(".bracket-rate").value) / 100,
+  }));
+
+const validateBrackets = (brackets) => {
+  let previousThreshold = -Infinity;
+  let previousRate = -Infinity;
+  for (const bracket of brackets) {
+    if (!Number.isFinite(bracket.threshold) || bracket.threshold < 0) {
+      return "Bracket thresholds must be nonnegative numbers.";
+    }
+    if (!Number.isFinite(bracket.rate) || bracket.rate < 0 || bracket.rate > 0.2) {
+      return "Bracket rates must be between 0% and 20%.";
+    }
+    if (bracket.threshold <= previousThreshold) {
+      return "Bracket thresholds must strictly increase from top to bottom.";
+    }
+    if (bracket.rate < previousRate) {
+      return "Bracket rates must not decrease as thresholds rise.";
+    }
+    previousThreshold = bracket.threshold;
+    previousRate = bracket.rate;
+  }
+  return null;
+};
+
+const syncBracketMode = () => {
+  const active = byId("bracket-rows").children.length > 0;
+  byId("tax-rate").disabled = active;
+  byId("tax-rate-label").classList.toggle("is-disabled", active);
+  byId("clear-brackets").disabled = !active;
+  byId("bracket-mode-note").textContent = active
+    ? "On — the flat rate is ignored; the lowest threshold acts as the exemption."
+    : "Off — a single flat rate applies above the exemption.";
+};
+
+const setBracketError = (message) => {
+  const target = byId("bracket-error");
+  target.hidden = !message;
+  target.textContent = message ?? "";
+};
+
+const round4 = (value) => Math.round(value * 10000) / 10000;
+
+// --- Deep-linkable URL state --------------------------------------------------
+// The full request is encoded as base64url JSON in ?s= so any scenario — bracket
+// schedules included — round-trips through a shared link.
+const encodeState = (request) => {
+  const json = JSON.stringify(request);
+  return btoa(unescape(encodeURIComponent(json))).replace(/\+/g, "-").replace(/\//g, "_");
+};
+
+const decodeState = (encoded) => {
+  const normalized = encoded.replace(/-/g, "+").replace(/_/g, "/");
+  const json = decodeURIComponent(escape(atob(normalized)));
+  const parsed = JSON.parse(json);
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+};
+
+const readStateFromUrl = () => {
+  const encoded = new URLSearchParams(window.location.search).get("s");
+  if (!encoded) return null;
+  try {
+    return decodeState(encoded);
+  } catch {
+    return null;
+  }
+};
+
+const writeStateToUrl = (request) => {
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.set("s", encodeState(request));
+    window.history.replaceState(null, "", url);
+  } catch {
+    // A serialization failure must never block the model from rendering.
+  }
+};
+
+const mergeRequest = (base, override) => ({
+  ...base,
+  ...override,
+  wealthTax: { ...base.wealthTax, ...(override.wealthTax ?? {}) },
+  ubi: { ...base.ubi, ...(override.ubi ?? {}) },
+  market: { ...base.market, ...(override.market ?? {}) },
+  behavior: { ...base.behavior, ...(override.behavior ?? {}) },
 });
 
 let engineWorker = null;
@@ -213,18 +364,28 @@ const runServerScenario = async (request) => {
 };
 
 const runScenario = async () => {
+  const request = formRequest();
+  if (request.wealthTax.brackets) {
+    const bracketError = validateBrackets(request.wealthTax.brackets);
+    if (bracketError) {
+      setBracketError(bracketError);
+      setFormStatus(bracketError, true);
+      return;
+    }
+  }
+  setBracketError(null);
   const button = byId("run-button");
   button.disabled = true;
   button.textContent = "Running the model…";
   setFormStatus("Running the U.S. distribution and ten-year projection…");
   try {
-    const request = formRequest();
     const payload = isStaticSnapshot
       ? await runLocalScenario(request)
       : await runServerScenario(request);
     latestResult = payload;
     render(payload);
     byId("scenario-summary").textContent = scenarioSummary(request, payload);
+    writeStateToUrl(request);
     setFormStatus(`Updated from ${integer.format(payload.population.sampledHouseholds)} weighted household agents${isStaticSnapshot ? ", computed in your browser" : ""}.`);
   } catch (error) {
     setFormStatus(error instanceof Error ? error.message : "Scenario failed.", true);
@@ -516,10 +677,20 @@ const capitalize = (text) => text.charAt(0).toUpperCase() + text.slice(1);
 const regimeFor = (inflation) => inflation >= 5 ? "extreme" : inflation >= 0.5 ? "crisis" : inflation >= 0.1 ? "high" : inflation >= 0.05 ? "elevated" : "stable";
 const plainDirection = (value) => value >= 0 ? `${percent.format(value)} better off` : `${percent.format(Math.abs(value))} worse off`;
 const scenarioSummary = (request, result) => {
+  const monthly = `${money.format(request.ubi.adultMonthlyBenefit)}/mo equivalent`;
+  const brackets = request.wealthTax.brackets;
+  if (brackets && brackets.length > 0) {
+    const rates = brackets.map((bracket) => bracket.rate);
+    const low = Math.min(...rates);
+    const high = Math.max(...rates);
+    const band = low === high ? formatRate(low) : `${formatRate(low)}–${formatRate(high)}`;
+    const floor = Math.min(...brackets.map((bracket) => bracket.threshold));
+    return `Graduated ${band} above ${compactMoney.format(floor)} · ${monthly}`;
+  }
   const target = request.wealthTax.targetMode === "top-share"
     ? `top ${percent.format(request.wealthTax.topShare)}`
     : `wealth above ${compactMoney.format(result?.wealthTaxTarget?.effectiveExemption ?? request.wealthTax.exemption)}`;
-  return `${formatRate(request.wealthTax.rate)} on ${target} · ${money.format(request.ubi.adultMonthlyBenefit)}/mo equivalent`;
+  return `${formatRate(request.wealthTax.rate)} on ${target} · ${monthly}`;
 };
 
 const syncTargetControls = () => {
@@ -531,18 +702,39 @@ const syncTargetControls = () => {
 };
 
 const applyPreset = (name) => {
+  // Single-rate presets omit `brackets`; graduated proposals list [thresholdM, ratePct]
+  // rows. Every preset resets the bracket editor so switching is unambiguous.
   const presets = {
     "top-one": { targetMode: "top-share", topShare: 1, exemption: 10, rate: 1 },
     billionaire: { targetMode: "exemption", topShare: 1, exemption: 1000, rate: 10 },
     "ten-million": { targetMode: "exemption", topShare: 1, exemption: 10, rate: 5 },
     universal: { targetMode: "exemption", topShare: 100, exemption: 0, rate: 1, adultBenefit: 1000, childBenefit: 500, directCashShare: 100 },
+    "warren-2020": {
+      targetMode: "exemption",
+      exemption: 50,
+      rate: 2,
+      brackets: [[50, 2], [1000, 6]],
+    },
+    "sanders-2020": {
+      targetMode: "exemption",
+      exemption: 32,
+      rate: 1,
+      brackets: [[32, 1], [50, 2], [250, 3], [500, 4], [1000, 5], [2500, 6], [5000, 7], [10000, 8]],
+    },
+    "current-law": { targetMode: "exemption", topShare: 1, exemption: 10, rate: 0, brackets: [] },
   };
   const preset = presets[name];
   if (!preset) return;
   byId("target-mode").value = preset.targetMode;
-  byId("top-share").value = preset.topShare;
+  if (preset.topShare !== undefined) byId("top-share").value = preset.topShare;
   byId("exemption").value = preset.exemption;
   byId("tax-rate").value = preset.rate;
+  renderBrackets(
+    (preset.brackets ?? []).map(([threshold, rate]) => ({
+      threshold: threshold * 1_000_000,
+      rate: rate / 100,
+    })),
+  );
   if (preset.adultBenefit !== undefined) byId("adult-benefit").value = preset.adultBenefit;
   if (preset.childBenefit !== undefined) byId("child-benefit").value = preset.childBenefit;
   if (preset.directCashShare !== undefined) byId("direct-cash-share").value = preset.directCashShare;
@@ -566,6 +758,11 @@ byId("run-button").addEventListener("click", (event) => {
 });
 byId("distribution-strategy").addEventListener("change", renderDistribution);
 byId("target-mode").addEventListener("change", syncTargetControls);
+byId("add-bracket").addEventListener("click", () => {
+  byId("bracket-rows").append(makeBracketRow());
+  syncBracketMode();
+});
+byId("clear-brackets").addEventListener("click", () => renderBrackets([]));
 document.querySelectorAll("[data-preset]").forEach((button) => {
   button.addEventListener("click", () => applyPreset(button.dataset.preset));
 });

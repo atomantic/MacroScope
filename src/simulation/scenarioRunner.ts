@@ -1,4 +1,4 @@
-import type { WealthTaxPolicyV1 } from "../policies/schema.js";
+import type { TaxBracket, WealthTaxPolicyV1 } from "../policies/schema.js";
 import { assessWealthTax } from "../policies/wealthTax.js";
 import {
   DEFAULT_COMPARISON_REQUEST,
@@ -125,10 +125,10 @@ const normalizeComparisonRequest = (
 ): ComparisonRequestV1 => ({
   ...DEFAULT_COMPARISON_REQUEST,
   ...request,
-  wealthTax: {
+  wealthTax: normalizeWealthTax({
     ...DEFAULT_COMPARISON_REQUEST.wealthTax,
     ...request.wealthTax,
-  },
+  }),
   ubi: {
     ...DEFAULT_COMPARISON_REQUEST.ubi,
     ...request.ubi,
@@ -142,6 +142,24 @@ const normalizeComparisonRequest = (
     ...request.behavior,
   },
 });
+
+// A graduated schedule is self-describing: its lowest absolute threshold is the
+// exemption, and dollar targeting always applies (percentile targeting has no
+// meaning once explicit thresholds are given). Sort defensively so downstream
+// rebasing and the effective-exemption lookup can trust the ordering.
+const normalizeWealthTax = (
+  wealthTax: ComparisonRequestV1["wealthTax"],
+): ComparisonRequestV1["wealthTax"] => {
+  const brackets = wealthTax.brackets;
+  if (!brackets || brackets.length === 0) return wealthTax;
+  const sorted = [...brackets].sort((left, right) => left.threshold - right.threshold);
+  return {
+    ...wealthTax,
+    targetMode: "exemption",
+    exemption: sorted[0]?.threshold ?? wealthTax.exemption,
+    brackets: sorted,
+  };
+};
 
 const runStrategy = (
   households: readonly SyntheticHousehold[],
@@ -582,7 +600,7 @@ const buildWealthTaxPolicy = (
 ): WealthTaxPolicyV1 => ({
   unit: "tax-household",
   exemption,
-  brackets: [{ threshold: 0, rate: request.wealthTax.rate }],
+  brackets: resolveBrackets(request, exemption),
   assets: {
     deposits: { inclusionRate: 1, valuationFactor: 1 },
     governmentBonds: { inclusionRate: 1, valuationFactor: 1 },
@@ -599,6 +617,24 @@ const buildWealthTaxPolicy = (
   installments: 4,
   allowDeferral: true,
 });
+
+// Graduated proposals (Warren, Sanders) specify absolute wealth thresholds, but
+// the policy applies brackets to the post-exemption taxable base. The lowest
+// threshold is the exemption, so rebase every threshold by it. Falls back to the
+// single flat rate when no schedule is supplied.
+const resolveBrackets = (
+  request: ComparisonRequestV1,
+  exemption: number,
+): readonly TaxBracket[] => {
+  const brackets = request.wealthTax.brackets;
+  if (!brackets || brackets.length === 0) {
+    return [{ threshold: 0, rate: request.wealthTax.rate }];
+  }
+  return brackets.map((bracket) => ({
+    threshold: Math.max(0, bracket.threshold - exemption),
+    rate: bracket.rate,
+  }));
+};
 
 const resolveEffectiveExemption = (
   households: readonly SyntheticHousehold[],

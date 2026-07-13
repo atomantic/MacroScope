@@ -181,6 +181,15 @@ export const buildPolicyProjection = (
   // tier's revenue share exceeds its base share, so this modestly understates the
   // expatriation drain; a base-share proxy keeps it consistent with the model's
   // established revenue apportionment rather than mixing two conventions.
+  // NOTE: like groupTaxShare, this uses COARSE cohort-average net worth, not the
+  // synthetic per-household assessments that produce taxCollected. So an exemption
+  // cutting through a DFA cohort (e.g. the default $10M through the 90th–99th
+  // group, whose average is sub-$10M) zeroes that cohort's base and yields
+  // topTierShare = 1 — which makes expatriation drain the whole base exactly as
+  // in #6 at positive exemptions (no regression here; #17 only narrows the drain
+  // under a universal tax). Deriving the tier split from the synthetic population
+  // — and reconciling groupTaxShare with it — is tracked separately as backbone
+  // work, out of #17's reduced-form scope.
   const topTierTaxableBase = groupTaxableBase
     .filter((group) => TOP_TIER_GROUP_IDS.has(group.id))
     .reduce((sum, group) => sum + group.taxable, 0);

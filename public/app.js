@@ -571,7 +571,15 @@ const setSensitivityStale = (stale) => {
   const apply = byId("sensitivity-flip-apply");
   if (apply) apply.disabled = stale;
 };
+// A sweep requested while the dashboard panel is hidden (the guided walkthrough)
+// is stashed, not run, so repeated story-dial exploration doesn't burn ~80 runs
+// per change on a panel nobody can see; enterDashboard flushes the latest one.
+let pendingSensitivityRequest = null;
 const refreshSensitivity = async (request) => {
+  if (document.body.dataset.view !== "dashboard") {
+    pendingSensitivityRequest = request;
+    return;
+  }
   const token = (sensitivityToken += 1);
   setSensitivityStale(true);
   byId("sensitivity-note").textContent = "Sweeping every assumption across its range…";
@@ -582,10 +590,19 @@ const refreshSensitivity = async (request) => {
     setSensitivityStale(false);
   } catch (error) {
     if (token !== sensitivityToken) return;
-    setSensitivityStale(false);
+    // Leave the panel stale on failure: the previously rendered bars/flip belong
+    // to the old scenario, so they must not become interactive again just because
+    // the new sweep errored (e.g. a 503 from the server queue).
     byId("sensitivity-note").textContent =
       error instanceof Error ? error.message : "Sensitivity analysis unavailable.";
   }
+};
+
+const flushPendingSensitivity = () => {
+  if (!pendingSensitivityRequest) return;
+  const request = pendingSensitivityRequest;
+  pendingSensitivityRequest = null;
+  void refreshSensitivity(request);
 };
 
 const runScenario = async () => {
@@ -969,14 +986,29 @@ const renderStress = (stress) => {
 // point (rounding to nearest could land just short and not actually flip);
 // tornado endpoints are exact dial bounds, so they snap to the nearest step.
 const applyDialValue = (formId, formValue, snap = "nearest") => {
+  // While the panel is stale (a newer sweep is running), the bars/flip describe
+  // the old scenario — ignore activation from any source, including keyboard
+  // Enter/Space on a focused bar, which `pointer-events: none` does not block.
+  if (byId("sensitivity")?.classList.contains("is-stale")) return;
   const field = byId(formId);
   if (!field) return;
   const step = Number(field.step) || 0.01;
   const decimals = step >= 1 ? 0 : String(step).split(".")[1]?.length ?? 2;
   const min = field.min !== "" ? Number(field.min) : -Infinity;
-  const max = field.max !== "" ? Number(field.max) : Infinity;
+  let max = field.max !== "" ? Number(field.max) : Infinity;
+  // Borrow and sell shares are jointly capped at 100% (borrowShare + sellShare
+  // <= 1); the static field max is 100, so cap dynamically against the current
+  // complementary share or a step-rounded value could submit an infeasible total
+  // and make recalculation fail.
+  if (formId === "borrow-share" || formId === "sell-share") {
+    const otherId = formId === "borrow-share" ? "sell-share" : "borrow-share";
+    max = Math.min(max, 100 - (Number(byId(otherId)?.value) || 0));
+  }
   const rounder = snap === "up" ? Math.ceil : snap === "down" ? Math.floor : Math.round;
-  const snapped = rounder(Number(formValue) / step) * step;
+  let snapped = rounder(Number(formValue) / step) * step;
+  // Step-rounding can overshoot a dynamic max; floor back onto the grid so the
+  // applied value never exceeds the feasible ceiling.
+  if (snapped > max) snapped = Math.floor(max / step) * step;
   field.value = clamp(snapped, min, max).toFixed(decimals);
   activePreset = null;
   void runScenario();
@@ -1904,6 +1936,8 @@ const enterStory = (index = 0) => {
 
 const enterDashboard = () => {
   document.body.dataset.view = "dashboard";
+  // The panel is now visible — run the sweep deferred during the walkthrough.
+  flushPendingSensitivity();
   try {
     window.localStorage.setItem(STORY_SEEN_KEY, "1");
   } catch {

@@ -212,6 +212,30 @@ export const parseComparisonRequest = (input: unknown): ParsedComparisonRequest 
     1,
     errors,
   );
+  const avoidanceElasticity = readNumber(
+    behavior,
+    "avoidanceElasticity",
+    DEFAULT_COMPARISON_REQUEST.behavior.avoidanceElasticity,
+    0,
+    0.5,
+    errors,
+  );
+  const expatriationShare = readNumber(
+    behavior,
+    "expatriationShare",
+    DEFAULT_COMPARISON_REQUEST.behavior.expatriationShare,
+    0,
+    0.9,
+    errors,
+  );
+  const privateBusinessInclusionRate = readNumber(
+    behavior,
+    "privateBusinessInclusionRate",
+    DEFAULT_COMPARISON_REQUEST.behavior.privateBusinessInclusionRate,
+    0,
+    1,
+    errors,
+  );
   if (borrowShare + sellShare > 1) {
     errors.push("borrowShare plus sellShare must not exceed 1.");
   }
@@ -248,6 +272,9 @@ export const parseComparisonRequest = (input: unknown): ParsedComparisonRequest 
         assetHedgeShare,
         housingHedgeShare,
         rentPassThrough,
+        avoidanceElasticity,
+        expatriationShare,
+        privateBusinessInclusionRate,
       },
     },
   };

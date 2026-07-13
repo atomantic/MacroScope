@@ -216,6 +216,20 @@
             <label for="sell-share">Asset-sale share (%)<input id="sell-share" name="sellShare" type="number" min="0" max="100" step="5" /></label>
             <label for="loan-rate">Loan interest (%)<input id="loan-rate" name="loanRate" type="number" min="0" max="50" step="0.1" /></label>
           </fieldset>
+          <fieldset class="behavior-fieldset">
+            <legend>Taxpayer response</legend>
+            <div class="behavior-presets" aria-label="Taxpayer-response presets">
+              <span>Response scenario</span>
+              <button type="button" data-behavior-preset="full-compliance">Full compliance</button>
+              <button type="button" data-behavior-preset="scandinavian">Scandinavian experience</button>
+              <button type="button" data-behavior-preset="french-isf">French ISF experience</button>
+            </div>
+            <div class="behavior-grid">
+              <label for="avoidance-elasticity">Avoidance per point (%)<input id="avoidance-elasticity" name="avoidanceElasticity" type="number" min="0" max="50" step="1" /><small class="field-hint">Share of the taxable base that vanishes into valuation games and reclassification for each percentage point of tax rate.</small></label>
+              <label for="expatriation-share">Expatriation over decade (%)<input id="expatriation-share" name="expatriationShare" type="number" min="0" max="90" step="1" /><small class="field-hint">Share of top-tier taxable wealth that leaves the country and the tax base over the ten-year horizon.</small></label>
+              <label for="private-business-inclusion">Private-business included (%)<input id="private-business-inclusion" name="privateBusinessInclusionRate" type="number" min="0" max="100" step="5" /><small class="field-hint">Share of hard-to-value private-business wealth actually captured in the base after valuation discounts.</small></label>
+            </div>
+          </fieldset>
           <fieldset>
             <legend>Macro assumptions</legend>
             <label for="asset-return">Annual asset return (%)<input id="asset-return" name="assetReturn" type="number" min="-50" max="50" step="0.5" /></label>

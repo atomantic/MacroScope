@@ -130,6 +130,10 @@ const populateForm = (request) => {
   byId("asset-hedge-share").value = request.behavior.assetHedgeShare * 100;
   byId("housing-hedge-share").value = request.behavior.housingHedgeShare * 100;
   byId("rent-pass-through").value = request.behavior.rentPassThrough * 100;
+  byId("avoidance-elasticity").value = request.behavior.avoidanceElasticity * 100;
+  byId("expatriation-share").value = request.behavior.expatriationShare * 100;
+  byId("private-business-inclusion").value =
+    request.behavior.privateBusinessInclusionRate * 100;
   syncTargetControls();
 };
 
@@ -167,6 +171,10 @@ const formRequest = () => ({
     assetHedgeShare: Number(byId("asset-hedge-share").value) / 100,
     housingHedgeShare: Number(byId("housing-hedge-share").value) / 100,
     rentPassThrough: Number(byId("rent-pass-through").value) / 100,
+    avoidanceElasticity: Number(byId("avoidance-elasticity").value) / 100,
+    expatriationShare: Number(byId("expatriation-share").value) / 100,
+    privateBusinessInclusionRate:
+      Number(byId("private-business-inclusion").value) / 100,
   },
 });
 
@@ -691,6 +699,24 @@ const applyPreset = (name) => {
   void runScenario();
 };
 
+const applyBehaviorPreset = (name) => {
+  // Reduced-form literature anchors (issue #6): full compliance captures the
+  // model's 100%-remittance assumption, the Scandinavian case reflects the low
+  // avoidance elasticities in Seim (2017), and the French ISF case reflects the
+  // heavier avoidance and expatriation documented by Pichet (2007).
+  const presets = {
+    "full-compliance": { avoidance: 0, expatriation: 0, inclusion: 100 },
+    scandinavian: { avoidance: 7, expatriation: 4, inclusion: 85 },
+    "french-isf": { avoidance: 20, expatriation: 15, inclusion: 60 },
+  };
+  const preset = presets[name];
+  if (!preset) return;
+  byId("avoidance-elasticity").value = preset.avoidance;
+  byId("expatriation-share").value = preset.expatriation;
+  byId("private-business-inclusion").value = preset.inclusion;
+  void runScenario();
+};
+
 const setFormStatus = (message, isError = false) => {
   const status = byId("form-status");
   status.textContent = message;
@@ -718,5 +744,8 @@ byId("distribution-strategy").addEventListener("change", () => {
 byId("target-mode").addEventListener("change", syncTargetControls);
 document.querySelectorAll("[data-preset]").forEach((button) => {
   button.addEventListener("click", () => applyPreset(button.dataset.preset));
+});
+document.querySelectorAll("[data-behavior-preset]").forEach((button) => {
+  button.addEventListener("click", () => applyBehaviorPreset(button.dataset.behaviorPreset));
 });
 void initialize();

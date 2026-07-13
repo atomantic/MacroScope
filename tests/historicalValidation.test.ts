@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   BACKTEST_TOLERANCE_POINTS,
+  CASH_TRANSFER_ANCHOR,
   DEFAULT_COMPARISON_REQUEST,
   HISTORICAL_BACKTEST,
   HISTORICAL_BASELINE_INFLATION,
+  HISTORICAL_MONETIZED_DEFICIT_RATIO_2020,
   HISTORICAL_SERIES,
   inflationFromStress,
   runComparison,
@@ -92,10 +94,42 @@ describe("historical inflation backtest (2020–2023)", () => {
 
   it("ships FRED sources and honest caveats about what the reduced form misses", () => {
     expect(backtest.sources.some((source) => source.url.includes("M2SL"))).toBe(true);
-    expect(backtest.sources.some((source) => source.url.includes("CPIAUCSL"))).toBe(true);
+    // The committed Dec/Dec values are the non-seasonally-adjusted CPI-U series.
+    expect(backtest.sources.some((source) => source.url.includes("CPIAUCNS"))).toBe(true);
     expect(
       backtest.caveats.some((caveat) => /supply|energy/i.test(caveat)),
     ).toBe(true);
+  });
+
+  it("pins the monetized-deficit channel the primary path folds into M2", () => {
+    // The primary money-channel backtest feeds monetizedDeficitRatio=0 to avoid
+    // double-counting, so it does not exercise the kernel's fiscal coefficients.
+    // This isolated check does, so a change to the `monetizedDeficitRatio`
+    // inflation/confidence coefficients still fails a test.
+    const fiscal = backtest.fiscalChannel;
+    expect(fiscal.monetizedDeficitRatio).toBe(HISTORICAL_MONETIZED_DEFICIT_RATIO_2020);
+    // Money growth is held at threshold, so the no-fiscal case is pure baseline.
+    expect(fiscal.inflationWithoutFiscal).toBeCloseTo(HISTORICAL_BASELINE_INFLATION, 12);
+    expect(fiscal.marginalInflation).toBeCloseTo(
+      fiscal.inflationWithFiscal - fiscal.inflationWithoutFiscal,
+      12,
+    );
+    // The fiscal ratio adds a few points of inflation (pins the *0.25 term) and
+    // erodes confidence a little (pins the *0.35 confidence term).
+    expect(fiscal.marginalInflation).toBeGreaterThan(0.02);
+    expect(fiscal.marginalInflation).toBeLessThan(0.045);
+    expect(fiscal.confidenceAfter).toBeGreaterThan(0.95);
+    expect(fiscal.confidenceAfter).toBeLessThan(0.99);
+    // Computed from the live kernel, not a stored copy.
+    const direct = inflationFromStress({
+      baselineInflation: HISTORICAL_BASELINE_INFLATION,
+      demandInflation: 0,
+      moneyGrowth: 0.025,
+      monetizedDeficitRatio: HISTORICAL_MONETIZED_DEFICIT_RATIO_2020,
+      priorConfidence: 1,
+    });
+    expect(fiscal.inflationWithFiscal).toBeCloseTo(direct.inflation, 12);
+    expect(fiscal.confidenceAfter).toBeCloseTo(direct.confidence, 12);
   });
 });
 
@@ -129,5 +163,39 @@ describe("secondary prediction: a cash-funded transfer barely moves M2", () => {
     expect(summary.peakAnnualInflation).toBeLessThan(0.05);
     // Actual dollars still reach households — the transfer happens.
     expect(annualFlows.ubiReceived).toBeGreaterThan(0);
+  });
+
+  it("reproduces the observed transfer-funded vs. deficit-monetized contrast", () => {
+    // The prediction is anchored to a real distinction: transfer-funded fiscal
+    // expansions did not grow M2, while the 2020–2021 deficit-monetized
+    // expansion drove the ~40% surge this backtest ties to the inflation.
+    expect(CASH_TRANSFER_ANCHOR.source.url).toContain("M2SL");
+    expect(CASH_TRANSFER_ANCHOR.historicalContrast).toMatch(/2020|monetiz/i);
+
+    // Model side of the contrast: the same request, cash-funded vs. with the
+    // unfunded portion monetized, must split exactly as the history did.
+    const cashFunded = runComparison(cashFundedRequest());
+    const monetized = runComparison({
+      ...cashFundedRequest(),
+      ubi: {
+        ...cashFundedRequest().ubi,
+        adultMonthlyBenefit: 2_000,
+        childMonthlyBenefit: 1_000,
+        fundingRule: "fixed",
+      },
+      behavior: {
+        ...cashFundedRequest().behavior,
+        deficitMonetizationShare: 1,
+      },
+    });
+    // Transfer-funded ≈ no money growth; monetized deficit expands M2 markedly.
+    expect(Math.abs(cashFunded.projection.summary.cumulativeM2Change)).toBeLessThan(0.001);
+    expect(monetized.projection.summary.cumulativeM2Change).toBeGreaterThan(
+      cashFunded.projection.summary.cumulativeM2Change + 0.05,
+    );
+    // And the money that gets created is what lifts inflation.
+    expect(monetized.projection.summary.peakAnnualInflation).toBeGreaterThan(
+      cashFunded.projection.summary.peakAnnualInflation,
+    );
   });
 });

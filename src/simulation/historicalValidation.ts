@@ -45,6 +45,22 @@ export const HISTORICAL_BASELINE_INFLATION = 1.8 * PERCENT;
  */
 export const BACKTEST_TOLERANCE_POINTS = 3.5 * PERCENT;
 
+/**
+ * 2020 monetized-deficit ratio for the isolated fiscal-channel check: the
+ * increase in the Federal Reserve's Treasury holdings in 2020 (~$2.4T of SOMA
+ * purchases, FRED TREAST) as a share of 2020 GDP (~$21.1T). This is the portion
+ * of the fiscal deficit the central bank absorbed — the input the production
+ * pipeline routes into the kernel's `monetizedDeficitRatio`.
+ *
+ * The primary money-channel backtest above feeds this as 0 to avoid
+ * double-counting (the monetized deficit is already the source of the M2
+ * surge). To still pin the kernel's `monetizedDeficitRatio` coefficients, the
+ * fiscal channel is validated separately (`fiscalChannel` below): it is fed
+ * this ratio with money growth held at the threshold, isolating the direct
+ * fiscal-inflation and confidence-erosion terms.
+ */
+export const HISTORICAL_MONETIZED_DEFICIT_RATIO_2020 = 0.11;
+
 export interface HistoricalYearInput {
   /** Calendar year the M2 growth was realized. */
   readonly year: number;
@@ -65,7 +81,8 @@ export interface HistoricalYearInput {
 /**
  * FRED M2SL (December-over-December) and BLS CPI-U (December-over-December).
  * Money growth transmits to the following year's prices (see module doc).
- * Sources: FRED series M2SL and CPIAUCSL.
+ * Sources: FRED series M2SL and CPIAUCNS (CPI-U, not seasonally adjusted — the
+ * standard basis for December-over-December annual inflation).
  */
 export const HISTORICAL_SERIES: readonly HistoricalYearInput[] = [
   { year: 2019, m2GrowthYoY: 6.6 * PERCENT, deficitToGdp: 4.6 * PERCENT, actualCpiInflation: 2.3 * PERCENT },
@@ -90,6 +107,58 @@ export interface BacktestPeak {
   readonly inflation: number;
 }
 
+/**
+ * The kernel's monetized-deficit channel, exercised in isolation so its
+ * coefficients are pinned by the backtest even though the primary money-channel
+ * path holds them at zero (to avoid double-counting the M2 surge).
+ */
+export interface FiscalChannelCheck {
+  readonly year: number;
+  readonly monetizedDeficitRatio: number;
+  /** Kernel inflation with the fiscal ratio applied and money growth held at threshold. */
+  readonly inflationWithFiscal: number;
+  /** Kernel inflation with the fiscal ratio zeroed (baseline for the delta). */
+  readonly inflationWithoutFiscal: number;
+  /** Marginal inflation the fiscal channel adds (percentage points, as a rate). */
+  readonly marginalInflation: number;
+  /** Confidence after the fiscal-driven erosion (1 = full credibility). */
+  readonly confidenceAfter: number;
+  readonly note: string;
+}
+
+/**
+ * Secondary, qualitative anchor for the model's "cash-funded transfer ≈ no M2
+ * change" prediction. The prediction is tied to an observed contrast — not just
+ * the simulator's own accounting — so the test can check the model reproduces
+ * the real-world distinction between transfer-funded and deficit-monetized
+ * fiscal expansions.
+ */
+export interface CashTransferAnchor {
+  readonly prediction: string;
+  readonly historicalContrast: string;
+  readonly source: DataSource;
+}
+
+/**
+ * Observed contrast the model must reproduce: fiscal transfers funded from
+ * existing balances (taxation) did not themselves expand M2, whereas the
+ * 2020–2021 fiscal expansion was deficit-financed and monetized and drove the
+ * ~40% M2 surge that this backtest ties to the subsequent inflation. Same
+ * dollars moving between households vs. new money created are different events.
+ */
+export const CASH_TRANSFER_ANCHOR: CashTransferAnchor = {
+  prediction:
+    "A wealth-tax-funded transfer paid from existing deposits (no borrowing, no monetized deficit) leaves M2 unchanged; only new bank credit or a monetized deficit expands it.",
+  historicalContrast:
+    "Tax-and-transfer redistribution funded from taxation does not itself grow the money stock, while the 2020–2021 deficit-monetized fiscal expansion grew M2 ~40% — the surge this backtest links to the 2021–2022 inflation. The model reproduces this split: a cash-funded transfer nets to ~0% M2 change, the monetized 2020–2021 path does not.",
+  source: {
+    label: "M2 Money Stock (M2SL) and Federal deficit as a percentage of GDP (FYFSGDA188S)",
+    organization: "Federal Reserve Board / OMB via FRED",
+    vintage: "2020–2021 monetized expansion vs. tax-funded transfers",
+    url: "https://fred.stlouisfed.org/series/M2SL",
+  },
+};
+
 export interface HistoricalBacktest {
   readonly episode: string;
   readonly baselineInflation: number;
@@ -102,6 +171,7 @@ export interface HistoricalBacktest {
   /** Realized within-year CPI peak (headline YoY), for honest context. */
   readonly actualHeadlinePeak: { readonly label: string; readonly inflation: number };
   readonly allWithinTolerance: boolean;
+  readonly fiscalChannel: FiscalChannelCheck;
   readonly caveats: readonly string[];
   readonly sources: readonly DataSource[];
 }
@@ -160,6 +230,36 @@ export const runHistoricalBacktest = (): HistoricalBacktest => {
     { year: years[0]?.year ?? 0, inflation: -Infinity },
   );
 
+  // Isolated fiscal-channel check. Hold money growth at the kernel's
+  // financing-stress threshold (0.025 — below it, financingStress is 0) so the
+  // only inflation above baseline comes from the monetized-deficit terms. This
+  // exercises and pins the kernel's `monetizedDeficitRatio` coefficients, which
+  // the primary money-channel path deliberately leaves at zero.
+  const financingThreshold = 0.025;
+  const fiscalOn = inflationFromStress({
+    baselineInflation: HISTORICAL_BASELINE_INFLATION,
+    demandInflation: 0,
+    moneyGrowth: financingThreshold,
+    monetizedDeficitRatio: HISTORICAL_MONETIZED_DEFICIT_RATIO_2020,
+    priorConfidence: 1,
+  });
+  const fiscalOff = inflationFromStress({
+    baselineInflation: HISTORICAL_BASELINE_INFLATION,
+    demandInflation: 0,
+    moneyGrowth: financingThreshold,
+    monetizedDeficitRatio: 0,
+    priorConfidence: 1,
+  });
+  const fiscalChannel: FiscalChannelCheck = {
+    year: 2020,
+    monetizedDeficitRatio: HISTORICAL_MONETIZED_DEFICIT_RATIO_2020,
+    inflationWithFiscal: fiscalOn.inflation,
+    inflationWithoutFiscal: fiscalOff.inflation,
+    marginalInflation: fiscalOn.inflation - fiscalOff.inflation,
+    confidenceAfter: fiscalOn.confidence,
+    note: "The 2020 Fed-absorbed deficit (~11% of GDP) run through the kernel's monetized-deficit channel adds a few points of inflation and erodes confidence — the fiscal injection the primary path folds into M2 growth, isolated here so its coefficients stay pinned.",
+  };
+
   return {
     episode: "United States, 2020–2023 monetary expansion and inflation",
     baselineInflation: HISTORICAL_BASELINE_INFLATION,
@@ -171,10 +271,11 @@ export const runHistoricalBacktest = (): HistoricalBacktest => {
     actualPeak,
     actualHeadlinePeak: { label: "June 2022, headline CPI year-over-year", inflation: 9.1 * PERCENT },
     allWithinTolerance: years.every((year) => year.withinTolerance),
+    fiscalChannel,
     caveats: [
       "The kernel is a monetary-transmission approximation with a one-year lag, not a structural macro model. It has no supply-shock, energy, or labor-market channel.",
       "It has no demand-collapse or supply-shock channel, so it misses both ends of the episode. In 2020 the pandemic crushed demand and newly created deposits sat as precautionary savings, holding actual CPI to 1.4% while the lagged money signal (2019's growth) reads higher; in 2022 an energy spike pushed actual CPI above what the already-decelerating 2021 money growth implies. The kernel captures the monetary trend, not these shocks.",
-      "The monetized fiscal deficit is represented through its M2 footprint rather than being added a second time, because in 2020–2021 the deficit was the source of the money growth. Deficit-to-GDP figures are shown for context only.",
+      "The primary path represents the monetized fiscal deficit through its M2 footprint rather than adding it a second time, because in 2020–2021 the deficit was the source of the money growth. The fiscal channel is validated separately (fiscalChannel) so the kernel's monetized-deficit coefficients are still pinned.",
       "December-over-December CPI is compared; the within-year headline peak (~9.1% in June 2022) was higher than any calendar-year figure.",
     ],
     sources: [
@@ -185,16 +286,22 @@ export const runHistoricalBacktest = (): HistoricalBacktest => {
         url: "https://fred.stlouisfed.org/series/M2SL",
       },
       {
-        label: "Consumer Price Index for All Urban Consumers (CPIAUCSL)",
+        label: "Consumer Price Index for All Urban Consumers, not seasonally adjusted (CPIAUCNS)",
         organization: "U.S. Bureau of Labor Statistics via FRED",
         vintage: "December-over-December inflation, 2020–2023",
-        url: "https://fred.stlouisfed.org/series/CPIAUCSL",
+        url: "https://fred.stlouisfed.org/series/CPIAUCNS",
       },
       {
         label: "Federal deficit as a percentage of GDP (FYFSGDA188S)",
         organization: "OMB/BEA via FRED",
         vintage: "Fiscal years 2019–2023, context only",
         url: "https://fred.stlouisfed.org/series/FYFSGDA188S",
+      },
+      {
+        label: "U.S. Treasury securities held by the Federal Reserve (TREAST)",
+        organization: "Federal Reserve Board via FRED",
+        vintage: "2020 SOMA Treasury absorption, fiscal-channel input",
+        url: "https://fred.stlouisfed.org/series/TREAST",
       },
     ],
   };

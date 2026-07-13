@@ -149,14 +149,22 @@ export const buildPolicyProjection = (
   const expatriationRetention =
     (1 - request.behavior.expatriationShare) ** (1 / YEARS);
 
-  // Growth/investment channel state (issue #13). The wealth tax lowers the
-  // after-tax return on wealth by roughly the average rate paid out of the base
-  // each year, which the savings dial turns into an investment shortfall; the
-  // demand dial pushes the other way with the transfer's fiscal impulse. The
-  // demand impulse is measured against national GDP, so the represented program
-  // flow is scaled back to national terms with this factor below.
-  const afterTaxReturnDrag = Math.max(0, effectiveTaxRate);
+  // Growth/investment channel state (issue #13). The savings dial turns the
+  // wealth tax's drag on the after-tax return to wealth into an investment
+  // shortfall; the demand dial pushes the other way with the transfer's fiscal
+  // impulse. Both national aggregates come from the represented flows scaled
+  // back to national terms with this factor.
   const nationalScale = populationScale(request);
+  // The drag is the ACTUAL burden the tax places on wealth — year-one national
+  // tax collected as a share of aggregate net worth — not the statutory rate.
+  // So it goes to ~0 when a high exemption reaches no one or avoidance guts
+  // compliance (little is collected), and the growth drag never fires on a tax
+  // that isn't actually levied. (taxCollected already folds in avoidance and
+  // exemption reach via the strategy outcomes.)
+  const afterTaxReturnDrag = Math.min(
+    1,
+    taxCollected / nationalScale / US_BASELINE.householdNetWorth,
+  );
   let capitalIndex = 1;
   let capitalPerWorker = 1; // capitalIndex ** CAPITAL_SHARE; wage/output deviation
   const yearOneProgramBudget =
@@ -304,12 +312,15 @@ export const buildPolicyProjection = (
     // Reduced-form growth/investment channel (issue #13). Investment deviates
     // from the steady-state replacement rate: the wealth tax's drag on the
     // after-tax return to wealth cuts it (savings channel), while the transfer's
-    // demand impulse — the real program budget as a share of national GDP —
-    // lifts it (demand channel). With both dials at 0 the deviation is 0, so the
+    // demand impulse — the REAL program budget as a share of national GDP —
+    // lifts it (demand channel). Deflate the (possibly CPI-indexed) nominal
+    // budget by the price level first, so a benefit that only grows with prices
+    // adds no real demand. With both dials at 0 the deviation is 0, so the
     // mean-reverting capital index stays pinned at 1 and wages/output grow along
     // the constant REAL_GROWTH trend exactly as before.
+    const realProgramBudget = programBudgetYear / priceLevel;
     const demandImpulse =
-      programBudgetYear / nationalScale / US_BASELINE.nominalGdp;
+      realProgramBudget / nationalScale / US_BASELINE.nominalGdp;
     const investmentDeviation =
       -request.behavior.savingsResponseElasticity * afterTaxReturnDrag +
       request.behavior.demandGrowthOffset * demandImpulse;

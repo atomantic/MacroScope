@@ -324,6 +324,26 @@ describe("ten-year projection dynamics", () => {
     }
   });
 
+  it("scales the savings drag by actual collection, not the statutory rate", () => {
+    // The drag must track the tax actually levied on wealth. With the same
+    // savings elasticity and rate, a high exemption that collects little should
+    // drag GDP far less than a universal tax that collects a lot — the growth
+    // penalty never fires on a statutory rate that isn't actually collected.
+    const withResponse = (exemption: number) =>
+      runComparison({
+        ...nationalRequest(),
+        wealthTax: { targetMode: "exemption", exemption, topShare: 0.01, rate: 0.05 },
+        behavior: { ...nationalRequest().behavior, savingsResponseElasticity: 0.8 },
+      }).projection.summary.gdpChange;
+    const universalDrag = withResponse(0); // taxes from the first dollar → large collection
+    const highExemptionDrag = withResponse(1_000_000_000); // reaches only the top tail
+    expect(universalDrag).toBeLessThan(-0.02);
+    // The sparse-collection case drags far less than the broad one...
+    expect(highExemptionDrag).toBeGreaterThan(universalDrag);
+    // ...and stays modest despite the identical 5% statutory rate + 0.8 response.
+    expect(highExemptionDrag).toBeGreaterThan(-0.03);
+  });
+
   it("lifts output when the transfer's demand offset is on", () => {
     // With no savings response, a positive demand offset feeds the transfer's
     // fiscal impulse into investment and output, so GDP ends ABOVE the no-policy

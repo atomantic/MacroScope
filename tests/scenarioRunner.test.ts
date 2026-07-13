@@ -271,10 +271,15 @@ describe("vertical-slice scenario runner", () => {
     expect(deepCell(heavy)).toBeGreaterThan(deepCell(none));
   });
 
-  it("scopes stress-grid expatriation to the top-tier sub-base (issue #17)", () => {
+  it("scopes expatriation to the top-tier sub-base under a universal tax (issue #17)", () => {
     const base = compactRequest();
-    // Ten-year revenue retained under heavy expatriation, relative to none — the
-    // channels other than expatriation cancel in the ratio, isolating its drain.
+    // Exercises the shared evolveTaxBase/combinedBaseMultiplier scoping that both
+    // the main projection loop and the stress grid use, observed here through the
+    // main loop's year-ten revenue (the grid's own cells are regime-dominated
+    // under a universal tax, where revenue so exceeds outlay that base erosion
+    // can't move the peak). Ten-year revenue retained under heavy expatriation,
+    // relative to none — the channels other than expatriation cancel in the
+    // ratio, isolating its drain.
     const finalRatio = (exemption: number) => {
       const finalTax = (expatriationShare: number) =>
         runComparison({

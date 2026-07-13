@@ -44,16 +44,15 @@ const initialize = async () => {
       baseline = await baselineResponse.json();
       const snapshot = await snapshotResponse.json();
       byId("service-status").classList.add("online");
-      byId("service-status-text").textContent = "Published snapshot";
+      byId("service-status-text").textContent = "In-browser model";
       byId("baseline-label").textContent = `${baseline.label} · ${baseline.vintage} Fed wealth data · ${compactNumber(baseline.households)} households`;
       renderSources(baseline.sources);
       populateForm(defaults);
       latestResult = snapshot;
       render(snapshot);
       byId("scenario-summary").textContent = scenarioSummary(defaults, snapshot);
-      byId("run-button").textContent = "Interactive model runs locally";
-      byId("run-button").disabled = true;
-      setFormStatus("Published default scenario. Run the PortOS/PM2 app to change assumptions.");
+      setFormStatus("Default scenario shown. Change any assumption and recalculate — the model runs in your browser.");
+      if (typeof Worker !== "undefined") ensureEngineWorker();
       return;
     }
     const [healthResponse, defaultResponse, baselineResponse] = await Promise.all([
@@ -76,6 +75,9 @@ const initialize = async () => {
   } catch (error) {
     setFormStatus(error instanceof Error ? error.message : "Unable to initialize.", true);
     byId("service-status-text").textContent = "Unavailable";
+    // Without the fetched defaults the form would submit an invalid request
+    // (representedHouseholds 0) on every click — disable it instead.
+    byId("run-button").disabled = true;
   }
 };
 
@@ -145,30 +147,90 @@ const formRequest = () => ({
   },
 });
 
+let engineWorker = null;
+let engineWorkerFailed = false;
+let engineRequestId = 0;
+const enginePending = new Map();
+
+const ensureEngineWorker = () => {
+  if (engineWorker) return engineWorker;
+  const worker = new Worker("./engine-worker.js", { type: "module" });
+  worker.addEventListener("message", (event) => {
+    const { id } = event.data ?? {};
+    const respond = enginePending.get(id);
+    if (!respond) return;
+    enginePending.delete(id);
+    respond(event.data);
+  });
+  worker.addEventListener("error", () => {
+    worker.terminate();
+    // A late error from an already-replaced worker must not drain the
+    // replacement's pending requests.
+    if (engineWorker !== worker) return;
+    engineWorker = null;
+    engineWorkerFailed = true;
+    const waiting = [...enginePending.values()];
+    enginePending.clear();
+    waiting.forEach((respond) => respond({ ok: false, workerFailed: true }));
+  });
+  engineWorker = worker;
+  return worker;
+};
+
+const runInWorker = (request) =>
+  new Promise((resolve) => {
+    engineRequestId += 1;
+    enginePending.set(engineRequestId, resolve);
+    ensureEngineWorker().postMessage({ id: engineRequestId, request });
+  });
+
+const runOnMainThread = async (request) =>
+  (await import("./engine/browser/engine.js")).compareScenarios(request);
+
+const runLocalScenario = async (request) => {
+  const useWorker = typeof Worker !== "undefined" && !engineWorkerFailed;
+  let response = useWorker ? await runInWorker(request) : await runOnMainThread(request);
+  // Module workers can fail where Worker itself exists (older Firefox,
+  // blocked worker loading) — retry the same request on the main thread.
+  if (response?.workerFailed) response = await runOnMainThread(request);
+  if (!response?.ok) {
+    throw new Error(response?.details?.join(" ") || response?.error || "Scenario failed.");
+  }
+  return response.result;
+};
+
+const runServerScenario = async (request) => {
+  const response = await fetch("/api/scenarios/compare", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.details?.join(" ") || payload.error || "Scenario failed.");
+  }
+  return payload;
+};
+
 const runScenario = async () => {
-  if (isStaticSnapshot) return;
   const button = byId("run-button");
   button.disabled = true;
+  button.textContent = "Running the model…";
   setFormStatus("Running the U.S. distribution and ten-year projection…");
   try {
     const request = formRequest();
-    const response = await fetch("/api/scenarios/compare", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request),
-    });
-    const payload = await response.json();
-    if (!response.ok) {
-      throw new Error(payload.details?.join(" ") || payload.error || "Scenario failed.");
-    }
+    const payload = isStaticSnapshot
+      ? await runLocalScenario(request)
+      : await runServerScenario(request);
     latestResult = payload;
     render(payload);
     byId("scenario-summary").textContent = scenarioSummary(request, payload);
-    setFormStatus(`Updated from ${integer.format(payload.population.sampledHouseholds)} weighted household agents.`);
+    setFormStatus(`Updated from ${integer.format(payload.population.sampledHouseholds)} weighted household agents${isStaticSnapshot ? ", computed in your browser" : ""}.`);
   } catch (error) {
     setFormStatus(error instanceof Error ? error.message : "Scenario failed.", true);
   } finally {
     button.disabled = false;
+    button.textContent = "Recalculate verdict";
   }
 };
 

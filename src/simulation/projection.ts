@@ -45,7 +45,7 @@ type Strategies = Readonly<Record<PaymentStrategy, StrategyOutcome>>;
 // Wealth groups whose taxed wealth counts as "top tier" for the expatriation
 // dial (issue #6/#17): the top 1% and above. Whenever a positive exemption
 // confines the tax to these cohorts the top-tier share of the taxed base is 1.
-const TOP_TIER_GROUP_IDS = new Set(
+const TOP_TIER_GROUP_IDS = new Set<string>(
   US_BASELINE.wealthGroups
     .filter((group) => group.percentileMinimum >= MODEL_CONSTANTS.topOnePercentPercentile)
     .map((group) => group.id),
@@ -175,6 +175,12 @@ export const buildPolicyProjection = (
   // tax it scopes expatriation to the top-tier sub-base (issue #17). The
   // zero-base edge case (a very high exemption) attributes the whole synthetic
   // top-tail burden to the wealthiest cohort, which is top tier, so 1 applies.
+  // This is a share of taxable BASE, which the model treats as the share of
+  // revenue everywhere it apportions collections (groupTaxShare below is likewise
+  // base-weighted) — exact under a flat rate. Under a graduated schedule the top
+  // tier's revenue share exceeds its base share, so this modestly understates the
+  // expatriation drain; a base-share proxy keeps it consistent with the model's
+  // established revenue apportionment rather than mixing two conventions.
   const topTierTaxableBase = groupTaxableBase
     .filter((group) => TOP_TIER_GROUP_IDS.has(group.id))
     .reduce((sum, group) => sum + group.taxable, 0);
@@ -306,7 +312,21 @@ export const buildPolicyProjection = (
     const taxBaseMultiplier = combinedBaseMultiplier(taxBaseState, topTierShare);
     const taxCollectedYear = taxCollected * taxBaseMultiplier;
     for (const [id, share] of groupTaxShare) {
-      cumulativeGroupTax.set(id, (cumulativeGroupTax.get(id) ?? 0) + taxCollectedYear * share);
+      // Attribute each cohort's cumulative tax with its OWN tier multiplier, not
+      // the blended aggregate: top-tier cohorts bear the expatriation drain while
+      // non-top cohorts keep their retained base (issue #17). Because the
+      // top-tier cohorts' shares sum to topTierShare, this sums back to
+      // taxCollectedYear exactly — aggregate collections are unchanged, only the
+      // per-cohort winners/losers split is made faithful. With expatriation off
+      // (top === rest) or a top-only exemption (non-top shares are 0) it reduces
+      // to the blended multiplier.
+      const tierMultiplier = TOP_TIER_GROUP_IDS.has(id)
+        ? taxBaseState.top
+        : taxBaseState.rest;
+      cumulativeGroupTax.set(
+        id,
+        (cumulativeGroupTax.get(id) ?? 0) + taxCollected * share * tierMultiplier,
+      );
     }
     const newPrivateLoansYear = newPrivateLoans * taxBaseMultiplier;
     const requestedUbiYear = requestedUbi * indexation;

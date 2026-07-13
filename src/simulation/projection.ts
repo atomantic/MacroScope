@@ -42,6 +42,70 @@ const CAPITAL_INDEX_FLOOR = 0.05;
 
 type Strategies = Readonly<Record<PaymentStrategy, StrategyOutcome>>;
 
+// Wealth groups whose taxed wealth counts as "top tier" for the expatriation
+// dial (issue #6/#17): the top 1% and above. Whenever a positive exemption
+// confines the tax to these cohorts the top-tier share of the taxed base is 1.
+const TOP_TIER_GROUP_IDS = new Set(
+  US_BASELINE.wealthGroups
+    .filter((group) => group.percentileMinimum >= MODEL_CONSTANTS.topOnePercentPercentile)
+    .map((group) => group.id),
+);
+
+// The taxed base is tracked as two sub-bases relative to year one (each starts
+// at 1): the top-tier portion, which expatriation can drain, and the retained
+// non-top-tier remainder, which it cannot. See evolveTaxBase.
+type TaxBaseState = { readonly top: number; readonly rest: number };
+
+// Base-dynamics inputs threaded into the inflation stress grid so its cells and
+// the hyperinflation threshold respond to asset returns, rate erosion, and
+// expatriation — not only to UBI scale and monetization share (issue #17).
+type BaseDynamics = {
+  readonly annualAssetReturn: number;
+  readonly baselineInflation: number;
+  readonly assetPriceInflationPassThrough: number;
+  readonly effectiveTaxRate: number;
+  readonly expatriationRetention: number;
+  readonly topTierShare: number;
+};
+
+// Reduced-form wealth-tax base dynamics shared by the main projection loop and
+// the inflation stress grid (issue #17). Asset returns plus partial pass-through
+// of policy-driven excess inflation grow the base; the effective rate paid out
+// of it erodes it. Both act on the whole taxed base. Expatriation drains ONLY
+// the top-tier sub-base: whenever a positive exemption confines the tax to the
+// top the top-tier share is 1 and this reduces to a single base eroded uniformly
+// by expatriation (the #6 behavior); under a universal (zero-exemption) tax the
+// non-top-tier remainder is retained, matching the dial's "top-tier taxable
+// wealth" definition.
+const evolveTaxBase = (
+  state: TaxBaseState,
+  input: {
+    annualAssetReturn: number;
+    annualInflation: number;
+    baselineInflation: number;
+    assetPriceInflationPassThrough: number;
+    effectiveTaxRate: number;
+    expatriationRetention: number;
+  },
+): TaxBaseState => {
+  const growth =
+    1 +
+    input.annualAssetReturn +
+    Math.max(0, input.annualInflation - input.baselineInflation) *
+      input.assetPriceInflationPassThrough;
+  const erosion = 1 - input.effectiveTaxRate;
+  return {
+    top: Math.max(0, state.top * growth * erosion * input.expatriationRetention),
+    rest: Math.max(0, state.rest * growth * erosion),
+  };
+};
+
+// Effective base multiplier: the top-tier sub-base weighted by its share of the
+// taxed base plus the retained non-top-tier remainder. A top-tier share of 1
+// (any positive exemption reaching only the top) returns the top sub-base alone.
+const combinedBaseMultiplier = (state: TaxBaseState, topTierShare: number): number =>
+  topTierShare * state.top + (1 - topTierShare) * state.rest;
+
 export const buildPolicyProjection = (
   request: ComparisonRequestV1,
   strategies: Strategies,
@@ -105,6 +169,16 @@ export const buildPolicyProjection = (
     taxable: Math.max(0, group.netWorth - effectiveExemption * group.households),
   }));
   const totalTaxableBase = groupTaxableBase.reduce((sum, group) => sum + group.taxable, 0);
+  // Share of the taxed base held by the top tier (>= 99th percentile). Under any
+  // positive exemption that reaches only the top this is 1, so expatriation acts
+  // on the whole taxed base exactly as in #6; under a universal (zero-exemption)
+  // tax it scopes expatriation to the top-tier sub-base (issue #17). The
+  // zero-base edge case (a very high exemption) attributes the whole synthetic
+  // top-tail burden to the wealthiest cohort, which is top tier, so 1 applies.
+  const topTierTaxableBase = groupTaxableBase
+    .filter((group) => TOP_TIER_GROUP_IDS.has(group.id))
+    .reduce((sum, group) => sum + group.taxable, 0);
+  const topTierShare = totalTaxableBase > 0 ? topTierTaxableBase / totalTaxableBase : 1;
   if (totalTaxableBase > 0) {
     for (const group of groupTaxableBase) {
       groupTaxShare.set(group.id, group.taxable / totalTaxableBase);
@@ -131,15 +205,18 @@ export const buildPolicyProjection = (
   // selected nominal asset return plus partial pass-through of policy-driven
   // excess inflation into asset prices, and shrinks by the statutory rate paid
   // out of the base each year (so cumulative tax paid compounds against it).
-  // Year 1 reproduces the strategy outcomes exactly (multiplier = 1).
-  let taxBaseMultiplier = 1;
-  // Expatriation drains a cumulative share of the taxable base over the decade
-  // (issue #6). It acts on the aggregate taxed base (taxBaseMultiplier below),
-  // which equals top-tier wealth whenever a positive exemption confines the tax
-  // to the top; under a universal (zero-exemption) tax it approximates the whole
-  // taxed base leaving. Spread geometrically so each year retains an equal
-  // fraction and the base has lost expatriationShare by year ten. Share 0 leaves
-  // the retention at 1 and reproduces the prior path.
+  // Year 1 reproduces the strategy outcomes exactly (combined multiplier = 1).
+  // Tracked as two sub-bases so expatriation can drain the top tier alone
+  // (issue #17); combinedBaseMultiplier collapses them each year.
+  let taxBaseState: TaxBaseState = { top: 1, rest: 1 };
+  // Expatriation drains a cumulative share of the TOP-TIER taxable base over the
+  // decade (issue #6/#17). evolveTaxBase applies this retention to the top-tier
+  // sub-base only: whenever a positive exemption confines the tax to the top the
+  // top-tier share is 1 and the whole taxed base leaves; under a universal
+  // (zero-exemption) tax only the top-tier share of revenue is drained. Spread
+  // geometrically so each year retains an equal fraction and the top-tier base
+  // has lost expatriationShare by year ten. Share 0 leaves the retention at 1 and
+  // reproduces the prior path.
   const expatriationRetention =
     (1 - request.behavior.expatriationShare) ** (1 / YEARS);
 
@@ -226,6 +303,7 @@ export const buildPolicyProjection = (
     // CPI indexation applies the last observed policy price level (a one-year
     // recognition lag), so year 1 always matches the strategy outcomes.
     const indexation = request.ubi.benefitIndexation === "cpi" ? priceLevel : 1;
+    const taxBaseMultiplier = combinedBaseMultiplier(taxBaseState, topTierShare);
     const taxCollectedYear = taxCollected * taxBaseMultiplier;
     for (const [id, share] of groupTaxShare) {
       cumulativeGroupTax.set(id, (cumulativeGroupTax.get(id) ?? 0) + taxCollectedYear * share);
@@ -425,17 +503,16 @@ export const buildPolicyProjection = (
       m2Injection: moneyInjection,
     };
     // Evolve the taxable base for next year: nominal asset returns plus partial
-    // excess-inflation pass-through grow it; the statutory rate erodes it.
-    taxBaseMultiplier = Math.max(
-      0,
-      taxBaseMultiplier *
-        (1 +
-          request.behavior.annualAssetReturn +
-          Math.max(0, annualInflation - US_BASELINE.baselineInflation) *
-            request.model.assetPriceInflationPassThrough) *
-        (1 - effectiveTaxRate) *
-        expatriationRetention,
-    );
+    // excess-inflation pass-through grow it; the effective rate erodes it; and
+    // expatriation drains the top-tier sub-base (issue #17).
+    taxBaseState = evolveTaxBase(taxBaseState, {
+      annualAssetReturn: request.behavior.annualAssetReturn,
+      annualInflation,
+      baselineInflation: US_BASELINE.baselineInflation,
+      assetPriceInflationPassThrough: request.model.assetPriceInflationPassThrough,
+      effectiveTaxRate,
+      expatriationRetention,
+    });
   }
 
   const finalYear = years.at(-1);
@@ -459,6 +536,14 @@ export const buildPolicyProjection = (
     taxCollected,
     request.ubi.benefitIndexation ?? "none",
     request.model.loanAmortizationRate,
+    {
+      annualAssetReturn: request.behavior.annualAssetReturn,
+      baselineInflation: US_BASELINE.baselineInflation,
+      assetPriceInflationPassThrough: request.model.assetPriceInflationPassThrough,
+      effectiveTaxRate,
+      expatriationRetention,
+      topTierShare,
+    },
   );
   const theoryTest = buildTheoryTest(request, theoryYears, finalYear.m2Index / 100 - 1);
 
@@ -832,6 +917,7 @@ const buildStressTest = (
   taxCollected: number,
   benefitIndexation: "none" | "cpi",
   loanAmortizationRate: number,
+  baseDynamics: BaseDynamics,
 ): PolicyProjection["stressTest"] => {
   const ubiMultipliers = MODEL_CONSTANTS.stress.ubiMultipliers;
   const monetizationShares = MODEL_CONSTANTS.stress.monetizationShares;
@@ -848,6 +934,7 @@ const buildStressTest = (
         loanAmortizationRate,
         demandInflation:
           strategies["cash-first"].macro.estimatedInflationChange * multiplier,
+        baseDynamics,
       });
       cells.push({
         ubiMultiplier: multiplier,
@@ -874,6 +961,7 @@ const buildStressTest = (
       loanAmortizationRate,
       demandInflation:
         strategies["cash-first"].macro.estimatedInflationChange * multiplier,
+      baseDynamics,
     });
     if (annualToMonthly(peak) >= STRICT_HYPER_MONTHLY_RATE) {
       firstUbiMultiplierAtFullMonetization = multiplier;
@@ -905,24 +993,33 @@ const stressPeak = (input: {
   benefitIndexation: "none" | "cpi";
   loanAmortizationRate: number;
   demandInflation: number;
+  baseDynamics: BaseDynamics;
 }): number => {
   let m2 = US_BASELINE.m2;
   let confidence = 1;
   let privateDebt = 0;
   let priceLevel = 1;
   let peak: number = US_BASELINE.baselineInflation;
+  // Same base-dynamics evolution as the main projection loop (issue #17), so the
+  // stressed revenue and private-loan flows respond to asset returns, statutory-
+  // rate erosion, and top-tier expatriation across the horizon instead of being
+  // frozen at year one. Year 1: combined multiplier = 1, reproducing prior cells.
+  let baseState: TaxBaseState = { top: 1, rest: 1 };
   for (let year = 1; year <= YEARS; year += 1) {
+    const baseMultiplier = combinedBaseMultiplier(baseState, input.baseDynamics.topTierShare);
+    const taxCollectedYear = input.taxCollected * baseMultiplier;
+    const newPrivateLoansYear = input.newPrivateLoans * baseMultiplier;
     // CPI-indexed benefits grow the stressed outlay with the prior year's
     // price level (same one-year recognition lag as the main projection).
     const indexation = input.benefitIndexation === "cpi" ? priceLevel : 1;
     const outlay = input.requestedUbi * indexation * (1 + MODEL_CONSTANTS.stress.outlayGrowth);
-    const deficit = Math.max(0, outlay - input.taxCollected);
+    const deficit = Math.max(0, outlay - taxCollectedYear);
     // Same Treasury-surplus drain and M2 floor as the main projection loop.
-    const surplus = Math.max(0, input.taxCollected - outlay);
+    const surplus = Math.max(0, taxCollectedYear - outlay);
     const repayments = privateDebt * input.loanAmortizationRate;
-    privateDebt = Math.max(0, privateDebt + input.newPrivateLoans - repayments);
+    privateDebt = Math.max(0, privateDebt + newPrivateLoansYear - repayments);
     const injection = Math.max(
-      input.newPrivateLoans - repayments +
+      newPrivateLoansYear - repayments +
         deficit * input.monetizationShare -
         surplus,
       M2_FLOOR - m2,
@@ -939,6 +1036,12 @@ const stressPeak = (input: {
     m2 += injection;
     priceLevel *= 1 + stress.inflation;
     peak = Math.max(peak, stress.inflation);
+    // Same dynamics as the main loop; topTierShare is consumed by
+    // combinedBaseMultiplier above, not the per-sub-base evolution.
+    baseState = evolveTaxBase(baseState, {
+      ...input.baseDynamics,
+      annualInflation: stress.inflation,
+    });
   }
   return peak;
 };

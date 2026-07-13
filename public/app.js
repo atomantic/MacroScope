@@ -198,9 +198,21 @@ const makeBracketRow = (thresholdMillions = "", ratePercent = "") => {
 };
 
 const renderBrackets = (brackets) => {
+  // Tolerate anything a stale or hand-edited ?s= link can decode to: a non-array,
+  // or entries missing numeric threshold/rate. Drop the bad ones rather than
+  // throwing during init (which would brick the page via the outer catch).
+  const rows = Array.isArray(brackets)
+    ? brackets.filter(
+        (bracket) =>
+          bracket &&
+          typeof bracket === "object" &&
+          Number.isFinite(bracket.threshold) &&
+          Number.isFinite(bracket.rate),
+      )
+    : [];
   const container = byId("bracket-rows");
   container.replaceChildren(
-    ...(brackets ?? []).map((bracket) =>
+    ...rows.map((bracket) =>
       makeBracketRow(bracket.threshold / 1_000_000, round4(bracket.rate * 100)),
     ),
   );
@@ -208,16 +220,26 @@ const renderBrackets = (brackets) => {
   syncBracketMode();
 };
 
+// A blank cell reads as "" — keep it NaN (not Number("")===0) so an incomplete
+// row is rejected by validateBrackets rather than silently taxing from $0 at 0%.
+const parseCell = (raw, scale) => {
+  const trimmed = raw.trim();
+  return trimmed === "" ? Number.NaN : Number(trimmed) * scale;
+};
+
 const readBracketRows = () =>
   [...byId("bracket-rows").querySelectorAll(".bracket-row")].map((row) => ({
-    threshold: Number(row.querySelector(".bracket-threshold").value) * 1_000_000,
-    rate: Number(row.querySelector(".bracket-rate").value) / 100,
+    threshold: parseCell(row.querySelector(".bracket-threshold").value, 1_000_000),
+    rate: parseCell(row.querySelector(".bracket-rate").value, 0.01),
   }));
 
 const validateBrackets = (brackets) => {
   let previousThreshold = -Infinity;
   let previousRate = -Infinity;
   for (const bracket of brackets) {
+    if (Number.isNaN(bracket.threshold) || Number.isNaN(bracket.rate)) {
+      return "Every bracket row needs both a threshold and a rate.";
+    }
     if (!Number.isFinite(bracket.threshold) || bracket.threshold < 0) {
       return "Bracket thresholds must be nonnegative numbers.";
     }
@@ -238,12 +260,16 @@ const validateBrackets = (brackets) => {
 
 const syncBracketMode = () => {
   const active = byId("bracket-rows").children.length > 0;
+  // A schedule forces exemption targeting server-side (normalizeWealthTax), so
+  // reflect that here instead of leaving a top-share value the engine ignores.
+  if (active) byId("target-mode").value = "exemption";
   byId("tax-rate").disabled = active;
   byId("tax-rate-label").classList.toggle("is-disabled", active);
   byId("clear-brackets").disabled = !active;
   byId("bracket-mode-note").textContent = active
-    ? "On — the flat rate is ignored; the lowest threshold acts as the exemption."
+    ? "On — the flat rate, exemption, and targeting inputs come from the schedule; its lowest threshold is the exemption."
     : "Off — a single flat rate applies above the exemption.";
+  syncTargetControls();
 };
 
 const setBracketError = (message) => {
@@ -694,11 +720,15 @@ const scenarioSummary = (request, result) => {
 };
 
 const syncTargetControls = () => {
-  const topShareMode = byId("target-mode").value === "top-share";
-  byId("top-share").disabled = !topShareMode;
-  byId("top-share-label").classList.toggle("is-disabled", !topShareMode);
-  byId("exemption").disabled = topShareMode;
-  byId("exemption-label").classList.toggle("is-disabled", topShareMode);
+  // While a graduated schedule is active it owns targeting, the exemption, and
+  // the flat rate, so those inputs are inert — disable the whole targeting row.
+  const bracketsActive = byId("bracket-rows").children.length > 0;
+  const topShareMode = !bracketsActive && byId("target-mode").value === "top-share";
+  byId("target-mode").disabled = bracketsActive;
+  byId("top-share").disabled = bracketsActive || !topShareMode;
+  byId("top-share-label").classList.toggle("is-disabled", bracketsActive || !topShareMode);
+  byId("exemption").disabled = bracketsActive || topShareMode;
+  byId("exemption-label").classList.toggle("is-disabled", bracketsActive || topShareMode);
 };
 
 const applyPreset = (name) => {

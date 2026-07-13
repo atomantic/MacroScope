@@ -153,18 +153,10 @@ export const buildPolicyProjection = (
   // wealth tax's drag on the after-tax return to wealth into an investment
   // shortfall; the demand dial pushes the other way with the transfer's fiscal
   // impulse. Both national aggregates come from the represented flows scaled
-  // back to national terms with this factor.
+  // back to national terms with this factor. The drag itself is computed per
+  // year inside the loop from that year's collection (it evolves as the base
+  // erodes/grows).
   const nationalScale = populationScale(request);
-  // The drag is the ACTUAL burden the tax places on wealth — year-one national
-  // tax collected as a share of aggregate net worth — not the statutory rate.
-  // So it goes to ~0 when a high exemption reaches no one or avoidance guts
-  // compliance (little is collected), and the growth drag never fires on a tax
-  // that isn't actually levied. (taxCollected already folds in avoidance and
-  // exemption reach via the strategy outcomes.)
-  const afterTaxReturnDrag = Math.min(
-    1,
-    taxCollected / nationalScale / US_BASELINE.householdNetWorth,
-  );
   let capitalIndex = 1;
   let capitalPerWorker = 1; // capitalIndex ** CAPITAL_SHARE; wage/output deviation
   const yearOneProgramBudget =
@@ -321,8 +313,18 @@ export const buildPolicyProjection = (
     const realProgramBudget = programBudgetYear / priceLevel;
     const demandImpulse =
       realProgramBudget / nationalScale / US_BASELINE.nominalGdp;
+    // This year's drag: national tax ACTUALLY collected as a share of aggregate
+    // net worth — not the statutory rate — so it goes to ~0 when a high
+    // exemption reaches no one or avoidance guts compliance, and it tracks the
+    // base as it erodes or grows over the decade rather than freezing at
+    // year-one collections. (taxCollectedYear already folds in avoidance,
+    // exemption reach, and the annual base multiplier.)
+    const collectionDrag = Math.min(
+      1,
+      taxCollectedYear / nationalScale / US_BASELINE.householdNetWorth,
+    );
     const investmentDeviation =
-      -request.behavior.savingsResponseElasticity * afterTaxReturnDrag +
+      -request.behavior.savingsResponseElasticity * collectionDrag +
       request.behavior.demandGrowthOffset * demandImpulse;
     capitalIndex = Math.max(
       CAPITAL_INDEX_FLOOR,
@@ -437,6 +439,7 @@ export const buildPolicyProjection = (
     bottom50PurchasingPowerChange,
     peakAnnualInflation,
     publicBurdenPerHousehold,
+    gdpChange,
     borrowShare: weights.borrow,
   });
   const stressTest = buildStressTest(
@@ -918,6 +921,7 @@ const makeVerdict = (input: {
   bottom50PurchasingPowerChange: number;
   peakAnnualInflation: number;
   publicBurdenPerHousehold: number;
+  gdpChange: number;
   borrowShare: number;
 }): PolicyProjection["verdict"] => {
   const harmful =
@@ -929,11 +933,21 @@ const makeVerdict = (input: {
     input.peakAnnualInflation < 0.1 &&
     input.publicBurdenPerHousehold < 10_000;
   if (harmful) {
+    // Attribute the harm to its actual driver. When neither inflation nor debt
+    // is elevated but the bottom half still ends worse off, the growth/wage
+    // drag from the savings channel — not the financing path — is what did it;
+    // blaming inflation or debt would misdescribe the result.
+    const inflationOrDebtDriven =
+      input.peakAnnualInflation >= 0.2 || input.publicBurdenPerHousehold >= 50_000;
+    const growthDriven = !inflationOrDebtDriven && input.gdpChange <= -0.02;
     return {
       rating: "harmful",
-      headline: "The inflation or debt cost overwhelms the transfer gain.",
-      explanation:
-        "Under these assumptions, the bottom half ends with less relative buying power or the financing path enters a high-risk inflation/debt regime.",
+      headline: growthDriven
+        ? "The wealth-tax drag on investment and wages outweighs the transfer gain."
+        : "The inflation or debt cost overwhelms the transfer gain.",
+      explanation: growthDriven
+        ? "Under these assumptions the tax reduces saving and investment enough to shrink the capital stock and wages, so the bottom half ends with less real buying power even without a modeled inflation or debt crisis."
+        : "Under these assumptions, the bottom half ends with less relative buying power or the financing path enters a high-risk inflation/debt regime.",
     };
   }
   if (beneficial) {

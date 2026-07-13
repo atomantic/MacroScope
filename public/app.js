@@ -3,7 +3,7 @@ import {
   SCENARIO_FIELD_SPECS,
   encodeScenarioParams,
   decodeScenarioParams,
-} from "./scenario-params.js?v=10";
+} from "./scenario-params.js?v=11";
 
 const STRATEGIES = ["cash-first", "borrow-first", "sell-first"];
 const LABELS = {

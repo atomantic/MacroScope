@@ -95,6 +95,36 @@ describe("ten-year projection dynamics", () => {
     expect(realIndexedUbi).toBeGreaterThan(realNominalUbi);
   });
 
+  it("keeps every projection output finite under extreme indexed-benefit feedback", () => {
+    const result = runComparison({
+      ...nationalRequest(),
+      wealthTax: { targetMode: "exemption", exemption: 10_000_000, topShare: 0.01, rate: 0 },
+      ubi: {
+        ...nationalRequest().ubi,
+        adultMonthlyBenefit: 100_000,
+        childMonthlyBenefit: 100_000,
+        fundingRule: "fixed",
+        benefitIndexation: "cpi",
+      },
+      behavior: { ...nationalRequest().behavior, deficitMonetizationShare: 1 },
+    });
+    for (const year of result.projection.years) {
+      expect(Number.isFinite(year.priceLevel)).toBe(true);
+      expect(Number.isFinite(year.m2)).toBe(true);
+      expect(Number.isFinite(year.bottom50PurchasingPowerIndex)).toBe(true);
+      expect(Number.isFinite(year.top1RealWealthIndex)).toBe(true);
+    }
+    for (const year of result.projection.theoryTest.years) {
+      expect(Number.isFinite(year.housingPriceIndex)).toBe(true);
+      expect(Number.isFinite(year.bottomRenterHousingBurdenIndex)).toBe(true);
+      expect(Number.isFinite(year.bottomRenterDisposableIncomeIndex)).toBe(true);
+    }
+    const flows = result.projection.annualFlows;
+    expect(Number.isFinite(flows.finalYear.taxCollected)).toBe(true);
+    expect(Number.isFinite(flows.finalYear.ubiReceived)).toBe(true);
+    expect(Number.isFinite(flows.finalYear.m2Injection)).toBe(true);
+  });
+
   it("keeps year-one flows identical to the strategy outcomes and caveats aligned", () => {
     const result = runComparison(nationalRequest());
     const flows = result.projection.annualFlows;

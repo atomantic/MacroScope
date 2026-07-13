@@ -35,7 +35,9 @@ export interface ComparisonRequestV1 {
     readonly adultMonthlyBenefit: number;
     readonly childMonthlyBenefit: number;
     readonly fundingRule: UbiFundingRule;
-    readonly benefitIndexation: BenefitIndexation;
+    // Optional on the wire for schema-v1 compatibility; normalizeComparisonRequest
+    // defaults an omitted value to "none" (fixed nominal benefits).
+    readonly benefitIndexation?: BenefitIndexation;
     readonly directCashShare: number;
     readonly administrativeShare: number;
   };

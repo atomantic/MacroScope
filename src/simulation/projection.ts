@@ -14,6 +14,11 @@ const ANNUAL_LOAN_AMORTIZATION = 0.1;
 // Share of policy-driven excess inflation assumed to pass through into the
 // nominal prices of the taxed asset base each year.
 const ASSET_PRICE_INFLATION_PASS_THROUGH = 0.5;
+// Numerical ceiling on modeled annual inflation. Far above the strict
+// hyperinflation threshold (50%/month ≈ 129x/year) so regime classification
+// is unaffected, but keeps indexed-benefit feedback loops finite over the
+// ten-year horizon for every API-accepted input combination.
+const MAX_ANNUAL_INFLATION = 10_000;
 const STRICT_HYPER_MONTHLY_RATE = 0.5;
 const STRICT_HYPER_ANNUAL_RATE = (1 + STRICT_HYPER_MONTHLY_RATE) ** 12 - 1;
 const BASELINE_RENTER_HOUSING_COST_SHARE = 0.31;
@@ -178,8 +183,14 @@ export const buildPolicyProjection = (
     const stress = inflationFromStress({
       baselineInflation: US_BASELINE.baselineInflation,
       // The transfer creates a level shock; domestic supply and wages partially
-      // adapt rather than repeating the full first-year shock forever.
-      demandInflation: demandInflation * Math.exp(-(year - 1) / 3),
+      // adapt rather than repeating the full first-year shock forever. The
+      // shock also scales with the REAL size of this year's program relative
+      // to year one (budgetScale is nominal; priceLevel here is still the
+      // prior year's level, matching the indexation lag), so an eroding base
+      // or a melting nominal benefit reduces demand pressure while an indexed
+      // benefit sustains it. Year 1: budgetScale = priceLevel = 1.
+      demandInflation:
+        demandInflation * Math.exp(-(year - 1) / 3) * (budgetScale / priceLevel),
       moneyGrowth,
       monetizedDeficitRatio:
         (governmentDeficitYear * request.behavior.deficitMonetizationShare) /
@@ -454,13 +465,16 @@ const inflationFromStress = (input: {
   );
   const confidence = Math.max(0.05, input.priorConfidence - confidenceLoss);
   const velocityPressure = (1 - confidence) ** 2 * 1.5;
-  const inflation = Math.max(
-    -0.02,
-    input.baselineInflation +
-      input.demandInflation +
-      financingStress * 0.35 +
-      input.monetizedDeficitRatio * 0.25 +
-      velocityPressure,
+  const inflation = Math.min(
+    MAX_ANNUAL_INFLATION,
+    Math.max(
+      -0.02,
+      input.baselineInflation +
+        input.demandInflation +
+        financingStress * 0.35 +
+        input.monetizedDeficitRatio * 0.25 +
+        velocityPressure,
+    ),
   );
   return { inflation, confidence };
 };

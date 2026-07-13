@@ -1,5 +1,6 @@
 import {
   DEFAULT_COMPARISON_REQUEST,
+  type BenefitIndexation,
   type ComparisonRequestV1,
 } from "../simulation/contracts.js";
 
@@ -289,11 +290,11 @@ const readFundingRule = (
 const readBenefitIndexation = (
   raw: unknown,
   errors: string[],
-): ComparisonRequestV1["ubi"]["benefitIndexation"] => {
-  if (raw === undefined) return DEFAULT_COMPARISON_REQUEST.ubi.benefitIndexation;
+): BenefitIndexation => {
+  if (raw === undefined) return DEFAULT_COMPARISON_REQUEST.ubi.benefitIndexation ?? "none";
   if (raw === "none" || raw === "cpi") return raw;
   errors.push("benefitIndexation must be none or cpi.");
-  return DEFAULT_COMPARISON_REQUEST.ubi.benefitIndexation;
+  return DEFAULT_COMPARISON_REQUEST.ubi.benefitIndexation ?? "none";
 };
 
 const readTargetMode = (

@@ -613,7 +613,20 @@ const STORY_STEPS = [
     title: "The tax hits only a sliver of households.",
     body: (r) =>
       `With the line at ${compactMoney.format(r.wealthTaxTarget.effectiveExemption)} of net worth, wealth stacks up in the top decile — that is where the tax bites. Drag the exemption and watch which deciles fall above the line.`,
-    dial: { field: "exemption", label: "Exemption ($M net worth)", min: 0, max: 50, step: 1 },
+    dial: {
+      field: "exemption",
+      label: "Exemption ($M net worth)",
+      min: 0,
+      max: 50,
+      step: 1,
+      // A top-share preset (e.g. "1% on top 1%") makes the engine ignore the
+      // exemption field; dragging the exemption line switches targeting back to
+      // dollar-exemption so the dial actually moves the model.
+      prepare: () => {
+        byId("target-mode").value = "exemption";
+        syncTargetControls();
+      },
+    },
     viz: (host, r) => renderWealthStrip(host, r),
     readout: (r) =>
       `${compactMoney.format(r.projection.annualFlows.taxCollected)} collected in year one on wealth above the line.`,
@@ -672,7 +685,7 @@ const STORY_STEPS = [
   },
 ];
 
-const storyState = { index: 0, running: false };
+const storyState = { index: 0, running: false, pending: false, dynamic: null };
 
 const debounce = (fn, wait) => {
   let timer = null;
@@ -816,11 +829,17 @@ const renderStory = () => {
   stage.append(viz);
   if (step.viz) step.viz(viz, latestResult);
 
+  let readout = null;
   if (step.readout) {
-    const readout = element("p", step.readout(latestResult));
+    readout = element("p", step.readout(latestResult));
     readout.className = "story-readout";
     stage.append(readout);
   }
+
+  // Refs the dial-driven rerun refreshes in place, so the live <input> the
+  // reader is dragging is never torn down mid-gesture (only these data-bound
+  // nodes update).
+  storyState.dynamic = { bodyNode, viz: step.viz ? viz : null, readout };
 
   if (step.verdict) {
     const verdict = latestResult.projection.verdict;
@@ -866,6 +885,7 @@ const buildStoryDial = (dial) => {
   valueOut.textContent = String(current);
   const commit = debounce(async (value) => {
     field.value = String(value);
+    if (dial.prepare) dial.prepare();
     await storyRerun();
   }, 220);
   range.addEventListener("input", () => {
@@ -894,14 +914,40 @@ const renderStoryProgress = () => {
   );
 };
 
+// Refresh only the data-bound nodes of the current step (adaptive copy, viz,
+// readout) against the latest result — leaving the dial the reader is dragging
+// in place. Full-step rebuilds go through renderStory (navigation/presets).
+const refreshStoryDynamic = () => {
+  const dynamic = storyState.dynamic;
+  if (!dynamic) return;
+  const step = STORY_STEPS[storyState.index];
+  dynamic.bodyNode.textContent = step.body(latestResult);
+  if (dynamic.viz && step.viz) {
+    dynamic.viz.replaceChildren();
+    step.viz(dynamic.viz, latestResult);
+  }
+  if (dynamic.readout && step.readout) {
+    dynamic.readout.textContent = step.readout(latestResult);
+  }
+};
+
 const storyRerun = async () => {
-  if (storyState.running) return;
+  // Coalesce concurrent dial moves: if a run is in flight, mark a rerun pending
+  // and let the active loop pick up the newest field values when it finishes,
+  // so the final dial position is never dropped (slider ↔ model stay in sync).
+  if (storyState.running) {
+    storyState.pending = true;
+    return;
+  }
   storyState.running = true;
   byId("story-stage").classList.add("is-busy");
-  await runScenario();
+  do {
+    storyState.pending = false;
+    await runScenario();
+  } while (storyState.pending);
   storyState.running = false;
   byId("story-stage").classList.remove("is-busy");
-  renderStory();
+  refreshStoryDynamic();
 };
 
 const goToStep = (index) => {
@@ -954,7 +1000,9 @@ const initStory = () => {
   }
 
   const params = new URLSearchParams(window.location.search);
-  const stepParam = Number(params.get("step"));
+  // Floor so a fractional ?step=2.5 can't produce a fractional array index
+  // (STORY_STEPS[1.5] is undefined → renderStory would throw).
+  const stepParam = Math.floor(Number(params.get("step")));
   let seen = false;
   try {
     seen = window.localStorage.getItem(STORY_SEEN_KEY) === "1";

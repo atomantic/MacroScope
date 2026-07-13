@@ -128,10 +128,13 @@ export interface FiscalChannelCheck {
 
 /**
  * Secondary, qualitative anchor for the model's "cash-funded transfer ≈ no M2
- * change" prediction. The prediction is tied to an observed contrast — not just
- * the simulator's own accounting — so the test can check the model reproduces
- * the real-world distinction between transfer-funded and deficit-monetized
- * fiscal expansions.
+ * change" prediction. This is the *motivation* for an accounting-invariant
+ * check, not an empirical fit: the model reproduces an accounting invariant
+ * (transfers from existing balances net to zero money creation; only new credit
+ * or a monetized deficit expands M2) whose direction matches the observed
+ * 2020–2021 contrast. The invariant is verified against the engine's own
+ * double-entry accounting; the historical contrast is the qualitative reason it
+ * is the right invariant, per the issue's "even if only qualitatively" bar.
  */
 export interface CashTransferAnchor {
   readonly prediction: string;
@@ -257,7 +260,7 @@ export const runHistoricalBacktest = (): HistoricalBacktest => {
     inflationWithoutFiscal: fiscalOff.inflation,
     marginalInflation: fiscalOn.inflation - fiscalOff.inflation,
     confidenceAfter: fiscalOn.confidence,
-    note: "The 2020 Fed-absorbed deficit (~11% of GDP) run through the kernel's monetized-deficit channel adds a few points of inflation and erodes confidence — the fiscal injection the primary path folds into M2 growth, isolated here so its coefficients stay pinned.",
+    note: "The 2020 Fed-absorbed deficit (~11% of GDP) run through the kernel's monetized-deficit channel adds a few points of inflation and erodes confidence — the fiscal injection the primary path folds into M2 growth, isolated here so its coefficients stay pinned. This is a coefficient-pin, not an independent CPI backtest: it has no observed-inflation comparator of its own.",
   };
 
   return {
@@ -275,7 +278,7 @@ export const runHistoricalBacktest = (): HistoricalBacktest => {
     caveats: [
       "The kernel is a monetary-transmission approximation with a one-year lag, not a structural macro model. It has no supply-shock, energy, or labor-market channel.",
       "It has no demand-collapse or supply-shock channel, so it misses both ends of the episode. In 2020 the pandemic crushed demand and newly created deposits sat as precautionary savings, holding actual CPI to 1.4% while the lagged money signal (2019's growth) reads higher; in 2022 an energy spike pushed actual CPI above what the already-decelerating 2021 money growth implies. The kernel captures the monetary trend, not these shocks.",
-      "The primary path represents the monetized fiscal deficit through its M2 footprint rather than adding it a second time, because in 2020–2021 the deficit was the source of the money growth. The fiscal channel is validated separately (fiscalChannel) so the kernel's monetized-deficit coefficients are still pinned.",
+      "Scope of the fit: the tolerance band and allWithinTolerance check the kernel's money-growth transmission channel against observed CPI. The primary path feeds monetizedDeficitRatio=0 (the monetized deficit is already inside M2 growth in 2020–2021, so adding it again would double-count). Production's fiscal-inclusive invocation, which passes a nonzero monetizedDeficitRatio alongside M2 growth, is not itself compared to a separate observed-CPI series here; its coefficients are pinned in isolation by fiscalChannel. This is a monetary-channel backtest, not a claim that the exact simultaneous production inputs were replayed against history.",
       "December-over-December CPI is compared; the within-year headline peak (~9.1% in June 2022) was higher than any calendar-year figure.",
     ],
     sources: [

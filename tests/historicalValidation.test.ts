@@ -165,15 +165,17 @@ describe("secondary prediction: a cash-funded transfer barely moves M2", () => {
     expect(annualFlows.ubiReceived).toBeGreaterThan(0);
   });
 
-  it("reproduces the observed transfer-funded vs. deficit-monetized contrast", () => {
-    // The prediction is anchored to a real distinction: transfer-funded fiscal
-    // expansions did not grow M2, while the 2020–2021 deficit-monetized
-    // expansion drove the ~40% surge this backtest ties to the inflation.
+  it("holds the money-creation accounting invariant that matches the historical contrast", () => {
+    // This is an accounting-invariant check, not an empirical fit: the numbers
+    // come from the engine's own double-entry accounting. The historical anchor
+    // is the qualitative motivation — transfer-funded fiscal expansions did not
+    // grow M2, while the 2020–2021 deficit-monetized expansion drove the ~40%
+    // surge — for why this is the right invariant (issue's "qualitatively" bar).
     expect(CASH_TRANSFER_ANCHOR.source.url).toContain("M2SL");
     expect(CASH_TRANSFER_ANCHOR.historicalContrast).toMatch(/2020|monetiz/i);
 
-    // Model side of the contrast: the same request, cash-funded vs. with the
-    // unfunded portion monetized, must split exactly as the history did.
+    // The invariant: the same request, cash-funded vs. with the unfunded portion
+    // monetized, must split the way the accounting identities require.
     const cashFunded = runComparison(cashFundedRequest());
     const monetized = runComparison({
       ...cashFundedRequest(),

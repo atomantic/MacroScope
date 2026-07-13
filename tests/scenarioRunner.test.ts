@@ -24,6 +24,13 @@ describe("vertical-slice scenario runner", () => {
     expect(Object.values(first.strategies).every((outcome) => outcome.accounting.passed)).toBe(
       true,
     );
+    for (const outcome of Object.values(first.strategies)) {
+      expect(outcome.accounting.ledgerEvents).toBeGreaterThanOrEqual(3);
+      expect(outcome.accounting.ledgerFailures).toEqual([]);
+      expect(Math.abs(outcome.accounting.depositsIdentityResidual)).toBeLessThan(1_000);
+      expect(Math.abs(outcome.accounting.ledgerTrialBalanceResidual)).toBeLessThan(1);
+      expect(Math.abs(outcome.accounting.ledgerInstrumentResidual)).toBeLessThan(1);
+    }
     expect(borrow.funding.newCollateralizedLoans).toBeGreaterThan(0);
     expect(borrow.moneyAndCredit.bankDepositsChange).toBeGreaterThan(
       cash.moneyAndCredit.bankDepositsChange,
@@ -98,7 +105,13 @@ describe("vertical-slice scenario runner", () => {
     const sell = result.strategies["sell-first"];
     expect(sell.markets.housingSold).toBeGreaterThan(0);
     expect(Math.abs(sell.accounting.housingQuantityResidual)).toBeLessThan(0.01);
-    expect(sell.accounting.passed).toBe(true);
+    // A 20% zero-exemption tax is not settleable in the closed economy:
+    // buyers cannot fund the required asset purchases from existing deposits.
+    // The ledger audit reports that honestly instead of a tautological pass.
+    expect(sell.accounting.passed).toBe(false);
+    expect(
+      sell.accounting.ledgerFailures.some((failure) => failure.includes("overdraw")),
+    ).toBe(true);
   });
 
   it("keeps the owner-renter gap channel contingent on portfolio feedback", () => {

@@ -26,6 +26,7 @@ export type EventCause =
   | "tax-assessment"
   | "tax-payment"
   | "ubi"
+  | "government-operations"
   | "voluntary-trade"
   | "loan-origination"
   | "loan-repayment"

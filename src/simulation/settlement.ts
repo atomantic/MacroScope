@@ -105,6 +105,33 @@ export const distributeUbi = (
   });
 };
 
+export const payGovernmentOperations = (
+  ledger: Ledger,
+  amount: number,
+  context: SettlementContext,
+): void => {
+  positiveAmount(amount);
+  commit(ledger, {
+    id: context.eventId,
+    tick: context.tick,
+    layer: "transaction",
+    cause: "government-operations",
+    description:
+      "Treasury pays firms for public services delivery, administration, and leakage.",
+    metadata: { amount },
+    postings: [
+      debit(SYSTEM_ACCOUNTS.operationsExpense, amount),
+      credit(SYSTEM_ACCOUNTS.treasury, amount),
+      debit(SYSTEM_ACCOUNTS.treasuryLiability, amount),
+      credit(SYSTEM_ACCOUNTS.reserveLiability, amount),
+      debit(SYSTEM_ACCOUNTS.bankReserves, amount),
+      credit(SYSTEM_ACCOUNTS.bankDeposits, amount),
+      debit(SYSTEM_ACCOUNTS.firmDeposits, amount),
+      credit(SYSTEM_ACCOUNTS.firmOperationsIncome, amount),
+    ],
+  });
+};
+
 export const transferPublicEquityForDeposits = (
   ledger: Ledger,
   sellerId: string,

@@ -569,4 +569,436 @@ byId("target-mode").addEventListener("change", syncTargetControls);
 document.querySelectorAll("[data-preset]").forEach((button) => {
   button.addEventListener("click", () => applyPreset(button.dataset.preset));
 });
-void initialize();
+
+// ---------------------------------------------------------------------------
+// Story mode — a guided, step-driven narrative that builds the argument one
+// dial at a time before revealing the full dashboard. Every step reuses the
+// existing scenario engine and form fields, so a dial moved here re-runs the
+// same model the dashboard does. Deep-linkable via ?step=N.
+// ---------------------------------------------------------------------------
+
+const STORY_SEEN_KEY = "macroscope-story-seen";
+
+// Each step reads live values off `latestResult`, so its copy adapts to the
+// reader's current settings. `dial` binds a range input to an existing form
+// field (values are in the field's own units).
+const STORY_STEPS = [
+  {
+    id: "question",
+    kicker: "Start with the question",
+    title: "Tax the richest, send everyone a check. Who ends up better off?",
+    body: () =>
+      "You are about to build that answer yourself — one mechanism at a time. Pick a headline policy to begin; every dial you move re-runs the same U.S. model behind the full dashboard.",
+    presets: true,
+  },
+  {
+    id: "who-pays",
+    kicker: "Who the tax touches",
+    title: "The tax hits only a sliver of households.",
+    body: (r) =>
+      `With the line at ${compactMoney.format(r.wealthTaxTarget.effectiveExemption)} of net worth, wealth stacks up in the top decile — that is where the tax bites. Drag the exemption and watch which deciles fall above the line.`,
+    dial: { field: "exemption", label: "Exemption ($M net worth)", min: 0, max: 50, step: 1 },
+    viz: (host, r) => renderWealthStrip(host, r),
+    readout: (r) =>
+      `${compactMoney.format(r.projection.annualFlows.taxCollected)} collected in year one on wealth above the line.`,
+  },
+  {
+    id: "how-they-pay",
+    kicker: "How the wealthy pay",
+    title: "They rarely sell. They borrow against their wealth.",
+    body: (r) =>
+      `A wealth-tax bill can be paid with cash, by selling assets, or by borrowing against them. The more the reader assumes is borrowed, the more new bank lending the policy triggers. Right now ${percent.format(r.projection.behaviorMix.borrowShare)} is borrowed.`,
+    dial: { field: "borrow-share", label: "Share paid by borrowing (%)", min: 0, max: 100, step: 5 },
+    viz: (host, r) => renderPaymentSplit(host, r),
+    readout: (r) =>
+      `${compactMoney.format(r.projection.annualFlows.newPrivateLoans)} in new bank loans in year one — deposits created out of nothing.`,
+  },
+  {
+    id: "loans-make-money",
+    kicker: "Bank loans create money",
+    title: "New loans expand the money supply.",
+    body: () =>
+      "Taxing and transferring existing deposits just reshuffles money. New bank loans are different: they create fresh deposits. Keep moving the borrow dial and watch M2 respond over ten years.",
+    dial: { field: "borrow-share", label: "Share paid by borrowing (%)", min: 0, max: 100, step: 5 },
+    viz: (host, r) => renderStoryChart(host, "story-money-chart", moneyChartOptions(r.projection)),
+    readout: (r) =>
+      `M2 ends ${signedPercent(r.projection.summary.cumulativeM2Change)} versus the no-policy path.`,
+  },
+  {
+    id: "prices-respond",
+    kicker: "Prices respond",
+    title: "More money chasing goods can lift prices.",
+    body: (r) =>
+      `Whether new money shows up as inflation depends on how much of any deficit the central bank monetizes. Peak annual inflation in this run is ${formatRate(r.projection.summary.peakAnnualInflation)}. Turn the monetization dial to test it.`,
+    dial: { field: "monetization", label: "Deficit monetized (%)", min: 0, max: 100, step: 5 },
+    viz: (host, r) => renderStoryChart(host, "story-price-chart", moneyChartOptions(r.projection)),
+    readout: (r) =>
+      `Peak annual inflation ${formatRate(r.projection.summary.peakAnnualInflation)} — ${regimeFor(r.projection.summary.peakAnnualInflation)} regime.`,
+  },
+  {
+    id: "who-wins",
+    kicker: "Who wins after prices",
+    title: "After inflation, does the bottom half keep more?",
+    body: (r) =>
+      `This is the payoff. The check helps first; prices and financing decide whether it lasts. Adjust the monthly benefit and read the bottom-half line — currently ${signedPercent(r.projection.summary.bottom50PurchasingPowerChange)} of buying power versus no policy.`,
+    dial: { field: "adult-benefit", label: "Adult monthly benefit ($)", min: 0, max: 3000, step: 100 },
+    viz: (host, r) => renderStoryChart(host, "story-power-chart", powerChartOptions(r.projection)),
+    readout: (r) =>
+      `Bottom 50% buying power ends ${signedPercent(r.projection.summary.bottom50PurchasingPowerChange)}; top 1% real wealth ${signedPercent(r.projection.years?.at(-1)?.top1RealWealthIndex != null ? r.projection.years.at(-1).top1RealWealthIndex / 100 - 1 : 0)}.`,
+  },
+  {
+    id: "verdict",
+    kicker: "The verdict, now earned",
+    title: "You built the argument. Here is where it lands.",
+    body: (r) =>
+      `${r.projection.verdict.explanation} Every dial you touched is unlocked in the full dashboard, alongside the funding-path comparison, decile table, and inflation stress test.`,
+    verdict: true,
+  },
+];
+
+const storyState = { index: 0, running: false };
+
+const debounce = (fn, wait) => {
+  let timer = null;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), wait);
+  };
+};
+
+const moneyChartOptions = (projection) => {
+  const years = projection.years;
+  return {
+    description: `M2 ends at index ${years.at(-1).m2Index.toFixed(1)} and the price level at ${(years.at(-1).priceLevel * 100).toFixed(1)}, with 100 before policy.`,
+    series: [
+      { label: "M2 money stock", values: years.map((year) => year.m2Index), tone: "series-c" },
+      { label: "Price level", values: years.map((year) => year.priceLevel * 100), tone: "series-d" },
+    ],
+    baseline: 100,
+    valueSuffix: "",
+  };
+};
+
+const powerChartOptions = (projection) => {
+  const years = projection.years;
+  return {
+    description: `Bottom-half purchasing power ends at ${years.at(-1).bottom50PurchasingPowerIndex.toFixed(1)} and top-one-percent real wealth at ${years.at(-1).top1RealWealthIndex.toFixed(1)}, with 100 representing the no-policy path.`,
+    series: [
+      { label: "Bottom 50% buying power", values: years.map((year) => year.bottom50PurchasingPowerIndex), tone: "series-a" },
+      { label: "Top 1% real wealth", values: years.map((year) => year.top1RealWealthIndex), tone: "series-b" },
+    ],
+    baseline: 100,
+    valueSuffix: "",
+  };
+};
+
+const renderStoryChart = (host, id, options) => {
+  const chart = document.createElement("div");
+  chart.className = "chart";
+  chart.id = id;
+  host.append(chart);
+  renderLineChart(id, options);
+};
+
+// A log-scaled decile strip: bars are per-decile average net worth, the dashed
+// line is the exemption, and any decile whose households actually paid tax is
+// highlighted as "above the line".
+const renderWealthStrip = (host, result) => {
+  const deciles = result.strategies["cash-first"].distribution.deciles;
+  const exemption = result.wealthTaxTarget.effectiveExemption;
+  const safeLog = (value) => Math.log10(Math.max(1, value));
+  const values = deciles.map((decile) => safeLog(decile.averageNetWorthBefore));
+  const high = Math.max(safeLog(exemption), ...values) * 1.08;
+  const width = 720;
+  const height = 260;
+  const margin = { top: 18, right: 16, bottom: 30, left: 16 };
+  const plotHeight = height - margin.top - margin.bottom;
+  const bandWidth = (width - margin.left - margin.right) / deciles.length;
+  const yFor = (logValue) => margin.top + (1 - logValue / high) * plotHeight;
+  const svg = svgNode("svg", {
+    viewBox: `0 0 ${width} ${height}`,
+    role: "img",
+    "aria-label": `Average net worth by decile with the ${compactMoney.format(exemption)} exemption line drawn across.`,
+  });
+  const taxedDeciles = deciles.filter((decile) => decile.averageTaxPaid > 0).length;
+  deciles.forEach((decile, index) => {
+    const barX = margin.left + index * bandWidth + bandWidth * 0.14;
+    const barW = bandWidth * 0.72;
+    const top = yFor(values[index]);
+    const taxed = decile.averageTaxPaid > 0;
+    const rect = svgNode("rect", {
+      x: barX,
+      y: top,
+      width: barW,
+      height: margin.top + plotHeight - top,
+      class: taxed ? "strip-bar taxed" : "strip-bar",
+      rx: 2,
+    });
+    rect.append(svgNode("title", {}, `Decile ${decile.decile}: ${money.format(decile.averageNetWorthBefore)} average net worth${taxed ? `, ${money.format(decile.averageTaxPaid)} tax paid` : ", untaxed"}`));
+    svg.append(rect);
+    svg.append(svgNode("text", { x: barX + barW / 2, y: height - 10, class: "axis-label", "text-anchor": "middle" }, `D${decile.decile}`));
+  });
+  const lineY = yFor(safeLog(exemption));
+  svg.append(svgNode("line", { x1: margin.left, y1: lineY, x2: width - margin.right, y2: lineY, class: "baseline-line" }));
+  svg.append(svgNode("text", { x: width - margin.right, y: lineY - 7, class: "series-label series-b", "text-anchor": "end" }, `Exemption ${compactMoney.format(exemption)}`));
+  const chart = document.createElement("div");
+  chart.className = "chart strip-chart";
+  chart.append(svg);
+  host.append(chart);
+  const note = element(
+    "p",
+    taxedDeciles > 0
+      ? `${taxedDeciles} of 10 deciles hold households above the line. Wealth is log-scaled, so the top decile towers over the rest.`
+      : "No decile's average sits above the line — the tax lands only on the far tail inside the top decile.",
+  );
+  note.className = "story-note";
+  host.append(note);
+};
+
+// A single stacked bar showing how a wealth-tax bill is settled.
+const renderPaymentSplit = (host, result) => {
+  const mix = result.projection.behaviorMix;
+  const cashShare = Math.max(0, 1 - mix.borrowShare - mix.sellShare);
+  const segments = [
+    { label: "Cash", share: cashShare, tone: "seg-cash" },
+    { label: "Borrow", share: mix.borrowShare, tone: "seg-borrow" },
+    { label: "Sell assets", share: mix.sellShare, tone: "seg-sell" },
+  ].filter((segment) => segment.share > 0.0001);
+  const bar = document.createElement("div");
+  bar.className = "payment-split";
+  bar.setAttribute("role", "img");
+  bar.setAttribute("aria-label", segments.map((segment) => `${segment.label} ${percent.format(segment.share)}`).join(", "));
+  segments.forEach((segment) => {
+    const cell = document.createElement("span");
+    cell.className = `split-seg ${segment.tone}`;
+    cell.style.flexGrow = String(Math.max(0.02, segment.share));
+    if (segment.share >= 0.12) cell.textContent = `${segment.label} · ${percent.format(segment.share)}`;
+    bar.append(cell);
+  });
+  host.append(bar);
+};
+
+const renderStory = () => {
+  if (!latestResult) return;
+  const step = STORY_STEPS[storyState.index];
+  const stage = byId("story-stage");
+  stage.replaceChildren();
+
+  const copy = document.createElement("div");
+  copy.className = "story-copy";
+  const kicker = element("p", step.kicker);
+  kicker.className = "kicker";
+  copy.append(kicker);
+  const title = element("h1", typeof step.title === "function" ? step.title(latestResult) : step.title);
+  title.id = "story-title";
+  copy.append(title);
+  const bodyNode = element("p", step.body(latestResult));
+  bodyNode.className = "story-body";
+  copy.append(bodyNode);
+  stage.append(copy);
+
+  if (step.presets) {
+    const presetWrap = document.createElement("div");
+    presetWrap.className = "story-presets";
+    [
+      ["top-one", "1% on top 1%"],
+      ["billionaire", "10% over $1B"],
+      ["ten-million", "5% over $10M"],
+      ["universal", "Universal 1% + UBI"],
+    ].forEach(([preset, label]) => {
+      const button = element("button", label);
+      button.type = "button";
+      button.addEventListener("click", async () => {
+        applyStoryPreset(preset);
+        await storyRerun();
+      });
+      presetWrap.append(button);
+    });
+    stage.append(presetWrap);
+  }
+
+  if (step.dial) {
+    stage.append(buildStoryDial(step.dial));
+  }
+
+  const viz = document.createElement("div");
+  viz.className = "story-viz";
+  stage.append(viz);
+  if (step.viz) step.viz(viz, latestResult);
+
+  if (step.readout) {
+    const readout = element("p", step.readout(latestResult));
+    readout.className = "story-readout";
+    stage.append(readout);
+  }
+
+  if (step.verdict) {
+    const verdict = latestResult.projection.verdict;
+    document.body.dataset.verdict = verdict.rating;
+    const panel = document.createElement("div");
+    panel.className = "story-verdict";
+    const badge = element("span", verdict.rating);
+    badge.className = "verdict-badge";
+    panel.append(badge);
+    panel.append(element("strong", verdict.headline));
+    stage.append(panel);
+    const enter = element("button", "Explore the full dashboard →");
+    enter.type = "button";
+    enter.className = "run-button story-enter";
+    enter.addEventListener("click", () => enterDashboard());
+    stage.append(enter);
+  }
+
+  renderStoryProgress();
+  byId("story-counter").textContent = `Step ${storyState.index + 1} of ${STORY_STEPS.length}`;
+  byId("story-prev").disabled = storyState.index === 0;
+  const next = byId("story-next");
+  next.hidden = storyState.index === STORY_STEPS.length - 1;
+};
+
+const buildStoryDial = (dial) => {
+  const field = byId(dial.field);
+  const wrap = document.createElement("label");
+  wrap.className = "story-dial";
+  const header = document.createElement("span");
+  header.className = "story-dial-head";
+  header.append(element("span", dial.label));
+  const valueOut = element("strong", "");
+  header.append(valueOut);
+  wrap.append(header);
+  const range = document.createElement("input");
+  range.type = "range";
+  range.min = String(dial.min);
+  range.max = String(dial.max);
+  range.step = String(dial.step);
+  const current = clamp(Number(field.value), dial.min, dial.max);
+  range.value = String(current);
+  valueOut.textContent = String(current);
+  const commit = debounce(async (value) => {
+    field.value = String(value);
+    await storyRerun();
+  }, 220);
+  range.addEventListener("input", () => {
+    valueOut.textContent = range.value;
+    commit(range.value);
+  });
+  wrap.append(range);
+  return wrap;
+};
+
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+const renderStoryProgress = () => {
+  const progress = byId("story-progress");
+  progress.replaceChildren(
+    ...STORY_STEPS.map((step, index) => {
+      const dot = document.createElement("button");
+      dot.type = "button";
+      dot.className = "story-dot";
+      dot.setAttribute("role", "listitem");
+      dot.setAttribute("aria-label", `Go to step ${index + 1}: ${step.kicker}`);
+      if (index === storyState.index) dot.setAttribute("aria-current", "step");
+      dot.addEventListener("click", () => goToStep(index));
+      return dot;
+    }),
+  );
+};
+
+// Applies a preset by writing directly to the form fields (mirrors applyPreset
+// without triggering the dashboard's own scenario run).
+const applyStoryPreset = (name) => {
+  const presets = {
+    "top-one": { targetMode: "top-share", topShare: 1, exemption: 10, rate: 1 },
+    billionaire: { targetMode: "exemption", topShare: 1, exemption: 1000, rate: 10 },
+    "ten-million": { targetMode: "exemption", topShare: 1, exemption: 10, rate: 5 },
+    universal: { targetMode: "exemption", topShare: 100, exemption: 0, rate: 1, adultBenefit: 1000, childBenefit: 500, directCashShare: 100 },
+  };
+  const preset = presets[name];
+  if (!preset) return;
+  byId("target-mode").value = preset.targetMode;
+  byId("top-share").value = preset.topShare;
+  byId("exemption").value = preset.exemption;
+  byId("tax-rate").value = preset.rate;
+  if (preset.adultBenefit !== undefined) byId("adult-benefit").value = preset.adultBenefit;
+  if (preset.childBenefit !== undefined) byId("child-benefit").value = preset.childBenefit;
+  if (preset.directCashShare !== undefined) byId("direct-cash-share").value = preset.directCashShare;
+  syncTargetControls();
+};
+
+const storyRerun = async () => {
+  if (storyState.running) return;
+  storyState.running = true;
+  byId("story-stage").classList.add("is-busy");
+  await runScenario();
+  storyState.running = false;
+  byId("story-stage").classList.remove("is-busy");
+  renderStory();
+};
+
+const goToStep = (index) => {
+  storyState.index = clamp(index, 0, STORY_STEPS.length - 1);
+  syncStoryUrl();
+  renderStory();
+  byId("story").scrollIntoView({ behavior: "smooth", block: "start" });
+};
+
+const syncStoryUrl = () => {
+  const url = new URL(window.location.href);
+  url.searchParams.set("step", String(storyState.index + 1));
+  window.history.replaceState(null, "", url);
+};
+
+const enterStory = (index = 0) => {
+  storyState.index = clamp(index, 0, STORY_STEPS.length - 1);
+  document.body.dataset.view = "story";
+  syncStoryUrl();
+  renderStory();
+  window.scrollTo({ top: 0, behavior: "auto" });
+};
+
+const enterDashboard = () => {
+  document.body.dataset.view = "dashboard";
+  try {
+    window.localStorage.setItem(STORY_SEEN_KEY, "1");
+  } catch {
+    // Private-mode storage failures must not break navigation.
+  }
+  const url = new URL(window.location.href);
+  url.searchParams.delete("step");
+  window.history.replaceState(null, "", url);
+  byId("story-launch").hidden = false;
+  window.scrollTo({ top: 0, behavior: "auto" });
+};
+
+const initStory = () => {
+  byId("story-prev").addEventListener("click", () => goToStep(storyState.index - 1));
+  byId("story-next").addEventListener("click", () => goToStep(storyState.index + 1));
+  byId("story-skip").addEventListener("click", () => enterDashboard());
+  byId("story-launch").addEventListener("click", () => enterStory(0));
+
+  // If the model never loaded, there is nothing to narrate — show the
+  // dashboard shell so its error status is visible.
+  if (!latestResult) {
+    enterDashboard();
+    byId("story-launch").hidden = true;
+    return;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const stepParam = Number(params.get("step"));
+  let seen = false;
+  try {
+    seen = window.localStorage.getItem(STORY_SEEN_KEY) === "1";
+  } catch {
+    seen = false;
+  }
+  if (Number.isFinite(stepParam) && stepParam >= 1) {
+    enterStory(stepParam - 1);
+  } else if (params.get("view") === "dashboard" || seen) {
+    enterDashboard();
+  } else {
+    enterStory(0);
+  }
+};
+
+void initialize().then(initStory);

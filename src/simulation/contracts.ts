@@ -240,6 +240,7 @@ export interface StrategyOutcome {
   };
   readonly accounting: {
     readonly depositsIdentityResidual: number;
+    readonly bankDepositsIdentityResidual: number;
     readonly taxFundingResidual: number;
     readonly equityQuantityResidual: number;
     readonly housingQuantityResidual: number;

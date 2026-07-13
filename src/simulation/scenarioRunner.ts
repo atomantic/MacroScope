@@ -368,6 +368,7 @@ const runStrategy = (
       forcedLoanRepayments: cascade.totalForcedRepayments,
     },
     perHouseholdDepositsChange,
+    bankDepositsChange: depositsChange,
     taxAssessed,
     taxDeferred,
     equityQuantityResidual,

@@ -27,6 +27,13 @@ const consistentInputs = (): StrategyAccountingInputs => {
       flows.taxCollected +
       flows.ubiReceived -
       flows.forcedLoanRepayments,
+    // Bank view adds the operations spending parked in firm deposits.
+    bankDepositsChange:
+      flows.newLoans -
+      flows.taxCollected +
+      flows.ubiReceived +
+      flows.otherGovernmentOutlays -
+      flows.forcedLoanRepayments,
     taxAssessed: 100_000,
     taxDeferred: 10_000,
     equityQuantityResidual: 0,
@@ -40,6 +47,7 @@ describe("scenario ledger audit", () => {
     const flows = consistentFlows();
     const audit = auditStrategyFlows(flows);
     expect(audit.failures).toEqual([]);
+    expect(audit.replayComplete).toBe(true);
     expect(audit.events).toBe(5);
     expect(audit.householdDepositsChange).toBeCloseTo(
       flows.newLoans - flows.taxCollected + flows.ubiReceived - flows.forcedLoanRepayments,
@@ -90,6 +98,21 @@ describe("scenario ledger audit", () => {
     expect(accounting.passed).toBe(false);
   });
 
+  it("mutation: a corrupted bank-deposits flow identity is detected", () => {
+    const inputs = consistentInputs();
+    const corrupted: StrategyAccountingInputs = {
+      ...inputs,
+      // Simulates a regression that drops forced repayments from the formula.
+      bankDepositsChange: inputs.bankDepositsChange + inputs.flows.forcedLoanRepayments,
+    };
+    const accounting = computeStrategyAccounting(corrupted);
+    expect(Math.abs(accounting.bankDepositsIdentityResidual)).toBeCloseTo(
+      inputs.flows.forcedLoanRepayments,
+      6,
+    );
+    expect(accounting.passed).toBe(false);
+  });
+
   it("mutation: a funding allocator that loses money fails the tax check", () => {
     const inputs = consistentInputs();
     const corrupted: StrategyAccountingInputs = {
@@ -121,6 +144,7 @@ describe("scenario ledger audit", () => {
     };
     const audit = auditStrategyFlows(flows);
     expect(audit.failures.length).toBeGreaterThan(0);
+    expect(audit.replayComplete).toBe(false);
     expect(audit.failures.some((failure) => failure.includes("overdraw"))).toBe(true);
     const accounting = computeStrategyAccounting({
       ...consistentInputs(),

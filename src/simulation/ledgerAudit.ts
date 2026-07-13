@@ -41,6 +41,8 @@ export interface LedgerAuditResult {
   readonly trialBalanceResidual: number;
   readonly instrumentResidual: number;
   readonly events: number;
+  /** True when every aggregate event settled through the kernel. */
+  readonly replayComplete: boolean;
   readonly failures: readonly string[];
 }
 
@@ -50,6 +52,8 @@ export interface StrategyAccountingInputs {
   readonly flows: StrategyFlowAggregates;
   /** Independently computed sum of per-household (depositsAfter - deposits). */
   readonly perHouseholdDepositsChange: number;
+  /** The runner's flow-arithmetic bank-deposits change to audit. */
+  readonly bankDepositsChange: number;
   readonly taxAssessed: number;
   readonly taxDeferred: number;
   readonly equityQuantityResidual: number;
@@ -81,6 +85,7 @@ export const auditStrategyFlows = (
   const epsilon = Math.max(1e-6, scale * 1e-12);
   const failures: string[] = [];
   let ledger: Ledger | undefined;
+  let replayComplete = false;
 
   // The kernel reports broken conservation by throwing (unbalanced event,
   // sector residual, instrument mismatch, overdraw). The audit must surface
@@ -136,6 +141,7 @@ export const auditStrategyFlows = (
         eventId: "audit-forced-repayment",
       });
     }
+    replayComplete = true;
   } catch (error) {
     failures.push(error instanceof Error ? error.message : String(error));
   }
@@ -147,6 +153,7 @@ export const auditStrategyFlows = (
       trialBalanceResidual: 0,
       instrumentResidual: 0,
       events: 0,
+      replayComplete,
       failures,
     };
   }
@@ -166,6 +173,7 @@ export const auditStrategyFlows = (
     trialBalanceResidual: residuals.trialBalance,
     instrumentResidual: residuals.instrumentMirror,
     events: ledger.sequence,
+    replayComplete,
     failures,
   };
 };
@@ -185,12 +193,21 @@ export const computeStrategyAccounting = (
   inputs: StrategyAccountingInputs,
 ): StrategyAccounting => {
   const audit = auditStrategyFlows(inputs.flows);
-  const depositsIdentityResidual =
-    inputs.perHouseholdDepositsChange - audit.householdDepositsChange;
+  // Comparison residuals against a partially-replayed ledger would just
+  // measure the skipped events (a meaningless multi-trillion magnitude), so
+  // they are reported as 0 when the replay aborted; audit.failures already
+  // carries the reason and forces passed=false.
+  const depositsIdentityResidual = audit.replayComplete
+    ? inputs.perHouseholdDepositsChange - audit.householdDepositsChange
+    : 0;
+  const bankDepositsIdentityResidual = audit.replayComplete
+    ? inputs.bankDepositsChange - audit.bankDepositsChange
+    : 0;
   const taxFundingResidual =
     inputs.taxAssessed - inputs.flows.taxCollected - inputs.taxDeferred;
   const passed =
     Math.abs(depositsIdentityResidual) <= inputs.tolerance &&
+    Math.abs(bankDepositsIdentityResidual) <= inputs.tolerance &&
     Math.abs(taxFundingResidual) <= inputs.tolerance &&
     Math.abs(inputs.equityQuantityResidual) <= inputs.tolerance &&
     Math.abs(inputs.housingQuantityResidual) <= inputs.tolerance &&
@@ -199,6 +216,7 @@ export const computeStrategyAccounting = (
     audit.failures.length === 0;
   return {
     depositsIdentityResidual,
+    bankDepositsIdentityResidual,
     taxFundingResidual,
     equityQuantityResidual: inputs.equityQuantityResidual,
     housingQuantityResidual: inputs.housingQuantityResidual,

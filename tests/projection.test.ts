@@ -203,6 +203,39 @@ describe("ten-year projection dynamics", () => {
     expect(owner?.annualTaxPaid).toBe(0);
   });
 
+  it("drains only top-tier cohorts' cumulative tax under expatriation (issue #17)", () => {
+    // Universal tax (reaches every tier), low-inflation setup so the per-cohort
+    // real-wealth change is dominated by its own cumulative tax burden rather
+    // than the shared inflation channels.
+    const run = (expatriationShare: number) =>
+      runComparison({
+        ...nationalRequest(),
+        wealthTax: { targetMode: "exemption", exemption: 0, topShare: 0.01, rate: 0.01 },
+        behavior: {
+          ...nationalRequest().behavior,
+          borrowShare: 0,
+          sellShare: 0,
+          deficitMonetizationShare: 0,
+          expatriationShare,
+        },
+      });
+    const wealth = (result: ReturnType<typeof run>, id: string) =>
+      result.projection.groupOutcomes.find((group) => group.id === id)?.realWealthChange ?? 0;
+    const none = run(0);
+    const heavy = run(0.8);
+    // Top-tier cohorts (>= 99th percentile) shed cumulative tax as their sub-base
+    // expatriates, so their real wealth improves markedly.
+    const topGain = wealth(heavy, "top-0.1") - wealth(none, "top-0.1");
+    expect(topGain).toBeGreaterThan(0.03);
+    // A non-top cohort's base is retained, so its burden — and real wealth — barely
+    // move. Under the pre-fix blended multiplier the top tier's departure would
+    // have relieved every cohort's cumulative tax alike, collapsing this contrast;
+    // that it survives pins the per-tier cohort attribution.
+    const midChange = Math.abs(wealth(heavy, "middle-40") - wealth(none, "middle-40"));
+    expect(midChange).toBeLessThan(0.01);
+    expect(topGain).toBeGreaterThan(midChange * 5);
+  });
+
   it("attributes tax to the top tail when the exemption exceeds every cohort average", () => {
     // The "10% over $1B" preset sits above every cohort's AVERAGE wealth, so the
     // group-level taxable base is zero everywhere — but the top tail still pays,

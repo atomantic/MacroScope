@@ -509,3 +509,15 @@ body[data-view="story"] #dashboard-view { display: none; }
   .stress-table td { padding: 11px 1px; font-size: 0.65rem; }
   .stress-table th { padding-inline: 1px; }
 }
+
+/* --- Model constants (issue #8) ------------------------------------------ */
+.advanced-controls-note { grid-column: 1 / -1; margin: 14px 0 0; color: var(--muted); font-size: 0.72rem; line-height: 1.5; }
+.model-constants { margin-top: 26px; }
+.model-constants h4 { margin: 0 0 6px; font-family: var(--display); font-size: 1.05rem; }
+.model-constants-note { margin: 0 0 12px; font-size: 0.74rem; line-height: 1.5; }
+.model-constants-table { width: 100%; border-collapse: collapse; font-size: 0.74rem; }
+.model-constants-table th, .model-constants-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.model-constants-table th { color: var(--muted); font-weight: 750; }
+.model-constants-table .constant-value { font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 700; }
+.model-constants-table .constant-name { font-weight: 650; }
+.constant-tunable-badge { display: inline-block; padding: 2px 7px; border-radius: 99px; background: var(--green-soft); color: var(--green); font-size: 0.56rem; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase; }

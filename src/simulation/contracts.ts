@@ -4,6 +4,28 @@ import {
   type UbiFundingRule,
 } from "../policies/schema.js";
 import { US_BASELINE } from "./usBaseline.js";
+import { DEFAULT_MODEL_TUNABLES } from "./modelConstants.js";
+
+/**
+ * The promoted, user-tunable model constants (issue #8). Each mirrors a
+ * documented entry in MODEL_CONSTANTS; defaults reproduce the calibrated
+ * baseline exactly. Validation ranges and display metadata live in
+ * `MODEL_TUNABLES` (modelConstants.ts).
+ */
+export interface ModelTunables {
+  // Share of policy-driven excess inflation that lifts the bottom-half wage base.
+  readonly wagePassThrough: number;
+  // Fraction of outstanding private tax-payment loans repaid each year.
+  readonly loanAmortizationRate: number;
+  // Share of collected tax and debt service borne by the top tier.
+  readonly topTaxIncidenceShare: number;
+  // Share of first-year inflation pressure offset by monetary policy.
+  readonly monetaryPolicyOffsetShare: number;
+  // Share of excess inflation passing into the taxed asset base's price.
+  readonly assetPriceInflationPassThrough: number;
+  // Peak annual inflation at/above which the verdict is rated harmful.
+  readonly verdictHarmfulInflation: number;
+}
 
 export type PaymentStrategy = "cash-first" | "borrow-first" | "sell-first";
 export type BenefitIndexation = "none" | "cpi";
@@ -75,6 +97,8 @@ export interface ComparisonRequestV1 {
     readonly expatriationShare: number;
     readonly privateBusinessInclusionRate: number;
   };
+  // Promoted model constants, tunable with server-side validation (issue #8).
+  readonly model: ModelTunables;
 }
 
 export type InflationRegime =
@@ -375,4 +399,5 @@ export const DEFAULT_COMPARISON_REQUEST: ComparisonRequestV1 = {
     expatriationShare: 0,
     privateBusinessInclusionRate: 0.7,
   },
+  model: DEFAULT_MODEL_TUNABLES,
 };

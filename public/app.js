@@ -703,6 +703,14 @@ const restorePinnedFromUrl = async () => {
 // impractically large (or absent) opt in with data-slider-min/max.
 const fieldSliders = new Map();
 
+// Map a field's string value onto its slider, guarding against `Number(x) || min`
+// eating a legitimate 0 (e.g. asset-return has min -50, so 0 || -50 would park
+// the slider hard-left at -50%). Only genuinely non-numeric input falls back.
+const clampFieldValue = (raw, min, max) => {
+  const value = Number(raw);
+  return clamp(Number.isFinite(value) ? value : min, min, max);
+};
+
 const attachSlider = (input) => {
   if (fieldSliders.has(input.id)) return;
   const min = Number(input.dataset.sliderMin ?? input.getAttribute("min") ?? 0);
@@ -715,7 +723,7 @@ const attachSlider = (input) => {
   range.min = String(min);
   range.max = String(max);
   range.step = String(step);
-  range.value = String(clamp(Number(input.value) || min, min, max));
+  range.value = String(clampFieldValue(input.value, min, max));
   range.tabIndex = -1;
   range.setAttribute("aria-hidden", "true");
   range.dataset.for = input.id;
@@ -746,7 +754,7 @@ const syncSlider = (id) => {
   if (!range || !input) return;
   const min = Number(range.min);
   const max = Number(range.max);
-  range.value = String(clamp(Number(input.value) || min, min, max));
+  range.value = String(clampFieldValue(input.value, min, max));
 };
 
 const syncAllSliders = () => {
@@ -1777,6 +1785,13 @@ byId("run-button").addEventListener("click", (event) => {
 // Any manual edit means the form no longer matches a named preset, so the URL
 // falls back to explicit field params, and the model auto-runs (debounced).
 // Programmatic .value writes don't fire this.
+// A graduated schedule mid-entry (threshold typed, rate still blank) would fail
+// validateBrackets and flash a red error on every keystroke; only auto-run once
+// every present bracket row is complete (an empty schedule is trivially complete).
+const bracketRowsComplete = () =>
+  readBracketRows().every(
+    (bracket) => !Number.isNaN(bracket.threshold) && !Number.isNaN(bracket.rate),
+  );
 byId("scenario-form").addEventListener("input", (event) => {
   activePreset = null;
   const target = event.target;
@@ -1786,13 +1801,13 @@ byId("scenario-form").addEventListener("input", (event) => {
     applyJointConstraint(target);
     syncSlider(target.id);
   }
-  scheduleAutoRun();
+  if (bracketRowsComplete()) scheduleAutoRun();
 });
 // Selects fire change (not reliably input across browsers); auto-run on those too.
 byId("scenario-form").addEventListener("change", (event) => {
   if (event.target instanceof HTMLSelectElement) {
     activePreset = null;
-    scheduleAutoRun();
+    if (bracketRowsComplete()) scheduleAutoRun();
   }
 });
 byId("pin-button").addEventListener("click", () => pinCurrentScenario());

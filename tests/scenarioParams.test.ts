@@ -55,6 +55,14 @@ describe("scenario URL parameters", () => {
     expect(decodeScenarioParams(query).preset).toBe("billionaire");
   });
 
+  it("decodes a preset alongside explicit field overrides (fields win)", () => {
+    // Hand-crafted "preset + tweak" links must surface both, so the app's
+    // hydration layer can let the explicit field override the preset value.
+    const decoded = decodeScenarioParams("preset=billionaire&tr=20");
+    expect(decoded.preset).toBe("billionaire");
+    expect(decoded.fields["tax-rate"]).toBe("20");
+  });
+
   it("keeps the default strategy out of the URL", () => {
     const query = encodeScenarioParams({
       values: { ...defaults },

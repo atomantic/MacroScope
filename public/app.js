@@ -1,6 +1,5 @@
 import {
   FIELD_SPECS,
-  DEFAULT_STRATEGY,
   encodeScenarioParams,
   decodeScenarioParams,
 } from "./scenario-params.js";
@@ -191,7 +190,7 @@ const scenarioQuery = () =>
 
 const scenarioLink = () => {
   const query = scenarioQuery();
-  return `${location.origin}${location.pathname}${query ? `?${query}` : ""}`;
+  return `${location.origin}${location.pathname}${query ? `?${query}` : ""}${location.hash}`;
 };
 
 // Reflect the live form state in the address bar without adding history
@@ -205,7 +204,8 @@ const updateScenarioUrl = () => {
 // the URL carried scenario state, so callers know to recompute.
 const hydrateFormFromUrl = () => {
   const decoded = decodeScenarioParams(location.search);
-  if (decoded.preset && PRESETS[decoded.preset]) {
+  const appliedPreset = Boolean(decoded.preset && PRESETS[decoded.preset]);
+  if (appliedPreset) {
     setPresetFields(decoded.preset);
     activePreset = decoded.preset;
   }
@@ -215,7 +215,8 @@ const hydrateFormFromUrl = () => {
   if (fieldIds.length > 0) activePreset = null;
   if (decoded.strategy) byId("distribution-strategy").value = decoded.strategy;
   syncTargetControls();
-  return Boolean(decoded.preset) || fieldIds.length > 0 || Boolean(decoded.strategy);
+  // An unknown preset name applies nothing, so it must not force a recompute.
+  return appliedPreset || fieldIds.length > 0 || Boolean(decoded.strategy);
 };
 
 const copyText = async (text) => {

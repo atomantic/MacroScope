@@ -125,6 +125,22 @@ describe("ten-year projection dynamics", () => {
     expect(Number.isFinite(flows.finalYear.m2Injection)).toBe(true);
   });
 
+  it("keeps M2 positive when a large tax surplus drains deposits", () => {
+    const result = runComparison({
+      ...nationalRequest(),
+      wealthTax: { targetMode: "exemption", exemption: 0, topShare: 0.01, rate: 0.2 },
+      ubi: {
+        ...nationalRequest().ubi,
+        adultMonthlyBenefit: 0,
+        childMonthlyBenefit: 0,
+      },
+    });
+    for (const year of result.projection.years) {
+      expect(year.m2).toBeGreaterThan(0);
+      expect(year.m2Index).toBeGreaterThan(0);
+    }
+  });
+
   it("keeps year-one flows identical to the strategy outcomes and caveats aligned", () => {
     const result = runComparison(nationalRequest());
     const flows = result.projection.annualFlows;

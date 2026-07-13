@@ -19,6 +19,10 @@ const ASSET_PRICE_INFLATION_PASS_THROUGH = 0.5;
 // is unaffected, but keeps indexed-benefit feedback loops finite over the
 // ten-year horizon for every API-accepted input combination.
 const MAX_ANNUAL_INFLATION = 10_000;
+// Treasury surplus drains cannot destroy the whole money stock: in reality a
+// sustained surplus retires debt or is respent. This reduced-form floor keeps
+// M2 (and everything derived from it) positive for every accepted input.
+const M2_FLOOR = US_BASELINE.m2 * 0.1;
 const STRICT_HYPER_MONTHLY_RATE = 0.5;
 const STRICT_HYPER_ANNUAL_RATE = (1 + STRICT_HYPER_MONTHLY_RATE) ** 12 - 1;
 const BASELINE_RENTER_HOUSING_COST_SHARE = 0.31;
@@ -80,10 +84,12 @@ export const buildPolicyProjection = (
       ? Math.min(requestedUbi, taxCollected)
       : requestedUbi;
   const yearOneSurplus = Math.max(0, taxCollected - yearOneProgramBudget);
-  const yearOneM2Injection =
+  const yearOneM2Injection = Math.max(
     newPrivateLoans +
-    governmentDeficit * request.behavior.deficitMonetizationShare -
-    yearOneSurplus;
+      governmentDeficit * request.behavior.deficitMonetizationShare -
+      yearOneSurplus,
+    M2_FLOOR - US_BASELINE.m2,
+  );
   let finalYearFlows = {
     taxCollected,
     ubiReceived,
@@ -161,10 +167,12 @@ export const buildPolicyProjection = (
     const repayments = privateTaxDebt * ANNUAL_LOAN_AMORTIZATION;
     privateTaxDebt = Math.max(0, privateTaxDebt + newPrivateLoansYear - repayments);
     publicDebt += governmentDeficitYear;
-    const moneyInjection =
+    const moneyInjection = Math.max(
       newPrivateLoansYear - repayments +
-      governmentDeficitYear * request.behavior.deficitMonetizationShare -
-      surplusYear;
+        governmentDeficitYear * request.behavior.deficitMonetizationShare -
+        surplusYear,
+      M2_FLOOR - m2,
+    );
     const moneyGrowth = moneyInjection / Math.max(1, m2);
     m2 += moneyInjection;
 
@@ -570,14 +578,18 @@ const stressPeak = (input: {
     // CPI-indexed benefits grow the stressed outlay with the prior year's
     // price level (same one-year recognition lag as the main projection).
     const indexation = input.benefitIndexation === "cpi" ? priceLevel : 1;
-    const deficit = Math.max(
-      0,
-      input.requestedUbi * indexation * 1.012 - input.taxCollected,
-    );
+    const outlay = input.requestedUbi * indexation * 1.012;
+    const deficit = Math.max(0, outlay - input.taxCollected);
+    // Same Treasury-surplus drain and M2 floor as the main projection loop.
+    const surplus = Math.max(0, input.taxCollected - outlay);
     const repayments = privateDebt * ANNUAL_LOAN_AMORTIZATION;
     privateDebt = Math.max(0, privateDebt + input.newPrivateLoans - repayments);
-    const injection =
-      input.newPrivateLoans - repayments + deficit * input.monetizationShare;
+    const injection = Math.max(
+      input.newPrivateLoans - repayments +
+        deficit * input.monetizationShare -
+        surplus,
+      M2_FLOOR - m2,
+    );
     const stress = inflationFromStress({
       baselineInflation: US_BASELINE.baselineInflation,
       demandInflation: input.demandInflation,

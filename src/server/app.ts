@@ -9,6 +9,7 @@ import { DEFAULT_COMPARISON_REQUEST } from "../simulation/contracts.js";
 import { runComparison } from "../simulation/scenarioRunner.js";
 import { parseComparisonRequest } from "./comparisonInput.js";
 import { US_BASELINE } from "../simulation/usBaseline.js";
+import { HISTORICAL_BACKTEST } from "../simulation/historicalValidation.js";
 
 export interface AppOptions {
   readonly startedAt?: number;
@@ -58,6 +59,7 @@ export const createApp = (options: AppOptions = {}): Express => {
         "owner-renter-asset-feedback-theory-test",
         "percentile-or-dollar-wealth-tax-targeting",
         "cash-services-and-administration-allocation",
+        "historical-inflation-backtest-2020-2023",
       ],
     });
   });
@@ -72,6 +74,10 @@ export const createApp = (options: AppOptions = {}): Express => {
 
   app.get("/api/baseline/us", (_request, response) => {
     response.json(US_BASELINE);
+  });
+
+  app.get("/api/validation/historical", (_request, response) => {
+    response.json(HISTORICAL_BACKTEST);
   });
 
   app.post("/api/scenarios/compare", (request, response) => {

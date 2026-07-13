@@ -469,13 +469,24 @@ const averageBottomHalf = (
   );
 };
 
-const inflationFromStress = (input: {
-  baselineInflation: number;
-  demandInflation: number;
-  moneyGrowth: number;
-  monetizedDeficitRatio: number;
-  priorConfidence: number;
-}): { inflation: number; confidence: number } => {
+export interface InflationStressInput {
+  readonly baselineInflation: number;
+  readonly demandInflation: number;
+  readonly moneyGrowth: number;
+  readonly monetizedDeficitRatio: number;
+  readonly priorConfidence: number;
+}
+
+/**
+ * The single reduced-form inflation kernel used by every projection year and
+ * stress cell. Exported so the historical backtest
+ * (`historicalValidation.ts`) can feed real 2020–2023 monetary data through
+ * the exact same coefficients the forward-looking policy simulation relies on.
+ */
+export const inflationFromStress = (input: InflationStressInput): {
+  inflation: number;
+  confidence: number;
+} => {
   const financingStress = Math.max(0, input.moneyGrowth - 0.025);
   const confidenceLoss = Math.max(
     0,

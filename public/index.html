@@ -164,6 +164,37 @@
         </div>
       </section>
 
+      <section class="validation-section" aria-labelledby="validation-heading">
+        <div class="section-intro">
+          <p class="kicker">How do we know?</p>
+          <h2 id="validation-heading">The inflation engine, checked against 2020–2023.</h2>
+          <p id="validation-lede">The same reduced-form kernel that produces every number above is fed the actual U.S. money supply of 2019–2022 and asked to reproduce the inflation that followed. No per-year tuning — one set of published coefficients.</p>
+        </div>
+        <div class="validation-layout">
+          <div class="validation-chart-wrap">
+            <div class="chart" id="backtest-chart"></div>
+            <p class="validation-caption" id="backtest-caption">Modeled vs. actual CPI</p>
+          </div>
+          <aside class="validation-notes">
+            <div class="validation-metrics">
+              <div><span>Modeled peak</span><strong id="backtest-modeled-peak">—</strong><small id="backtest-actual-peak">—</small></div>
+              <div><span>Average miss</span><strong id="backtest-mae">—</strong><small>across the checked years</small></div>
+            </div>
+            <div class="validation-table-wrap">
+              <table class="validation-table" aria-label="Modeled versus actual inflation">
+                <thead><tr><th>Year</th><th>Prior-year M2</th><th>Modeled</th><th>Actual CPI</th></tr></thead>
+                <tbody id="backtest-body"></tbody>
+              </table>
+            </div>
+            <div class="validation-caveats">
+              <span>What this reduced form misses</span>
+              <ul id="backtest-caveats"></ul>
+            </div>
+            <div class="validation-sources" id="backtest-sources"></div>
+          </aside>
+        </div>
+      </section>
+
       <section class="verdict-reasons" aria-labelledby="reasons-heading">
         <div class="section-intro compact">
           <p class="kicker">Why the model says this</p>

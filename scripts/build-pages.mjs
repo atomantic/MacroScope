@@ -2,6 +2,7 @@ import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, posix, resolve } from "node:path";
 import {
   DEFAULT_COMPARISON_REQUEST,
+  HISTORICAL_BACKTEST,
   US_BASELINE,
   runComparison,
 } from "../dist/index.js";
@@ -65,6 +66,10 @@ await writeFile(
   `${JSON.stringify(DEFAULT_COMPARISON_REQUEST)}\n`,
 );
 await writeFile(resolve(data, "us-baseline.json"), `${JSON.stringify(US_BASELINE)}\n`);
+await writeFile(
+  resolve(data, "historical-backtest.json"),
+  `${JSON.stringify(HISTORICAL_BACKTEST)}\n`,
+);
 await writeFile(
   resolve(data, "default-scenario.json"),
   `${JSON.stringify(runComparison(DEFAULT_COMPARISON_REQUEST))}\n`,

@@ -173,7 +173,7 @@ export const runHistoricalBacktest = (): HistoricalBacktest => {
     allWithinTolerance: years.every((year) => year.withinTolerance),
     caveats: [
       "The kernel is a monetary-transmission approximation with a one-year lag, not a structural macro model. It has no supply-shock, energy, or labor-market channel.",
-      "It cannot reproduce 2020 itself: money was created while the pandemic collapsed demand, so newly created deposits sat as precautionary savings and prices barely moved. The reduced form maps money growth to prices with a lag and so overstates 2020 and understates the 2022 energy spike.",
+      "It has no demand-collapse or supply-shock channel, so it misses both ends of the episode. In 2020 the pandemic crushed demand and newly created deposits sat as precautionary savings, holding actual CPI to 1.4% while the lagged money signal (2019's growth) reads higher; in 2022 an energy spike pushed actual CPI above what the already-decelerating 2021 money growth implies. The kernel captures the monetary trend, not these shocks.",
       "The monetized fiscal deficit is represented through its M2 footprint rather than being added a second time, because in 2020–2021 the deficit was the source of the money growth. Deficit-to-GDP figures are shown for context only.",
       "December-over-December CPI is compared; the within-year headline peak (~9.1% in June 2022) was higher than any calendar-year figure.",
     ],

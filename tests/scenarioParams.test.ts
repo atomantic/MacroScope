@@ -122,4 +122,19 @@ describe("scenario URL parameters", () => {
     const query = encodeScenarioParams({ values: { ...defaults }, defaults });
     expect(decodeScenarioParams(query).pin).toBeNull();
   });
+
+  it("serializes the taxpayer-response fields so shared links reproduce them", () => {
+    // Regression: avoidance/expatriation/private-business were previously absent
+    // from FIELD_SPECS, so a link with those dials changed silently reset them.
+    for (const id of [
+      "avoidance-elasticity",
+      "expatriation-share",
+      "private-business-inclusion",
+    ]) {
+      expect(FIELD_SPECS.some((spec) => spec.id === id)).toBe(true);
+      const values = { ...defaults, [id]: "42" };
+      const decoded = decodeScenarioParams(encodeScenarioParams({ values, defaults }));
+      expect(decoded.fields[id]).toBe("42");
+    }
+  });
 });

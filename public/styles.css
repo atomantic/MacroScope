@@ -455,7 +455,8 @@ body[data-view="story"] #dashboard-view { display: none; }
 }
 .field-slider:focus-visible { box-shadow: 0 0 0 3px rgba(23, 105, 77, 0.2); }
 label.is-disabled .field-slider { pointer-events: none; opacity: 0.5; }
-input:disabled + .field-slider { pointer-events: none; opacity: 0.5; }
+input:disabled + .field-slider,
+.field-slider:disabled { pointer-events: none; opacity: 0.4; cursor: not-allowed; }
 
 .recalc-indicator {
   display: inline-flex; align-items: center; gap: 7px;

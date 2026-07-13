@@ -389,6 +389,11 @@ const scenarioQuery = () =>
 // The pinned Scenario A serializes as a nested query string. A URL-restored pin
 // round-trips verbatim (so a preset-based pin need not be re-resolved into
 // explicit fields); a runtime pin re-encodes from its captured field snapshot.
+// A pinned scenario that happens to equal the defaults (default strategy, no
+// brackets) encodes to "" — which the outer `if (pin)` would drop, silently
+// losing Scenario A from a shared link. Emit an inert marker so the URL still
+// records that a pin is present; it decodes to zero field overrides (== defaults).
+const PIN_DEFAULT_MARKER = "d=1";
 const pinnedQuery = () => {
   if (pinnedFromUrl) return pinnedFromUrl;
   if (!pinnedFieldValues) return null;
@@ -398,7 +403,7 @@ const pinnedQuery = () => {
       defaults: defaultFieldValues,
       strategy: pinnedStrategy ?? DEFAULT_STRATEGY,
       brackets: pinnedBrackets,
-    }) || null
+    }) || PIN_DEFAULT_MARKER
   );
 };
 
@@ -649,6 +654,11 @@ const computeScenario = async ({ preset, fields, brackets, strategy: _strategy }
   const savedFields = readFieldValues();
   const savedBrackets = encodeBracketsParam();
   try {
+    // Reset to the fetched defaults first: the pin encodes only its non-default
+    // overrides, so reconstructing it on top of the live form would let the live
+    // scenario's edits leak into Scenario A (every field the pin didn't set).
+    applyFieldValues(defaultFieldValues);
+    renderBrackets([]);
     if (preset && PRESETS[preset]) setPresetFields(preset);
     if (fields) {
       for (const id of Object.keys(fields)) {
@@ -657,7 +667,6 @@ const computeScenario = async ({ preset, fields, brackets, strategy: _strategy }
     }
     const bracketRows = bracketsFromParam(brackets);
     if (bracketRows.length > 0) renderBrackets(bracketRows);
-    else if (!preset) renderBrackets([]);
     syncTargetControls();
     const request = formRequest();
     if (request.wealthTax.brackets) {
@@ -754,6 +763,12 @@ const syncSlider = (id) => {
   if (!range || !input) return;
   const min = Number(range.min);
   const max = Number(range.max);
+  // When the field holds a value the slider can't represent (e.g. the Billionaire
+  // preset's $1B exemption on a slider capped at $100M), disable the slider rather
+  // than parking it at an endpoint — a stray drag would otherwise yank the field
+  // from $1B down to $100M. It re-enables once the value returns to range.
+  const raw = Number(input.value);
+  range.disabled = Number.isFinite(raw) && (raw < min || raw > max);
   range.value = String(clampFieldValue(input.value, min, max));
 };
 
@@ -794,8 +809,17 @@ const updatePinUi = () => {
   if (clearButton) clearButton.hidden = !pinned;
 };
 
-const pinCurrentScenario = () => {
-  if (!latestResult) return;
+const pinCurrentScenario = async () => {
+  // Flush any debounced/in-flight run first so latestResult reflects exactly the
+  // fields we're about to capture — otherwise a pin mid-debounce would freeze a
+  // stale result next to freshly-edited fields, and the URL would serialize a
+  // Scenario A that differs from the one shown.
+  clearTimeout(autoRunTimer);
+  const ok = await dashboardRerun();
+  if (!ok || !latestResult) {
+    showToast("Couldn't pin — resolve the current scenario first.", true);
+    return;
+  }
   pinnedResult = latestResult;
   pinnedFieldValues = readFieldValues();
   pinnedBrackets = encodeBracketsParam();
@@ -823,7 +847,8 @@ const PIN_METRICS = [
   { label: "Bottom 50% buying power", get: (r) => r.projection.summary.bottom50PurchasingPowerChange, kind: "pct" },
   { label: "Peak annual inflation", get: (r) => r.projection.summary.peakAnnualInflation, kind: "rate" },
   { label: "M2 money stock", get: (r) => r.projection.summary.cumulativeM2Change, kind: "pct" },
-  { label: "Housing price", get: (r) => r.projection.summary.housingPriceChange, kind: "pct" },
+  // housingPriceChange lives on the theory-test summary, not the top-level one.
+  { label: "Housing price", get: (r) => r.projection.theoryTest.summary.housingPriceChange, kind: "pct" },
   { label: "Wealth Gini (after)", get: (r) => r.strategies["cash-first"].distribution.wealthGiniAfter, kind: "gini" },
 ];
 
@@ -1801,16 +1826,20 @@ byId("scenario-form").addEventListener("input", (event) => {
     applyJointConstraint(target);
     syncSlider(target.id);
   }
+  // Clearing a cell of an already-scheduled complete bracket must also cancel the
+  // pending run, or it fires with the now-incomplete row and flashes the error.
   if (bracketRowsComplete()) scheduleAutoRun();
+  else clearTimeout(autoRunTimer);
 });
 // Selects fire change (not reliably input across browsers); auto-run on those too.
 byId("scenario-form").addEventListener("change", (event) => {
   if (event.target instanceof HTMLSelectElement) {
     activePreset = null;
     if (bracketRowsComplete()) scheduleAutoRun();
+    else clearTimeout(autoRunTimer);
   }
 });
-byId("pin-button").addEventListener("click", () => pinCurrentScenario());
+byId("pin-button").addEventListener("click", () => void pinCurrentScenario());
 byId("clear-pin-button").addEventListener("click", () => clearPin());
 byId("copy-link-button").addEventListener("click", () => void copyScenarioLink());
 byId("distribution-strategy").addEventListener("change", () => {

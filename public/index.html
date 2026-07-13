@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f2efe7" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./styles.css?v=10" />
+    <link rel="stylesheet" href="./styles.css?v=11" />
     <title>MacroScope</title>
   </head>
   <body>
@@ -284,6 +284,7 @@
             <button type="button" data-preset="warren-2020">Warren 2020</button>
             <button type="button" data-preset="sanders-2020">Sanders 2020</button>
             <button type="button" data-preset="current-law">Current law (no tax)</button>
+            <button class="preset-share-button" id="copy-link-button" type="button">Copy scenario link</button>
             <a class="preset-reference-link" href="#policy-references">See real-world precedents ↓</a>
           </div>
           <fieldset>
@@ -361,7 +362,6 @@
             <span class="recalc-indicator" id="recalc-indicator" role="status" aria-live="polite" hidden>Recalculating…</span>
             <button class="link-button" id="pin-button" type="button" aria-pressed="false">Pin this scenario (A)</button>
             <button class="link-button" id="clear-pin-button" type="button" hidden>Clear pinned</button>
-            <button class="link-button" id="copy-link-button" type="button">Copy link to this scenario</button>
             <p class="form-status" id="form-status" role="status">Loading baseline scenario…</p>
           </div>
         </form>
@@ -438,6 +438,6 @@
     </footer>
     <div class="toast-container" id="toast-container" aria-live="polite" aria-atomic="true"></div>
     <div class="visually-hidden" id="chart-readout" role="status" aria-live="polite"></div>
-    <script src="./app.js?v=10" type="module"></script>
+    <script src="./app.js?v=11" type="module"></script>
   </body>
 </html>

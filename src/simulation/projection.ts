@@ -937,13 +937,13 @@ const makeVerdict = (input: {
     input.publicBurdenPerHousehold < 10_000;
   if (harmful) {
     // Attribute the harm to its actual driver. Only call it growth-driven when
-    // inflation is genuinely benign (below the "high" regime, not merely below
-    // the 20% crisis line) and debt is low, so an elevated-but-sub-crisis
-    // inflation that is really doing the damage isn't misreported as a growth
-    // effect just because GDP also dipped. In that quiet-macro corner a
+    // inflation stays in the "stable" regime (below the 5% "elevated" band, i.e.
+    // essentially at baseline) and debt is low — so an elevated inflation that
+    // is itself pushing buying power under the harmful line isn't misreported as
+    // a growth effect just because GDP also dipped. In that quiet-macro corner a
     // materially negative GDP path is the credible cause of the harm.
     const growthDriven =
-      input.peakAnnualInflation < 0.1 &&
+      input.peakAnnualInflation < 0.05 &&
       input.publicBurdenPerHousehold < 10_000 &&
       input.gdpChange <= -0.02;
     return {

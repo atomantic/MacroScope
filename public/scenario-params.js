@@ -36,6 +36,10 @@ export const FIELD_SPECS = [
 export const PRESET_PARAM = "preset";
 export const STRATEGY_PARAM = "strat";
 export const BRACKETS_PARAM = "br";
+// A pinned "Scenario A" rides alongside the live scenario as a single nested
+// query string (itself the output of encodeScenarioParams) so an A/B comparison
+// is fully reproducible from one shareable link.
+export const PIN_PARAM = "pin";
 export const DEFAULT_STRATEGY = "cash-first";
 
 // Serialize the current form state to a compact query string. When `preset` is
@@ -49,6 +53,7 @@ export const encodeScenarioParams = ({
   preset = null,
   strategy = DEFAULT_STRATEGY,
   brackets = null,
+  pin = null,
 } = {}) => {
   const params = new URLSearchParams();
   if (preset) {
@@ -64,6 +69,10 @@ export const encodeScenarioParams = ({
     // own schedule on decode, so emitting br there would be redundant.
     if (brackets) params.set(BRACKETS_PARAM, brackets);
   }
+  // The pinned scenario is a complete, independently-encoded query string. It
+  // nests as one param value (URLSearchParams percent-encodes it), so it never
+  // collides with the live scenario's own keys.
+  if (pin) params.set(PIN_PARAM, pin);
   if (strategy && strategy !== DEFAULT_STRATEGY) params.set(STRATEGY_PARAM, strategy);
   return params.toString();
 };
@@ -81,6 +90,7 @@ export const decodeScenarioParams = (search) => {
     preset: params.get(PRESET_PARAM),
     strategy: params.get(STRATEGY_PARAM),
     brackets: params.get(BRACKETS_PARAM),
+    pin: params.get(PIN_PARAM),
     fields,
   };
 };

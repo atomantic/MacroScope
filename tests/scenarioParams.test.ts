@@ -93,4 +93,33 @@ describe("scenario URL parameters", () => {
     expect(new URLSearchParams(query).has("br")).toBe(false);
     expect(decodeScenarioParams(query).preset).toBe("warren-2020");
   });
+
+  it("nests a pinned Scenario A alongside the live scenario", () => {
+    // The pin is itself an encoded scenario; it must survive one level of
+    // nesting without its keys colliding with the live scenario's.
+    const pin = encodeScenarioParams({
+      values: { ...defaults, "tax-rate": "6", exemption: "50" },
+      defaults,
+      strategy: "borrow-first",
+    });
+    const query = encodeScenarioParams({
+      values: { ...defaults, "tax-rate": "1" },
+      defaults,
+      pin,
+    });
+    const decoded = decodeScenarioParams(query);
+    // Live scenario decodes normally.
+    expect(decoded.fields["tax-rate"]).toBe("1");
+    // The pin round-trips as an independent nested scenario.
+    expect(decoded.pin).toBe(pin);
+    const decodedPin = decodeScenarioParams(decoded.pin ?? "");
+    expect(decodedPin.fields["tax-rate"]).toBe("6");
+    expect(decodedPin.fields.exemption).toBe("50");
+    expect(decodedPin.strategy).toBe("borrow-first");
+  });
+
+  it("leaves pin null when no scenario is pinned", () => {
+    const query = encodeScenarioParams({ values: { ...defaults }, defaults });
+    expect(decodeScenarioParams(query).pin).toBeNull();
+  });
 });

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f2efe7" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./styles.css?v=9" />
+    <link rel="stylesheet" href="./styles.css?v=10" />
     <title>MacroScope</title>
   </head>
   <body>
@@ -115,6 +115,19 @@
             </figcaption>
             <div class="chart" id="money-chart"></div>
           </figure>
+        </div>
+        <div class="pin-comparison" id="pin-comparison" hidden>
+          <div class="pin-comparison-head">
+            <p class="kicker">A/B scenario comparison</p>
+            <h3>Pinned Scenario A vs. the live scenario</h3>
+            <p id="pin-comparison-note">Ghosted lines on every chart trace Scenario A; the table shows how the live scenario departs from it.</p>
+          </div>
+          <div class="table-scroll">
+            <table class="pin-comparison-table" aria-label="Pinned scenario versus live scenario">
+              <thead><tr><th>Outcome</th><th>Scenario A (pinned)</th><th>Live</th><th>Δ live − A</th></tr></thead>
+              <tbody id="pin-comparison-body"></tbody>
+            </table>
+          </div>
         </div>
       </section>
 
@@ -276,7 +289,7 @@
           <fieldset>
             <legend>Wealth tax</legend>
             <label for="target-mode">Target by<select id="target-mode" name="targetMode"><option value="exemption">Dollar exemption</option><option value="top-share">Top wealth share</option></select></label>
-            <label for="exemption" id="exemption-label">Exemption ($M)<input id="exemption" name="exemption" type="number" min="0" max="1000000" step="1" /></label>
+            <label for="exemption" id="exemption-label">Exemption ($M)<input id="exemption" name="exemption" type="number" min="0" max="1000000" step="1" data-slider-max="100" /></label>
             <label for="top-share" id="top-share-label">Top share (%)<input id="top-share" name="topShare" type="number" min="0.01" max="100" step="0.1" /></label>
             <label for="tax-rate" id="tax-rate-label">Annual rate (%)<input id="tax-rate" name="taxRate" type="number" min="0" max="20" step="0.1" /></label>
             <div class="bracket-editor" id="bracket-editor">
@@ -294,8 +307,8 @@
           </fieldset>
           <fieldset>
             <legend>Redistribution</legend>
-            <label for="adult-benefit">Adult monthly equivalent<input id="adult-benefit" name="adultBenefit" type="number" min="0" step="100" /></label>
-            <label for="child-benefit">Child monthly equivalent<input id="child-benefit" name="childBenefit" type="number" min="0" step="100" /></label>
+            <label for="adult-benefit">Adult monthly equivalent<input id="adult-benefit" name="adultBenefit" type="number" min="0" step="100" data-slider-max="3000" /></label>
+            <label for="child-benefit">Child monthly equivalent<input id="child-benefit" name="childBenefit" type="number" min="0" step="100" data-slider-max="2000" /></label>
             <label for="funding-rule">Funding rule<select id="funding-rule" name="fundingRule"><option value="revenue-constrained">Revenue constrained</option><option value="fixed">Fixed benefit + deficit</option><option value="smoothed">Smoothed with debt</option></select></label>
             <label for="benefit-indexation">Benefit indexation<select id="benefit-indexation" name="benefitIndexation"><option value="none">Fixed nominal</option><option value="cpi">CPI indexed</option></select></label>
             <label for="direct-cash-share">Delivered as cash (%)<input id="direct-cash-share" name="directCashShare" type="number" min="0" max="100" step="5" /></label>
@@ -345,6 +358,9 @@
           </details>
           <div class="form-actions">
             <button class="run-button" id="run-button" type="submit">Recalculate verdict</button>
+            <span class="recalc-indicator" id="recalc-indicator" role="status" aria-live="polite" hidden>Recalculating…</span>
+            <button class="link-button" id="pin-button" type="button" aria-pressed="false">Pin this scenario (A)</button>
+            <button class="link-button" id="clear-pin-button" type="button" hidden>Clear pinned</button>
             <button class="link-button" id="copy-link-button" type="button">Copy link to this scenario</button>
             <p class="form-status" id="form-status" role="status">Loading baseline scenario…</p>
           </div>
@@ -421,6 +437,7 @@
       <nav aria-label="Developer endpoints"><a href="/health">Health</a><a href="/api/status">Engine</a><a href="/api/baseline/us">U.S. baseline</a><a href="/api/scenarios/default">Scenario JSON</a></nav>
     </footer>
     <div class="toast-container" id="toast-container" aria-live="polite" aria-atomic="true"></div>
-    <script src="./app.js?v=9" type="module"></script>
+    <div class="visually-hidden" id="chart-readout" role="status" aria-live="polite"></div>
+    <script src="./app.js?v=10" type="module"></script>
   </body>
 </html>

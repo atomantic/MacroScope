@@ -5,7 +5,7 @@ import {
   decodeScenarioParams,
   // Versioned so a bumped app.js always pulls the matching FIELD_SPECS rather
   // than a browser-cached copy that predates newly added fields.
-} from "./scenario-params.js?v=12";
+} from "./scenario-params.js?v=13";
 
 const STRATEGIES = ["cash-first", "borrow-first", "sell-first"];
 const LABELS = {

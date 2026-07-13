@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f2efe7" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./styles.css?v=5" />
+    <link rel="stylesheet" href="./styles.css?v=7" />
     <title>MacroScope</title>
   </head>
   <body>
@@ -19,6 +19,24 @@
     </header>
 
     <main>
+      <section class="story" id="story" aria-labelledby="story-title" aria-live="polite">
+        <div class="story-head">
+          <p class="kicker">Guided walkthrough</p>
+          <div class="story-progress" id="story-progress" role="group" aria-label="Walkthrough steps"></div>
+          <button type="button" class="story-skip" id="story-skip">Skip to dashboard →</button>
+        </div>
+        <div class="story-stage" id="story-stage"></div>
+        <div class="story-nav">
+          <button type="button" class="story-back" id="story-prev">← Back</button>
+          <span class="story-counter" id="story-counter"></span>
+          <button type="button" class="story-forward" id="story-next">Next →</button>
+        </div>
+      </section>
+
+      <div id="dashboard-view">
+      <button type="button" class="story-launch" id="story-launch" hidden>
+        <span>New here?</span> Take the guided walkthrough that builds the argument one dial at a time →
+      </button>
       <section class="verdict-section" aria-labelledby="verdict-headline">
         <div class="verdict-copy">
           <p class="kicker">Model verdict · wealth tax funds redistribution</p>
@@ -320,6 +338,7 @@
         <h2 id="sources-heading">Built on official U.S. data.</h2>
         <div id="source-list"></div>
       </section>
+      </div>
     </main>
 
     <footer class="site-footer">
@@ -327,6 +346,6 @@
       <nav aria-label="Developer endpoints"><a href="/health">Health</a><a href="/api/status">Engine</a><a href="/api/baseline/us">U.S. baseline</a><a href="/api/scenarios/default">Scenario JSON</a></nav>
     </footer>
     <div class="toast-container" id="toast-container" aria-live="polite" aria-atomic="true"></div>
-    <script src="./app.js?v=6" type="module"></script>
+    <script src="./app.js?v=7" type="module"></script>
   </body>
 </html>

@@ -217,7 +217,12 @@ const scenarioLink = () => {
 // entries, so a reload or copied URL reproduces the current scenario.
 const updateScenarioUrl = () => {
   if (!defaultsReady()) return;
-  const query = scenarioQuery();
+  let query = scenarioQuery();
+  // Preserve the walkthrough's ?step alongside the scenario params so a story
+  // dial (which reruns the model, calling this) can't strip the step position —
+  // enterDashboard is the only place that intentionally drops it.
+  const step = new URLSearchParams(location.search).get("step");
+  if (step) query = query ? `${query}&step=${step}` : `step=${step}`;
   history.replaceState(null, "", `${location.pathname}${query ? `?${query}` : ""}${location.hash}`);
 };
 
@@ -369,8 +374,10 @@ const runScenario = async () => {
     byId("scenario-summary").textContent = scenarioSummary(request, payload);
     updateScenarioUrl();
     setFormStatus(`Updated from ${integer.format(payload.population.sampledHouseholds)} weighted household agents${isStaticSnapshot ? ", computed in your browser" : ""}.`);
+    return true;
   } catch (error) {
     setFormStatus(error instanceof Error ? error.message : "Scenario failed.", true);
+    return false;
   } finally {
     button.disabled = false;
     button.textContent = "Recalculate verdict";
@@ -399,18 +406,22 @@ const renderVerdict = (projection) => {
   byId("metric-m2").textContent = signedPercent(summary.cumulativeM2Change);
 };
 
-const renderCharts = (projection) => {
+const powerChartOptions = (projection) => {
   const years = projection.years;
-  renderLineChart("power-chart", {
-    description: `Over ten years, bottom-half purchasing power ends at ${years.at(-1).bottom50PurchasingPowerIndex.toFixed(1)} and top-one-percent real wealth ends at ${years.at(-1).top1RealWealthIndex.toFixed(1)}, with 100 representing the no-policy path.`,
+  return {
+    description: `Bottom-half purchasing power ends at ${years.at(-1).bottom50PurchasingPowerIndex.toFixed(1)} and top-one-percent real wealth at ${years.at(-1).top1RealWealthIndex.toFixed(1)}, with 100 representing the no-policy path.`,
     series: [
       { label: "Bottom 50% buying power", values: years.map((year) => year.bottom50PurchasingPowerIndex), tone: "series-a" },
       { label: "Top 1% real wealth", values: years.map((year) => year.top1RealWealthIndex), tone: "series-b" },
     ],
     baseline: 100,
     valueSuffix: "",
-  });
-  renderLineChart("money-chart", {
+  };
+};
+
+const moneyChartOptions = (projection) => {
+  const years = projection.years;
+  return {
     description: `M2 ends at index ${years.at(-1).m2Index.toFixed(1)} and the price level at ${(years.at(-1).priceLevel * 100).toFixed(1)}, with 100 before policy.`,
     series: [
       { label: "M2 money stock", values: years.map((year) => year.m2Index), tone: "series-c" },
@@ -418,7 +429,12 @@ const renderCharts = (projection) => {
     ],
     baseline: 100,
     valueSuffix: "",
-  });
+  };
+};
+
+const renderCharts = (projection) => {
+  renderLineChart("power-chart", powerChartOptions(projection));
+  renderLineChart("money-chart", moneyChartOptions(projection));
   byId("money-chart-caption").textContent = `M2 and prices, indexed to 100 · peak inflation ${formatRate(projection.summary.peakAnnualInflation)}`;
 };
 
@@ -843,7 +859,525 @@ byId("target-mode").addEventListener("change", syncTargetControls);
 document.querySelectorAll("[data-preset]").forEach((button) => {
   button.addEventListener("click", () => applyPreset(button.dataset.preset));
 });
+
+// ---------------------------------------------------------------------------
+// Story mode — a guided, step-driven narrative that builds the argument one
+// dial at a time before revealing the full dashboard. Every step reuses the
+// existing scenario engine and form fields, so a dial moved here re-runs the
+// same model the dashboard does. Deep-linkable via ?step=N.
+// ---------------------------------------------------------------------------
+
+const STORY_SEEN_KEY = "macroscope-story-seen";
+
+// A step `setup` runs ONCE when the reader enters the step, establishing a
+// coherent, in-range baseline for the single dial that step exposes. Doing it on
+// entry (not per dial move) keeps the lone dial the only thing that changes
+// while it's dragged — so moves are reversible and history-independent, and a
+// companion field is never silently rewritten mid-interaction.
+const setupExemptionStep = (result) => {
+  // Start the dollar-exemption exploration from the current effective cutoff
+  // (works whether the chosen preset used top-share or a dollar exemption),
+  // rounded into the dial's range so control, copy, chart, and model all agree
+  // the moment the step opens.
+  const effectiveMillions = result.wealthTaxTarget.effectiveExemption / 1_000_000;
+  byId("exemption").value = String(clamp(Math.round(effectiveMillions), 0, 50));
+  byId("target-mode").value = "exemption";
+  syncTargetControls();
+};
+// The borrow dial is the only payment control the story exposes; fix the sell
+// share at zero so the dial spans the full 0–100% (cash = 100 − borrow) without
+// tripping the borrow+sell ≤ 100 rule, and so equal dial positions always model
+// the same split regardless of drag history.
+const setupBorrowStep = () => {
+  byId("sell-share").value = "0";
+};
+// The default revenue-constrained rule caps spending at tax receipts, so the
+// deficit — and thus monetization — is zero. Establish fixed-benefit funding on
+// entry so the monetization dial (and only it) drives the inflation response.
+const setupMonetizationStep = () => {
+  byId("funding-rule").value = "fixed";
+  // The dial monetizes a deficit, so one must exist. A benefit fully covered by
+  // tax receipts (e.g. a near-zero benefit carried in from the dashboard) runs
+  // no deficit even under fixed funding, leaving the dial inert; $1k/mo adult
+  // reliably exceeds tax receipts for the U.S. population, so floor it there.
+  if (Number(byId("adult-benefit").value) < 1000) byId("adult-benefit").value = "1000";
+};
+
+// Each step reads live values off `latestResult`, so its copy adapts to the
+// reader's current settings. `dial` binds a range input to an existing form
+// field (values are in the field's own units).
+const STORY_STEPS = [
+  {
+    id: "question",
+    kicker: "Start with the question",
+    title: "Tax the richest, send everyone a check. Who ends up better off?",
+    body: () =>
+      "You are about to build that answer yourself — one mechanism at a time. Pick a headline policy to begin; every dial you move re-runs the same U.S. model behind the full dashboard.",
+    presets: true,
+  },
+  {
+    id: "who-pays",
+    kicker: "Who the tax touches",
+    title: "The tax hits only a sliver of households.",
+    setup: setupExemptionStep,
+    body: (r) =>
+      `With the line at ${compactMoney.format(r.wealthTaxTarget.effectiveExemption)} of net worth, wealth stacks up in the top decile — that is where the tax bites. Drag the exemption and watch which deciles fall above the line.`,
+    dial: { field: "exemption", label: "Exemption ($M net worth)", min: 0, max: 50, step: 1 },
+    viz: (host, r) => renderWealthStrip(host, r),
+    readout: (r) =>
+      `${compactMoney.format(r.projection.annualFlows.taxCollected)} collected in year one on wealth above the line.`,
+  },
+  {
+    id: "how-they-pay",
+    kicker: "How the wealthy pay",
+    title: "They rarely sell. They borrow against their wealth.",
+    setup: setupBorrowStep,
+    body: (r) =>
+      `A wealth-tax bill can be paid with cash or by borrowing against assets. The more the reader assumes is borrowed, the more new bank lending the policy triggers. Right now ${percent.format(r.projection.behaviorMix.borrowShare)} is borrowed.`,
+    dial: { field: "borrow-share", label: "Share paid by borrowing (%)", min: 0, max: 100, step: 5 },
+    viz: (host, r) => renderPaymentSplit(host, r),
+    readout: (r) =>
+      `${compactMoney.format(r.projection.annualFlows.newPrivateLoans)} in new bank loans in year one — deposits created out of nothing.`,
+  },
+  {
+    id: "loans-make-money",
+    kicker: "Bank loans create money",
+    title: "New loans expand the money supply.",
+    setup: setupBorrowStep,
+    body: () =>
+      "Taxing and transferring existing deposits just reshuffles money. New bank loans are different: they create fresh deposits. Keep moving the borrow dial and watch M2 respond over ten years.",
+    dial: { field: "borrow-share", label: "Share paid by borrowing (%)", min: 0, max: 100, step: 5 },
+    viz: (host, r) => renderStoryChart(host, "story-money-chart", moneyChartOptions(r.projection)),
+    readout: (r) =>
+      `M2 ends ${signedPercent(r.projection.summary.cumulativeM2Change)} versus the no-policy path.`,
+  },
+  {
+    id: "prices-respond",
+    kicker: "Prices respond",
+    title: "More money chasing goods can lift prices.",
+    setup: setupMonetizationStep,
+    body: (r) =>
+      `With a benefit funded partly by deficit, whether it shows up as inflation depends on how much the central bank monetizes. Peak annual inflation in this run is ${formatRate(r.projection.summary.peakAnnualInflation)}. Turn the monetization dial to test it.`,
+    dial: { field: "monetization", label: "Deficit monetized (%)", min: 0, max: 100, step: 5 },
+    viz: (host, r) => renderStoryChart(host, "story-price-chart", moneyChartOptions(r.projection)),
+    readout: (r) =>
+      `Peak annual inflation ${formatRate(r.projection.summary.peakAnnualInflation)} — ${regimeFor(r.projection.summary.peakAnnualInflation)} regime.`,
+  },
+  {
+    id: "who-wins",
+    kicker: "Who wins after prices",
+    title: "After inflation, does the bottom half keep more?",
+    body: (r) =>
+      `This is the payoff. The check helps first; prices and financing decide whether it lasts. Adjust the monthly benefit and read the bottom-half line — currently ${signedPercent(r.projection.summary.bottom50PurchasingPowerChange)} of buying power versus no policy.`,
+    dial: { field: "adult-benefit", label: "Adult monthly benefit ($)", min: 0, max: 3000, step: 100 },
+    viz: (host, r) => renderStoryChart(host, "story-power-chart", powerChartOptions(r.projection)),
+    readout: (r) =>
+      `Bottom 50% buying power ends ${signedPercent(r.projection.summary.bottom50PurchasingPowerChange)}; top 1% real wealth ${signedPercent(r.projection.years?.at(-1)?.top1RealWealthIndex != null ? r.projection.years.at(-1).top1RealWealthIndex / 100 - 1 : 0)}.`,
+  },
+  {
+    id: "verdict",
+    kicker: "The verdict, now earned",
+    title: "You built the argument. Here is where it lands.",
+    body: (r) =>
+      `${r.projection.verdict.explanation} Every dial you touched is unlocked in the full dashboard, alongside the funding-path comparison, decile table, and inflation stress test.`,
+    verdict: true,
+  },
+];
+
+const storyState = { index: 0, running: false, pending: false, dynamic: null, runPromise: null };
+
+const debounce = (fn, wait) => {
+  let timer = null;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), wait);
+  };
+};
+
+const renderStoryChart = (host, id, options) => {
+  const chart = document.createElement("div");
+  chart.className = "chart";
+  chart.id = id;
+  host.append(chart);
+  renderLineChart(id, options);
+};
+
+// A log-scaled decile strip: bars are per-decile average net worth, the dashed
+// line is the exemption, and any decile whose households actually paid tax is
+// highlighted as "above the line".
+const renderWealthStrip = (host, result) => {
+  const deciles = result.strategies["cash-first"].distribution.deciles;
+  const exemption = result.wealthTaxTarget.effectiveExemption;
+  const safeLog = (value) => Math.log10(Math.max(1, value));
+  const values = deciles.map((decile) => safeLog(decile.averageNetWorthBefore));
+  const high = Math.max(safeLog(exemption), ...values) * 1.08;
+  const width = 720;
+  const height = 260;
+  const margin = { top: 18, right: 16, bottom: 30, left: 16 };
+  const plotHeight = height - margin.top - margin.bottom;
+  const bandWidth = (width - margin.left - margin.right) / deciles.length;
+  const yFor = (logValue) => margin.top + (1 - logValue / high) * plotHeight;
+  const svg = svgNode("svg", {
+    viewBox: `0 0 ${width} ${height}`,
+    role: "img",
+    "aria-label": `Average net worth by decile with the ${compactMoney.format(exemption)} exemption line drawn across.`,
+  });
+  const taxedDeciles = deciles.filter((decile) => decile.averageTaxPaid > 0).length;
+  deciles.forEach((decile, index) => {
+    const barX = margin.left + index * bandWidth + bandWidth * 0.14;
+    const barW = bandWidth * 0.72;
+    const top = yFor(values[index]);
+    const taxed = decile.averageTaxPaid > 0;
+    const rect = svgNode("rect", {
+      x: barX,
+      y: top,
+      width: barW,
+      height: margin.top + plotHeight - top,
+      class: taxed ? "strip-bar taxed" : "strip-bar",
+      rx: 2,
+    });
+    rect.append(svgNode("title", {}, `Decile ${decile.decile}: ${money.format(decile.averageNetWorthBefore)} average net worth${taxed ? `, ${money.format(decile.averageTaxPaid)} tax paid` : ", untaxed"}`));
+    svg.append(rect);
+    svg.append(svgNode("text", { x: barX + barW / 2, y: height - 10, class: "axis-label", "text-anchor": "middle" }, `D${decile.decile}`));
+  });
+  const lineY = yFor(safeLog(exemption));
+  svg.append(svgNode("line", { x1: margin.left, y1: lineY, x2: width - margin.right, y2: lineY, class: "baseline-line" }));
+  svg.append(svgNode("text", { x: width - margin.right, y: lineY - 7, class: "series-label series-b", "text-anchor": "end" }, `Exemption ${compactMoney.format(exemption)}`));
+  const chart = document.createElement("div");
+  chart.className = "chart strip-chart";
+  chart.append(svg);
+  host.append(chart);
+  const note = element(
+    "p",
+    taxedDeciles > 0
+      ? `${taxedDeciles} of 10 deciles hold households above the line. Wealth is log-scaled, so the top decile towers over the rest.`
+      : "No decile's average sits above the line — the tax lands only on the far tail inside the top decile.",
+  );
+  note.className = "story-note";
+  host.append(note);
+};
+
+// A single stacked bar showing how a wealth-tax bill is settled.
+const renderPaymentSplit = (host, result) => {
+  const mix = result.projection.behaviorMix;
+  const cashShare = Math.max(0, 1 - mix.borrowShare - mix.sellShare);
+  const segments = [
+    { label: "Cash", share: cashShare, tone: "seg-cash" },
+    { label: "Borrow", share: mix.borrowShare, tone: "seg-borrow" },
+    { label: "Sell assets", share: mix.sellShare, tone: "seg-sell" },
+  ].filter((segment) => segment.share > 0.0001);
+  const bar = document.createElement("div");
+  bar.className = "payment-split";
+  bar.setAttribute("role", "img");
+  bar.setAttribute("aria-label", segments.map((segment) => `${segment.label} ${percent.format(segment.share)}`).join(", "));
+  segments.forEach((segment) => {
+    const cell = document.createElement("span");
+    cell.className = `split-seg ${segment.tone}`;
+    cell.style.flexGrow = String(Math.max(0.02, segment.share));
+    if (segment.share >= 0.12) cell.textContent = `${segment.label} · ${percent.format(segment.share)}`;
+    bar.append(cell);
+  });
+  host.append(bar);
+};
+
+const renderStory = () => {
+  if (!latestResult) return;
+  const step = STORY_STEPS[storyState.index];
+  const stage = byId("story-stage");
+  stage.replaceChildren();
+
+  // Establish this step's baseline once, on entry (before the dial is built).
+  // If setup — or the out-of-range clamp below — changed the form, rerun so
+  // copy, chart, and result reflect the baseline the dial now sits on.
+  let needsResync = false;
+  if (step.setup) {
+    const before = JSON.stringify(formRequest());
+    step.setup(latestResult);
+    if (JSON.stringify(formRequest()) !== before) needsResync = true;
+  }
+
+  const copy = document.createElement("div");
+  copy.className = "story-copy";
+  const kicker = element("p", step.kicker);
+  kicker.className = "kicker";
+  copy.append(kicker);
+  const title = element("h1", step.title);
+  title.id = "story-title";
+  copy.append(title);
+  const bodyNode = element("p", step.body(latestResult));
+  bodyNode.className = "story-body";
+  copy.append(bodyNode);
+  stage.append(copy);
+
+  if (step.presets) {
+    const presetWrap = document.createElement("div");
+    presetWrap.className = "story-presets";
+    [
+      ["top-one", "1% on top 1%"],
+      ["billionaire", "10% over $1B"],
+      ["ten-million", "5% over $10M"],
+      ["universal", "Universal 1% + UBI"],
+    ].forEach(([preset, label]) => {
+      const button = element("button", label);
+      button.type = "button";
+      button.addEventListener("click", async () => {
+        setPresetFields(preset);
+        activePreset = preset;
+        await storyRerun();
+      });
+      presetWrap.append(button);
+    });
+    stage.append(presetWrap);
+  }
+
+  if (step.dial) {
+    const field = byId(step.dial.field);
+    const inRange = clamp(Number(field.value), step.dial.min, step.dial.max);
+    // Safety net for a dial without a setup (e.g. a benefit above the $3k dial
+    // max carried in from the dashboard): snap the field into range so the
+    // control can't display a value the model doesn't use.
+    if (Number(field.value) !== inRange) {
+      field.value = String(inRange);
+      needsResync = true;
+    }
+    stage.append(buildStoryDial(step.dial));
+  }
+
+  const viz = document.createElement("div");
+  viz.className = "story-viz";
+  stage.append(viz);
+  if (step.viz) step.viz(viz, latestResult);
+
+  let readout = null;
+  if (step.readout) {
+    readout = element("p", step.readout(latestResult));
+    readout.className = "story-readout";
+    stage.append(readout);
+  }
+
+  let verdictRefs = null;
+  if (step.verdict) {
+    const verdict = latestResult.projection.verdict;
+    document.body.dataset.verdict = verdict.rating;
+    const panel = document.createElement("div");
+    panel.className = "story-verdict";
+    const badge = element("span", verdict.rating);
+    badge.className = "verdict-badge";
+    const headline = element("strong", verdict.headline);
+    panel.append(badge, headline);
+    stage.append(panel);
+    verdictRefs = { badge, headline };
+    const enter = element("button", "Explore the full dashboard →");
+    enter.type = "button";
+    enter.className = "run-button story-enter";
+    enter.addEventListener("click", () => enterDashboard());
+    stage.append(enter);
+  }
+
+  // Story-scoped error line: runScenario reports failures only to the hidden
+  // dashboard status, so surface them here when a rerun fails.
+  const errorNode = element("p", "");
+  errorNode.className = "story-error";
+  errorNode.hidden = true;
+  stage.append(errorNode);
+
+  // Refs the dial-driven rerun refreshes in place, so the live <input> the
+  // reader is dragging is never torn down mid-gesture (only these data-bound
+  // nodes update).
+  storyState.dynamic = { bodyNode, viz: step.viz ? viz : null, readout, verdict: verdictRefs, errorNode };
+
+  // Setup/clamp changed the model inputs — rerun once so copy, chart, and
+  // verdict reflect the baseline the dial now sits on.
+  if (needsResync) void storyRerun();
+
+  renderStoryProgress();
+  byId("story-counter").textContent = `Step ${storyState.index + 1} of ${STORY_STEPS.length}`;
+  byId("story-prev").disabled = storyState.index === 0;
+  const next = byId("story-next");
+  next.hidden = storyState.index === STORY_STEPS.length - 1;
+};
+
+const buildStoryDial = (dial) => {
+  const field = byId(dial.field);
+  const wrap = document.createElement("label");
+  wrap.className = "story-dial";
+  const header = document.createElement("span");
+  header.className = "story-dial-head";
+  header.append(element("span", dial.label));
+  const valueOut = element("strong", "");
+  header.append(valueOut);
+  wrap.append(header);
+  const range = document.createElement("input");
+  range.type = "range";
+  range.min = String(dial.min);
+  range.max = String(dial.max);
+  range.step = String(dial.step);
+  const current = clamp(Number(field.value), dial.min, dial.max);
+  range.value = String(current);
+  valueOut.textContent = String(current);
+  // Write the shared field on every input so navigation mid-drag always sees
+  // the current value; debounce only the (expensive) model rerun.
+  const commit = debounce(() => storyRerun(), 220);
+  range.addEventListener("input", () => {
+    valueOut.textContent = range.value;
+    field.value = range.value;
+    commit();
+  });
+  wrap.append(range);
+  return wrap;
+};
+
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+const renderStoryProgress = () => {
+  const progress = byId("story-progress");
+  progress.replaceChildren(
+    ...STORY_STEPS.map((step, index) => {
+      const dot = document.createElement("button");
+      dot.type = "button";
+      dot.className = "story-dot";
+      dot.setAttribute("aria-label", `Go to step ${index + 1}: ${step.kicker}`);
+      if (index === storyState.index) dot.setAttribute("aria-current", "step");
+      dot.addEventListener("click", () => goToStep(index));
+      return dot;
+    }),
+  );
+};
+
+// Refresh only the data-bound nodes of the current step (adaptive copy, viz,
+// readout) against the latest result — leaving the dial the reader is dragging
+// in place. Full-step rebuilds go through renderStory (navigation/presets).
+const refreshStoryDynamic = () => {
+  const dynamic = storyState.dynamic;
+  if (!dynamic) return;
+  const step = STORY_STEPS[storyState.index];
+  if (dynamic.errorNode) dynamic.errorNode.hidden = true;
+  dynamic.bodyNode.textContent = step.body(latestResult);
+  if (dynamic.viz && step.viz) {
+    dynamic.viz.replaceChildren();
+    step.viz(dynamic.viz, latestResult);
+  }
+  if (dynamic.readout && step.readout) {
+    dynamic.readout.textContent = step.readout(latestResult);
+  }
+  // The verdict panel is not a plain text node; refresh its badge + headline so
+  // navigating to the verdict step before an in-flight rerun settles can't leave
+  // it showing the previous run's rating.
+  if (dynamic.verdict) {
+    const verdict = latestResult.projection.verdict;
+    document.body.dataset.verdict = verdict.rating;
+    dynamic.verdict.badge.textContent = verdict.rating;
+    dynamic.verdict.headline.textContent = verdict.headline;
+  }
+};
+
+// Returns a promise that settles when the model (including any coalesced
+// trailing reruns) is idle, so navigation can wait on an in-flight run.
+const storyRerun = () => {
+  // Coalesce concurrent dial moves: if a run is in flight, mark a rerun pending
+  // and let the active loop pick up the newest field values when it finishes,
+  // so the final dial position is never dropped (slider ↔ model stay in sync).
+  if (storyState.running) {
+    storyState.pending = true;
+    return storyState.runPromise;
+  }
+  storyState.runPromise = (async () => {
+    storyState.running = true;
+    byId("story-stage").classList.add("is-busy");
+    let ok = true;
+    do {
+      storyState.pending = false;
+      ok = await runScenario();
+    } while (storyState.pending);
+    storyState.running = false;
+    byId("story-stage").classList.remove("is-busy");
+    if (ok) {
+      refreshStoryDynamic();
+    } else if (storyState.dynamic?.errorNode) {
+      // Keep the visible view honest: the model rejected this setting, so don't
+      // silently leave stale results next to the moved dial.
+      storyState.dynamic.errorNode.textContent = "That setting couldn't be modeled. Adjust the dial and try again.";
+      storyState.dynamic.errorNode.hidden = false;
+    }
+  })();
+  return storyState.runPromise;
+};
+
+const goToStep = async (index) => {
+  const target = clamp(index, 0, STORY_STEPS.length - 1);
+  // Let an in-flight run (e.g. a just-clicked preset) settle first, so the next
+  // step's setup derives its baseline from the selected scenario, not the prior
+  // one, and the queued rerun can't overwrite the selection.
+  if (storyState.running && storyState.runPromise) await storyState.runPromise;
+  storyState.index = target;
+  syncStoryUrl();
+  renderStory();
+  byId("story").scrollIntoView({ behavior: "smooth", block: "start" });
+};
+
+const syncStoryUrl = () => {
+  const url = new URL(window.location.href);
+  url.searchParams.set("step", String(storyState.index + 1));
+  window.history.replaceState(null, "", url);
+};
+
+const enterStory = (index = 0) => {
+  storyState.index = clamp(index, 0, STORY_STEPS.length - 1);
+  document.body.dataset.view = "story";
+  syncStoryUrl();
+  renderStory();
+  window.scrollTo({ top: 0, behavior: "auto" });
+};
+
+const enterDashboard = () => {
+  document.body.dataset.view = "dashboard";
+  try {
+    window.localStorage.setItem(STORY_SEEN_KEY, "1");
+  } catch {
+    // Private-mode storage failures must not break navigation.
+  }
+  const url = new URL(window.location.href);
+  url.searchParams.delete("step");
+  window.history.replaceState(null, "", url);
+  byId("story-launch").hidden = false;
+  window.scrollTo({ top: 0, behavior: "auto" });
+};
+
+const initStory = () => {
+  byId("story-prev").addEventListener("click", () => goToStep(storyState.index - 1));
+  byId("story-next").addEventListener("click", () => goToStep(storyState.index + 1));
+  byId("story-skip").addEventListener("click", () => enterDashboard());
+  byId("story-launch").addEventListener("click", () => enterStory(0));
+
+  // If the model never loaded, there is nothing to narrate — show the dashboard
+  // shell so its error status is visible. Do NOT persist the seen flag here: a
+  // transient outage must not skip the walkthrough on the next successful visit.
+  if (!latestResult) {
+    document.body.dataset.view = "dashboard";
+    byId("story-launch").hidden = true;
+    return;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  // Floor so a fractional ?step=2.5 can't produce a fractional array index
+  // (STORY_STEPS[1.5] is undefined → renderStory would throw).
+  const stepParam = Math.floor(Number(params.get("step")));
+  let seen = false;
+  try {
+    seen = window.localStorage.getItem(STORY_SEEN_KEY) === "1";
+  } catch {
+    seen = false;
+  }
+  if (Number.isFinite(stepParam) && stepParam >= 1) {
+    enterStory(stepParam - 1);
+  } else if (params.get("view") === "dashboard" || seen) {
+    enterDashboard();
+  } else {
+    enterStory(0);
+  }
+};
+
 document.querySelectorAll("[data-behavior-preset]").forEach((button) => {
   button.addEventListener("click", () => applyBehaviorPreset(button.dataset.behaviorPreset));
 });
-void initialize();
+void initialize().then(initStory);

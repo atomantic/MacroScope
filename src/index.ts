@@ -10,6 +10,7 @@ export * from "./simulation/distribution.js";
 export * from "./simulation/ledgerAudit.js";
 export * from "./simulation/population.js";
 export * from "./simulation/scenarioRunner.js";
+export * from "./simulation/sensitivity.js";
 export * from "./simulation/usBaseline.js";
 export * from "./simulation/projection.js";
 export * from "./simulation/historicalValidation.js";

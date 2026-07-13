@@ -7,6 +7,7 @@ import { SCENARIO_SCHEMA_VERSION } from "../policies/schema.js";
 import { createDemoComparison } from "./demo.js";
 import { DEFAULT_COMPARISON_REQUEST } from "../simulation/contracts.js";
 import { runComparison } from "../simulation/scenarioRunner.js";
+import { runSensitivityAnalysis } from "../simulation/sensitivity.js";
 import { parseComparisonRequest } from "./comparisonInput.js";
 import { US_BASELINE } from "../simulation/usBaseline.js";
 import { HISTORICAL_BACKTEST } from "../simulation/historicalValidation.js";
@@ -57,6 +58,7 @@ export const createApp = (options: AppOptions = {}): Express => {
         "ten-year-purchasing-power-projection",
         "inflation-and-monetization-stress-test",
         "owner-renter-asset-feedback-theory-test",
+        "one-at-a-time-sensitivity-tornado",
         "percentile-or-dollar-wealth-tax-targeting",
         "cash-services-and-administration-allocation",
         "historical-inflation-backtest-2020-2023",
@@ -90,6 +92,18 @@ export const createApp = (options: AppOptions = {}): Express => {
       return;
     }
     response.json(runComparison(parsed.value));
+  });
+
+  app.post("/api/scenarios/sensitivity", (request, response) => {
+    const parsed = parseComparisonRequest(request.body);
+    if (!parsed.value) {
+      response.status(400).json({
+        error: "Invalid comparison request.",
+        details: parsed.errors,
+      });
+      return;
+    }
+    response.json(runSensitivityAnalysis(parsed.value));
   });
 
   app.use("/api", (_request, response) => {

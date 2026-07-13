@@ -77,6 +77,7 @@ const initialize = async () => {
         render(snapshot);
         byId("scenario-summary").textContent = scenarioSummary(defaults, snapshot);
         setFormStatus("Default scenario shown. Change any assumption and recalculate — the model runs in your browser.");
+        void refreshSensitivity(formRequest());
       }
       return;
     }
@@ -486,22 +487,26 @@ const ensureEngineWorker = () => {
   return worker;
 };
 
-const runInWorker = (request) =>
+const runInWorker = (request, mode = "compare") =>
   new Promise((resolve) => {
     engineRequestId += 1;
     enginePending.set(engineRequestId, resolve);
-    ensureEngineWorker().postMessage({ id: engineRequestId, request });
+    ensureEngineWorker().postMessage({ id: engineRequestId, request, mode });
   });
 
-const runOnMainThread = async (request) =>
-  (await import("./engine/browser/engine.js")).compareScenarios(request);
+const runOnMainThread = async (request, mode = "compare") => {
+  const engine = await import("./engine/browser/engine.js");
+  return mode === "sensitivity"
+    ? engine.analyzeSensitivity(request)
+    : engine.compareScenarios(request);
+};
 
-const runLocalScenario = async (request) => {
+const runLocalScenario = async (request, mode = "compare") => {
   const useWorker = typeof Worker !== "undefined" && !engineWorkerFailed;
-  let response = useWorker ? await runInWorker(request) : await runOnMainThread(request);
+  let response = useWorker ? await runInWorker(request, mode) : await runOnMainThread(request, mode);
   // Module workers can fail where Worker itself exists (older Firefox,
   // blocked worker loading) — retry the same request on the main thread.
-  if (response?.workerFailed) response = await runOnMainThread(request);
+  if (response?.workerFailed) response = await runOnMainThread(request, mode);
   if (!response?.ok) {
     throw new Error(response?.details?.join(" ") || response?.error || "Scenario failed.");
   }
@@ -519,6 +524,42 @@ const runServerScenario = async (request) => {
     throw new Error(payload.details?.join(" ") || payload.error || "Scenario failed.");
   }
   return payload;
+};
+
+const runServerSensitivity = async (request) => {
+  const response = await fetch("/api/scenarios/sensitivity", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.details?.join(" ") || payload.error || "Sensitivity run failed.");
+  }
+  return payload;
+};
+
+const runSensitivity = async (request) =>
+  isStaticSnapshot
+    ? runLocalScenario(request, "sensitivity")
+    : runServerSensitivity(request);
+
+// The tornado sweep runs ~2N scenarios, so it is computed after the main verdict
+// renders rather than blocking it. A monotonically increasing token guarantees a
+// slower earlier run can never overwrite a newer scenario's chart.
+let sensitivityToken = 0;
+const refreshSensitivity = async (request) => {
+  const token = (sensitivityToken += 1);
+  byId("sensitivity-note").textContent = "Sweeping every assumption across its range…";
+  try {
+    const analysis = await runSensitivity(request);
+    if (token !== sensitivityToken) return;
+    renderSensitivity(analysis);
+  } catch (error) {
+    if (token !== sensitivityToken) return;
+    byId("sensitivity-note").textContent =
+      error instanceof Error ? error.message : "Sensitivity analysis unavailable.";
+  }
 };
 
 const runScenario = async () => {
@@ -545,6 +586,8 @@ const runScenario = async () => {
     byId("scenario-summary").textContent = scenarioSummary(request, payload);
     updateScenarioUrl();
     setFormStatus(`Updated from ${integer.format(payload.population.sampledHouseholds)} weighted household agents${isStaticSnapshot ? ", computed in your browser" : ""}.`);
+    // Rank the assumptions behind this verdict without blocking the main render.
+    void refreshSensitivity(request);
     return true;
   } catch (error) {
     setFormStatus(error instanceof Error ? error.message : "Scenario failed.", true);
@@ -890,6 +933,128 @@ const renderStress = (stress) => {
   byId("hyper-threshold").textContent = stress.threshold.firstUbiMultiplierAtFullMonetization === null
     ? stress.threshold.explanation
     : `First modeled breach: about ${integer.format(stress.threshold.firstUbiMultiplierAtFullMonetization)}× this UBI with the unfunded portion fully monetized. This is an extreme boundary, not a forecast.`;
+};
+
+// Load a swept assumption's value into its form field and recompute. The write
+// is programmatic, so the form's input listener won't fire — clear the active
+// preset here so the URL falls back to explicit field params. `snap` controls
+// how the value is rounded onto the field's step grid: verdict-flip values snap
+// "up"/"down" AWAY from the base so the rounded value stays past the tipping
+// point (rounding to nearest could land just short and not actually flip);
+// tornado endpoints are exact dial bounds, so they snap to the nearest step.
+const applyDialValue = (formId, formValue, snap = "nearest") => {
+  const field = byId(formId);
+  if (!field) return;
+  const step = Number(field.step) || 0.01;
+  const decimals = step >= 1 ? 0 : String(step).split(".")[1]?.length ?? 2;
+  const min = field.min !== "" ? Number(field.min) : -Infinity;
+  const max = field.max !== "" ? Number(field.max) : Infinity;
+  const rounder = snap === "up" ? Math.ceil : snap === "down" ? Math.floor : Math.round;
+  const snapped = rounder(Number(formValue) / step) * step;
+  field.value = clamp(snapped, min, max).toFixed(decimals);
+  activePreset = null;
+  void runScenario();
+  byId("assumptions-anchor")?.scrollIntoView({ behavior: "smooth", block: "start" });
+};
+
+const TORNADO_TONE = {
+  beneficial: "bar-beneficial",
+  harmful: "bar-harmful",
+  flat: "bar-flat",
+};
+
+const renderSensitivity = (analysis) => {
+  renderVerdictFlip(analysis.verdictFlip);
+  const base = analysis.base.bottom50PurchasingPowerChange;
+  byId("sensitivity-note").textContent =
+    `Ranked across ${analysis.dials.length} assumptions in ${integer.format(analysis.runs)} model runs. ` +
+    `Baseline bottom-half buying power: ${signedPercent(base)}.`;
+
+  const root = byId("tornado-chart");
+  root.replaceChildren();
+  const dials = analysis.dials;
+  if (dials.length === 0) return;
+  const rowHeight = 34;
+  const width = 720;
+  const margin = { top: 16, right: 60, bottom: 34, left: 196 };
+  const height = margin.top + margin.bottom + dials.length * rowHeight;
+
+  // Domain is the full span of endpoint outcomes (in percentage points off the
+  // baseline), symmetric around 0 so the center line reads as "no change".
+  const deltas = dials.flatMap((dial) => [dial.low.bottom50Delta, dial.high.bottom50Delta]);
+  const extent = Math.max(0.005, ...deltas.map((delta) => Math.abs(delta)));
+  const domain = extent * 1.15;
+  const plotLeft = margin.left;
+  const plotRight = width - margin.right;
+  const x = (delta) => plotLeft + ((delta + domain) / (2 * domain)) * (plotRight - plotLeft);
+  const centerX = x(0);
+
+  const svg = svgNode("svg", {
+    viewBox: `0 0 ${width} ${height}`,
+    role: "img",
+    "aria-label": `Assumptions ranked by their impact on bottom-50 buying power. ${dials[0].label} moves it most.`,
+  });
+
+  // Axis: percentage-point offsets from the baseline outcome.
+  for (const tick of [-domain, 0, domain]) {
+    const xPos = x(tick);
+    svg.append(svgNode("line", { x1: xPos, y1: margin.top, x2: xPos, y2: height - margin.bottom, class: tick === 0 ? "tornado-center" : "grid-line" }));
+    svg.append(svgNode("text", { x: xPos, y: height - margin.bottom + 18, class: "tornado-axis", "text-anchor": "middle" }, `${tick > 0 ? "+" : ""}${(tick * 100).toFixed(1)} pp`));
+  }
+
+  dials.forEach((dial, index) => {
+    const rowY = margin.top + index * rowHeight;
+    const barY = rowY + 6;
+    const barHeight = rowHeight - 16;
+    const lowX = x(dial.low.bottom50Delta);
+    const highX = x(dial.high.bottom50Delta);
+    const left = Math.min(lowX, highX);
+    const right = Math.max(lowX, highX);
+    const group = svgNode("g", { class: "tornado-bar", tabindex: "0", role: "button" });
+    const barTitle =
+      `${dial.label}: low end → ${signedPercent(dial.low.bottom50PurchasingPowerChange)} buying power, ` +
+      `high end → ${signedPercent(dial.high.bottom50PurchasingPowerChange)}. Click to load the stronger end into the form.`;
+    group.append(svgNode("title", {}, barTitle));
+    group.append(svgNode("rect", { x: left, y: barY, width: Math.max(1.5, right - left), height: barHeight, class: TORNADO_TONE[dial.direction] ?? "bar-flat", rx: 2 }));
+
+    // The endpoint with the larger absolute swing is the informative extreme;
+    // clicking the bar loads it into the form.
+    const strongEnd = Math.abs(dial.high.bottom50Delta) >= Math.abs(dial.low.bottom50Delta) ? dial.high : dial.low;
+    const activate = () => applyDialValue(dial.formId, strongEnd.formValue);
+    group.addEventListener("click", activate);
+    group.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        activate();
+      }
+    });
+
+    svg.append(svgNode("text", { x: plotLeft - 12, y: barY + barHeight / 2 + 4, class: "tornado-label", "text-anchor": "end" }, dial.label));
+    const valueX = right + 8 > plotRight - 4 ? left - 8 : right + 8;
+    const valueAnchor = right + 8 > plotRight - 4 ? "end" : "start";
+    svg.append(svgNode("text", { x: valueX, y: barY + barHeight / 2 + 4, class: "tornado-value", "text-anchor": valueAnchor }, `${(dial.impact * 100).toFixed(1)} pp`));
+    svg.append(group);
+  });
+
+  root.append(svg);
+};
+
+const renderVerdictFlip = (flip) => {
+  const panel = byId("sensitivity-flip");
+  const text = byId("sensitivity-flip-text");
+  const apply = byId("sensitivity-flip-apply");
+  if (!flip) {
+    panel.hidden = true;
+    apply.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  text.textContent = flip.sentence;
+  apply.hidden = false;
+  apply.textContent = `Apply ${flip.label.toLowerCase()} and recalculate`;
+  // Snap away from the base value so the step-rounded field stays past the flip.
+  const snap = flip.value >= flip.fromValue ? "up" : "down";
+  apply.onclick = () => applyDialValue(flip.formId, flip.formValue, snap);
 };
 
 const renderReasons = (projection) => {

@@ -150,12 +150,14 @@ const runStrategy = (
   request: ComparisonRequestV1,
   strategy: PaymentStrategy,
 ): StrategyOutcome => {
+  const complianceFactor = avoidanceComplianceFactor(request);
   const funding = new Map<string, HouseholdFunding>();
   for (const household of households) {
-    const tax = assessWealthTax(
-      { assets: household.assets, liabilities: household.liabilities },
-      policy,
-    ).annualTax;
+    const tax =
+      assessWealthTax(
+        { assets: household.assets, liabilities: household.liabilities },
+        policy,
+      ).annualTax * complianceFactor;
     funding.set(household.id, fundTax(household, tax, strategy, request));
   }
 
@@ -588,7 +590,10 @@ const buildWealthTaxPolicy = (
     governmentBonds: { inclusionRate: 1, valuationFactor: 1 },
     publicEquity: { inclusionRate: 1, valuationFactor: 1 },
     housing: { inclusionRate: 1, valuationFactor: 1 },
-    privateBusiness: { inclusionRate: 0.7, valuationFactor: 1 },
+    privateBusiness: {
+      inclusionRate: request.behavior.privateBusinessInclusionRate,
+      valuationFactor: 1,
+    },
     retirementAssets: { inclusionRate: 0, valuationFactor: 1 },
   },
   liabilities: {
@@ -599,6 +604,18 @@ const buildWealthTaxPolicy = (
   installments: 4,
   allowDeferral: true,
 });
+
+// Avoidance and evasion erode the reported taxable base in proportion to the
+// statutory rate (issue #6). avoidanceElasticity is the fraction of the base
+// lost per percentage point of rate, so a 2% rate at elasticity 0.1 loses 20%
+// of the base. Because the single-bracket tax is linear in the post-exemption
+// base, scaling the assessed tax by this factor is exactly a base reduction.
+// Elasticity 0 reproduces the full-compliance revenue.
+const avoidanceComplianceFactor = (request: ComparisonRequestV1): number =>
+  Math.max(
+    0,
+    1 - request.behavior.avoidanceElasticity * request.wealthTax.rate * 100,
+  );
 
 const resolveEffectiveExemption = (
   households: readonly SyntheticHousehold[],

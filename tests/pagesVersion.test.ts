@@ -51,6 +51,14 @@ describe("versionRelativeImports", () => {
     expect(versionRelativeImports(source, "16")).toBe(source);
   });
 
+  it("leaves dynamic import() specifiers untouched (app.js versions those itself at runtime)", () => {
+    // The paren-vs-quote distinction is load-bearing: app.js derives the
+    // version from its own URL and stamps its dynamic engine/worker imports, so
+    // the build-time rewrite must NOT also stamp (and mangle) them.
+    const source = 'const m = await import("./engine/browser/engine.js");';
+    expect(versionRelativeImports(source, "15")).toBe(source);
+  });
+
   it("versions the whole worker-reachable graph so no transitive import is left stale", () => {
     const worker = 'import { compareScenarios } from "./engine/browser/engine.js";';
     expect(versionRelativeImports(worker, "15")).toBe(

@@ -174,6 +174,78 @@ describe("vertical-slice scenario runner", () => {
     expect(Math.abs(fiscal.governmentBalance)).toBeLessThan(0.01);
   });
 
+  it("leaves revenue unchanged at the full-compliance boundary", () => {
+    const base = compactRequest();
+    const neutral = runComparison({
+      ...base,
+      behavior: {
+        ...base.behavior,
+        avoidanceElasticity: 0,
+        expatriationShare: 0,
+        privateBusinessInclusionRate: 0.7,
+      },
+    });
+    // The neutral dials equal the historical defaults, so the run must be
+    // byte-for-byte identical to the untouched default behavior.
+    expect(neutral).toEqual(runComparison(base));
+  });
+
+  it("erodes revenue monotonically as avoidance elasticity rises", () => {
+    const base = compactRequest();
+    const withAvoidance = (avoidanceElasticity: number) =>
+      runComparison({
+        ...base,
+        behavior: { ...base.behavior, avoidanceElasticity },
+      });
+    const none = withAvoidance(0);
+    const some = withAvoidance(0.1);
+    const more = withAvoidance(0.2);
+
+    const revenue = (result: ReturnType<typeof runComparison>) =>
+      result.strategies["cash-first"].fiscal.taxCollected;
+    expect(revenue(some)).toBeLessThan(revenue(none));
+    expect(revenue(more)).toBeLessThan(revenue(some));
+    // rate 2% at elasticity 0.1 erases 20% of the base and thus the tax.
+    expect(revenue(some)).toBeCloseTo(revenue(none) * 0.8, -2);
+    // Less revenue funds less redistribution, moving the verdict metric down.
+    expect(more.projection.summary.bottom50PurchasingPowerChange).toBeLessThan(
+      none.projection.summary.bottom50PurchasingPowerChange,
+    );
+  });
+
+  it("scales revenue monotonically with the private-business inclusion dial", () => {
+    const base = compactRequest();
+    const withInclusion = (privateBusinessInclusionRate: number) =>
+      runComparison({
+        ...base,
+        behavior: { ...base.behavior, privateBusinessInclusionRate },
+      });
+    const revenue = (rate: number) =>
+      withInclusion(rate).strategies["cash-first"].fiscal.taxCollected;
+    expect(revenue(0.3)).toBeLessThan(revenue(0.7));
+    expect(revenue(0.7)).toBeLessThan(revenue(1));
+  });
+
+  it("shrinks the year-ten base with expatriation but leaves year one intact", () => {
+    const base = compactRequest();
+    const withExpatriation = (expatriationShare: number) =>
+      runComparison({
+        ...base,
+        behavior: { ...base.behavior, expatriationShare },
+      });
+    const none = withExpatriation(0);
+    const heavy = withExpatriation(0.5);
+    // Expatriation is a gradual decade process: year one is unchanged.
+    expect(heavy.projection.annualFlows.taxCollected).toBeCloseTo(
+      none.projection.annualFlows.taxCollected,
+      4,
+    );
+    // By year ten the eroded base collects strictly less.
+    expect(heavy.projection.annualFlows.finalYear.taxCollected).toBeLessThan(
+      none.projection.annualFlows.finalYear.taxCollected,
+    );
+  });
+
   it("resolves percentile targets separately from dollar exemptions", () => {
     const topOne = runComparison({
       ...compactRequest(),

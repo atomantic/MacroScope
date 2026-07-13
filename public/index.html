@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f2efe7" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./styles.css?v=5" />
+    <link rel="stylesheet" href="./styles.css?v=9" />
     <title>MacroScope</title>
   </head>
   <body>
@@ -19,6 +19,24 @@
     </header>
 
     <main>
+      <section class="story" id="story" aria-labelledby="story-title" aria-live="polite">
+        <div class="story-head">
+          <p class="kicker">Guided walkthrough</p>
+          <div class="story-progress" id="story-progress" role="group" aria-label="Walkthrough steps"></div>
+          <button type="button" class="story-skip" id="story-skip">Skip to dashboard →</button>
+        </div>
+        <div class="story-stage" id="story-stage"></div>
+        <div class="story-nav">
+          <button type="button" class="story-back" id="story-prev">← Back</button>
+          <span class="story-counter" id="story-counter"></span>
+          <button type="button" class="story-forward" id="story-next">Next →</button>
+        </div>
+      </section>
+
+      <div id="dashboard-view">
+      <button type="button" class="story-launch" id="story-launch" hidden>
+        <span>New here?</span> Take the guided walkthrough that builds the argument one dial at a time →
+      </button>
       <section class="verdict-section" aria-labelledby="verdict-headline">
         <div class="verdict-copy">
           <p class="kicker">Model verdict · wealth tax funds redistribution</p>
@@ -51,6 +69,29 @@
           <strong id="metric-m2">—</strong>
           <small>cumulative change, year 10</small>
         </article>
+      </section>
+
+      <section class="winners-section" aria-labelledby="winners-heading">
+        <div class="section-intro">
+          <p class="kicker">Who wins, who loses</p>
+          <h2 id="winners-heading">Every group gets an explicit ten-year outcome.</h2>
+          <p>Each bar shows where a cohort ends versus the no-policy path, combining wealth tax paid, UBI received, purchasing power after inflation, and asset-price effects. Renters read on buying power; asset-holders read on real net worth. <a href="#caveats" class="caveat-link">See what the model does and doesn't capture.</a></p>
+        </div>
+        <div class="winners-grid" id="winners-grid" aria-label="Ten-year outcome by wealth group"></div>
+        <div class="persona-card">
+          <div class="persona-intro">
+            <p class="kicker">A household like mine</p>
+            <h3>Map your household onto the nearest modeled cohort.</h3>
+            <p>The model runs entirely in your browser; your inputs are saved to this page's link so you can bookmark or share the view. The card updates whenever you change a policy dial above or below.</p>
+          </div>
+          <form id="persona-form" aria-label="Describe your household">
+            <label for="persona-net-worth">Approximate net worth ($)<input id="persona-net-worth" name="personaNetWorth" type="number" min="-100000" step="1000" value="25000" /></label>
+            <label for="persona-adults">Adults<input id="persona-adults" name="personaAdults" type="number" min="1" max="10" step="1" value="2" /></label>
+            <label for="persona-children">Children<input id="persona-children" name="personaChildren" type="number" min="0" max="12" step="1" value="1" /></label>
+            <label for="persona-tenure">Home<select id="persona-tenure" name="personaTenure"><option value="renter">I rent</option><option value="owner">I own</option></select></label>
+          </form>
+          <div class="persona-result" id="persona-result" role="status">Enter a few details to see your modeled outcome.</div>
+        </div>
       </section>
 
       <section class="story-section" aria-labelledby="trajectory-heading">
@@ -164,6 +205,37 @@
         </div>
       </section>
 
+      <section class="validation-section" aria-labelledby="validation-heading">
+        <div class="section-intro">
+          <p class="kicker">How do we know?</p>
+          <h2 id="validation-heading">The inflation engine, checked against 2020–2023.</h2>
+          <p id="validation-lede">The same reduced-form kernel that produces every number above is fed the actual U.S. money supply of 2019–2022 and asked to reproduce the inflation that followed. This checks the kernel's money-growth transmission channel — one set of published coefficients, no per-year tuning; supply and energy shocks are outside the reduced form.</p>
+        </div>
+        <div class="validation-layout">
+          <div class="validation-chart-wrap">
+            <div class="chart" id="backtest-chart"></div>
+            <p class="validation-caption" id="backtest-caption">Modeled vs. actual CPI</p>
+          </div>
+          <aside class="validation-notes">
+            <div class="validation-metrics">
+              <div><span>Modeled peak</span><strong id="backtest-modeled-peak">—</strong><small id="backtest-actual-peak">—</small></div>
+              <div><span>Average miss</span><strong id="backtest-mae">—</strong><small>across the checked years</small></div>
+            </div>
+            <div class="validation-table-wrap">
+              <table class="validation-table" aria-label="Modeled versus actual inflation">
+                <thead><tr><th>Year</th><th>Prior-year M2</th><th>Modeled</th><th>Actual CPI</th></tr></thead>
+                <tbody id="backtest-body"></tbody>
+              </table>
+            </div>
+            <div class="validation-caveats">
+              <span>What this reduced form misses</span>
+              <ul id="backtest-caveats"></ul>
+            </div>
+            <div class="validation-sources" id="backtest-sources"></div>
+          </aside>
+        </div>
+      </section>
+
       <section class="verdict-reasons" aria-labelledby="reasons-heading">
         <div class="section-intro compact">
           <p class="kicker">Why the model says this</p>
@@ -235,6 +307,20 @@
             <label for="sell-share">Asset-sale share (%)<input id="sell-share" name="sellShare" type="number" min="0" max="100" step="5" /></label>
             <label for="loan-rate">Loan interest (%)<input id="loan-rate" name="loanRate" type="number" min="0" max="50" step="0.1" /></label>
           </fieldset>
+          <fieldset class="behavior-fieldset">
+            <legend>Taxpayer response</legend>
+            <div class="behavior-presets" aria-label="Taxpayer-response presets">
+              <span>Response scenario</span>
+              <button type="button" data-behavior-preset="full-compliance">Full compliance</button>
+              <button type="button" data-behavior-preset="scandinavian">Scandinavian experience</button>
+              <button type="button" data-behavior-preset="french-isf">French ISF experience</button>
+            </div>
+            <div class="behavior-grid">
+              <label for="avoidance-elasticity">Avoidance per point (%)<input id="avoidance-elasticity" name="avoidanceElasticity" type="number" min="0" max="50" step="1" /><small class="field-hint">Share of the taxable base that vanishes into valuation games and reclassification for each percentage point of tax rate.</small></label>
+              <label for="expatriation-share">Expatriation over decade (%)<input id="expatriation-share" name="expatriationShare" type="number" min="0" max="90" step="1" /><small class="field-hint">Share of top-tier taxable wealth that leaves the country and the tax base over the ten-year horizon.</small></label>
+              <label for="private-business-inclusion">Private-business included (%)<input id="private-business-inclusion" name="privateBusinessInclusionRate" type="number" min="0" max="100" step="5" /><small class="field-hint">Share of hard-to-value private-business wealth actually captured in the base after valuation discounts.</small></label>
+            </div>
+          </fieldset>
           <fieldset>
             <legend>Macro assumptions</legend>
             <label for="asset-return">Annual asset return (%)<input id="asset-return" name="assetReturn" type="number" min="-50" max="50" step="0.5" /></label>
@@ -259,6 +345,7 @@
           </details>
           <div class="form-actions">
             <button class="run-button" id="run-button" type="submit">Recalculate verdict</button>
+            <button class="link-button" id="copy-link-button" type="button">Copy link to this scenario</button>
             <p class="form-status" id="form-status" role="status">Loading baseline scenario…</p>
           </div>
         </form>
@@ -285,7 +372,7 @@
           <h3>Consumption sectors</h3>
           <div class="table-scroll"><table><thead><tr><th>Sector</th><th>Cash first</th><th>Borrow first</th><th>Sell first</th></tr></thead><tbody id="sector-body"></tbody></table></div>
         </div>
-        <div class="caveats"><h3>Model boundaries</h3><ul id="caveat-list"></ul></div>
+        <div class="caveats" id="caveats"><h3>Model boundaries</h3><ul id="caveat-list"></ul></div>
       </details>
 
       <section class="policy-references" id="policy-references" aria-labelledby="policy-references-heading">
@@ -326,12 +413,14 @@
         <h2 id="sources-heading">Built on official U.S. data.</h2>
         <div id="source-list"></div>
       </section>
+      </div>
     </main>
 
     <footer class="site-footer">
       <span>Conditional, transparent scenarios — not forecasts or financial advice.</span>
       <nav aria-label="Developer endpoints"><a href="/health">Health</a><a href="/api/status">Engine</a><a href="/api/baseline/us">U.S. baseline</a><a href="/api/scenarios/default">Scenario JSON</a></nav>
     </footer>
-    <script src="./app.js?v=6" defer></script>
+    <div class="toast-container" id="toast-container" aria-live="polite" aria-atomic="true"></div>
+    <script src="./app.js?v=9" type="module"></script>
   </body>
 </html>

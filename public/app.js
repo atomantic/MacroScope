@@ -624,6 +624,11 @@ const setupBorrowStep = () => {
 // entry so the monetization dial (and only it) drives the inflation response.
 const setupMonetizationStep = () => {
   byId("funding-rule").value = "fixed";
+  // The dial monetizes a deficit, so one must exist. A benefit fully covered by
+  // tax receipts (e.g. a near-zero benefit carried in from the dashboard) runs
+  // no deficit even under fixed funding, leaving the dial inert; $1k/mo adult
+  // reliably exceeds tax receipts for the U.S. population, so floor it there.
+  if (Number(byId("adult-benefit").value) < 1000) byId("adult-benefit").value = "1000";
 };
 
 // Each step reads live values off `latestResult`, so its copy adapts to the
@@ -707,7 +712,7 @@ const STORY_STEPS = [
   },
 ];
 
-const storyState = { index: 0, running: false, pending: false, dynamic: null };
+const storyState = { index: 0, running: false, pending: false, dynamic: null, runPromise: null };
 
 const debounce = (fn, wait) => {
   let timer = null;
@@ -937,13 +942,13 @@ const buildStoryDial = (dial) => {
   const current = clamp(Number(field.value), dial.min, dial.max);
   range.value = String(current);
   valueOut.textContent = String(current);
-  const commit = debounce(async (value) => {
-    field.value = String(value);
-    await storyRerun();
-  }, 220);
+  // Write the shared field on every input so navigation mid-drag always sees
+  // the current value; debounce only the (expensive) model rerun.
+  const commit = debounce(() => storyRerun(), 220);
   range.addEventListener("input", () => {
     valueOut.textContent = range.value;
-    commit(range.value);
+    field.value = range.value;
+    commit();
   });
   wrap.append(range);
   return wrap;
@@ -993,35 +998,45 @@ const refreshStoryDynamic = () => {
   }
 };
 
-const storyRerun = async () => {
+// Returns a promise that settles when the model (including any coalesced
+// trailing reruns) is idle, so navigation can wait on an in-flight run.
+const storyRerun = () => {
   // Coalesce concurrent dial moves: if a run is in flight, mark a rerun pending
   // and let the active loop pick up the newest field values when it finishes,
   // so the final dial position is never dropped (slider ↔ model stay in sync).
   if (storyState.running) {
     storyState.pending = true;
-    return;
+    return storyState.runPromise;
   }
-  storyState.running = true;
-  byId("story-stage").classList.add("is-busy");
-  let ok = true;
-  do {
-    storyState.pending = false;
-    ok = await runScenario();
-  } while (storyState.pending);
-  storyState.running = false;
-  byId("story-stage").classList.remove("is-busy");
-  if (ok) {
-    refreshStoryDynamic();
-  } else if (storyState.dynamic?.errorNode) {
-    // Keep the visible view honest: the model rejected this setting, so don't
-    // silently leave stale results next to the moved dial.
-    storyState.dynamic.errorNode.textContent = "That setting couldn't be modeled. Adjust the dial and try again.";
-    storyState.dynamic.errorNode.hidden = false;
-  }
+  storyState.runPromise = (async () => {
+    storyState.running = true;
+    byId("story-stage").classList.add("is-busy");
+    let ok = true;
+    do {
+      storyState.pending = false;
+      ok = await runScenario();
+    } while (storyState.pending);
+    storyState.running = false;
+    byId("story-stage").classList.remove("is-busy");
+    if (ok) {
+      refreshStoryDynamic();
+    } else if (storyState.dynamic?.errorNode) {
+      // Keep the visible view honest: the model rejected this setting, so don't
+      // silently leave stale results next to the moved dial.
+      storyState.dynamic.errorNode.textContent = "That setting couldn't be modeled. Adjust the dial and try again.";
+      storyState.dynamic.errorNode.hidden = false;
+    }
+  })();
+  return storyState.runPromise;
 };
 
-const goToStep = (index) => {
-  storyState.index = clamp(index, 0, STORY_STEPS.length - 1);
+const goToStep = async (index) => {
+  const target = clamp(index, 0, STORY_STEPS.length - 1);
+  // Let an in-flight run (e.g. a just-clicked preset) settle first, so the next
+  // step's setup derives its baseline from the selected scenario, not the prior
+  // one, and the queued rerun can't overwrite the selection.
+  if (storyState.running && storyState.runPromise) await storyState.runPromise;
+  storyState.index = target;
   syncStoryUrl();
   renderStory();
   byId("story").scrollIntoView({ behavior: "smooth", block: "start" });

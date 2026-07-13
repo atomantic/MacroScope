@@ -246,6 +246,58 @@ describe("vertical-slice scenario runner", () => {
     );
   });
 
+  it("propagates base dynamics through the inflation stress grid (issue #17)", () => {
+    const base = compactRequest();
+    const grid = (expatriationShare: number) =>
+      runComparison({
+        ...base,
+        behavior: { ...base.behavior, expatriationShare },
+      }).projection.stressTest;
+    const none = grid(0);
+    const heavy = grid(0.8);
+    const peaks = (test: ReturnType<typeof grid>) =>
+      test.cells.map((cell) => cell.peakAnnualInflation);
+    // Expatriation leaves year-one revenue untouched, so before the base
+    // dynamics were threaded through the stress horizon it could not move the
+    // grid at all. Now it drains the taxed base across the decade, so the cells
+    // respond — proving the grid is no longer frozen at year-one revenue.
+    expect(peaks(heavy)).not.toEqual(peaks(none));
+    // In the deep-deficit corner (8× UBI, fully monetized) the eroding base
+    // widens the out-year deficit, so the peak runs strictly hotter.
+    const deepCell = (test: ReturnType<typeof grid>) =>
+      test.cells.find(
+        (cell) => cell.ubiMultiplier === 8 && cell.monetizationShare === 1,
+      )?.peakAnnualInflation ?? 0;
+    expect(deepCell(heavy)).toBeGreaterThan(deepCell(none));
+  });
+
+  it("scopes expatriation to the top-tier sub-base under a universal tax (issue #17)", () => {
+    const base = compactRequest();
+    // Exercises the shared evolveTaxBase/combinedBaseMultiplier scoping that both
+    // the main projection loop and the stress grid use, observed here through the
+    // main loop's year-ten revenue (the grid's own cells are regime-dominated
+    // under a universal tax, where revenue so exceeds outlay that base erosion
+    // can't move the peak). Ten-year revenue retained under heavy expatriation,
+    // relative to none — the channels other than expatriation cancel in the
+    // ratio, isolating its drain.
+    const finalRatio = (exemption: number) => {
+      const finalTax = (expatriationShare: number) =>
+        runComparison({
+          ...base,
+          wealthTax: { targetMode: "exemption", exemption, topShare: 0.01, rate: 0.02 },
+          behavior: { ...base.behavior, expatriationShare },
+        }).projection.annualFlows.finalYear.taxCollected;
+      return finalTax(0.5) / finalTax(0);
+    };
+    const universalRatio = finalRatio(0); // zero exemption reaches every tier
+    const topTierRatio = finalRatio(50_000_000); // exemption confines tax to the top
+    // Under a top-tier-only tax the whole taxed base can leave, so revenue erodes
+    // by the full geometric expatriation retention. Under a universal tax only
+    // the top-tier share of the base is drained, so the same dial erodes less.
+    expect(topTierRatio).toBeCloseTo((1 - 0.5) ** (9 / 10), 2);
+    expect(universalRatio).toBeGreaterThan(topTierRatio);
+  });
+
   it("resolves percentile targets separately from dollar exemptions", () => {
     const topOne = runComparison({
       ...compactRequest(),

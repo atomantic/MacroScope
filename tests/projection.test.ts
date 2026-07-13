@@ -203,6 +203,40 @@ describe("ten-year projection dynamics", () => {
     expect(owner?.annualTaxPaid).toBe(0);
   });
 
+  it("attributes tax to the top tail when the exemption exceeds every cohort average", () => {
+    // The "10% over $1B" preset sits above every cohort's AVERAGE wealth, so the
+    // group-level taxable base is zero everywhere — but the top tail still pays,
+    // so the burden must land on the wealthiest cohort, not vanish to $0.
+    const result = runComparison({
+      ...nationalRequest(),
+      wealthTax: { targetMode: "exemption", exemption: 1_000_000_000, topShare: 0.01, rate: 0.1 },
+    });
+    expect(result.projection.annualFlows.taxCollected).toBeGreaterThan(0);
+    const byId = Object.fromEntries(
+      result.projection.groupOutcomes.map((group) => [group.id, group]),
+    );
+    expect(byId["top-0.1"].annualTaxPaid).toBeGreaterThan(0);
+    expect(byId["top-1"].annualTaxPaid).toBe(0);
+    expect(byId["middle-40"].annualTaxPaid).toBe(0);
+  });
+
+  it("keeps per-household group figures invariant to the represented population", () => {
+    // Collected tax and delivered UBI scale with representedHouseholds while the
+    // wealth-group baselines are national; the per-household outputs must divide
+    // the flows back down so they don't collapse to fractions of a dollar.
+    const national = runComparison(nationalRequest());
+    const scaled = runComparison({ ...nationalRequest(), representedHouseholds: 5_000 });
+    const ubiNational = national.projection.groupOutcomes[0]?.annualUbiReceived ?? 0;
+    const ubiScaled = scaled.projection.groupOutcomes[0]?.annualUbiReceived ?? 0;
+    expect(ubiScaled).toBeGreaterThan(1_000);
+    expect(ubiScaled).toBeCloseTo(ubiNational, 2);
+    const taxNational =
+      national.projection.groupOutcomes.find((g) => g.id === "top-1")?.annualTaxPaid ?? 0;
+    const taxScaled =
+      scaled.projection.groupOutcomes.find((g) => g.id === "top-1")?.annualTaxPaid ?? 0;
+    expect(taxScaled).toBeCloseTo(taxNational, 2);
+  });
+
   it("removes every group's tax burden when the wealth-tax rate is zero", () => {
     const result = runComparison({
       ...nationalRequest(),

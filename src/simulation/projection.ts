@@ -92,8 +92,23 @@ export const buildPolicyProjection = (
     taxable: Math.max(0, group.netWorth - effectiveExemption * group.households),
   }));
   const totalTaxableBase = groupTaxableBase.reduce((sum, group) => sum + group.taxable, 0);
-  for (const group of groupTaxableBase) {
-    groupTaxShare.set(group.id, totalTaxableBase > 0 ? group.taxable / totalTaxableBase : 0);
+  if (totalTaxableBase > 0) {
+    for (const group of groupTaxableBase) {
+      groupTaxShare.set(group.id, group.taxable / totalTaxableBase);
+    }
+  } else {
+    // A very high exemption (e.g. the "10% over $1B" preset) sits above every
+    // cohort's AVERAGE wealth, so no group-level base is positive — yet the
+    // synthetic top tail still pays. Attribute the whole burden to the
+    // wealthiest cohort rather than reporting $0 tax for everyone.
+    const wealthiest = [...US_BASELINE.wealthGroups].sort(
+      (left, right) =>
+        right.netWorth / Math.max(1, right.households) -
+        left.netWorth / Math.max(1, left.households),
+    )[0];
+    for (const group of groupTaxableBase) {
+      groupTaxShare.set(group.id, group.id === wealthiest?.id ? 1 : 0);
+    }
   }
   const cumulativeGroupTax = new Map<string, number>(
     US_BASELINE.wealthGroups.map((group) => [group.id, 0]),
@@ -523,9 +538,20 @@ const groupRealWealthChange = (
   const equityGain = (inputs.equityPremium - 1) * (group.publicEquity / netWorth);
   const debtErosion = excessInflation * (group.liabilities / netWorth);
   const cashErosion = -excessInflation * (group.deposits / netWorth);
-  const realTaxBurden = -(cumulativeTax / inputs.policyPriceLevel) / netWorth;
+  // cumulativeTax is a flow scaled to the represented population; the group's
+  // net worth is a national baseline. Normalize the tax to national scale so the
+  // burden ratio is correct for any representedHouseholds.
+  const nationalTax = cumulativeTax / populationScale(inputs.request);
+  const realTaxBurden = -(nationalTax / inputs.policyPriceLevel) / netWorth;
   return housingGain + equityGain + debtErosion + cashErosion + realTaxBurden;
 };
+
+// Ratio of the requested population to the national baseline. The engine's
+// collected-tax and delivered-UBI flows scale with representedHouseholds, while
+// the wealth-group baselines are national — so per-household and per-net-worth
+// figures must divide the flows back down by this factor.
+const populationScale = (request: ComparisonRequestV1): number =>
+  Math.max(1e-9, request.representedHouseholds / US_BASELINE.households);
 
 const rateGroupOutcome = (change: number): WealthGroupOutcome["rating"] =>
   change > GROUP_OUTCOME_BAND
@@ -541,17 +567,20 @@ const groupOf = (id: UsWealthGroupBaseline["id"]): UsWealthGroupBaseline => {
 };
 
 const buildGroupOutcomes = (inputs: GroupOutcomeInputs): WealthGroupOutcome[] => {
-  const totalHouseholds = US_BASELINE.households;
+  const scale = populationScale(inputs.request);
+  const representedHouseholds = inputs.request.representedHouseholds;
   // Per-household averages so cohorts are comparable and the persona card can
-  // read them directly. UBI is modeled as near-universal per household.
-  const perHouseholdUbi = inputs.ubiReceived / Math.max(1, totalHouseholds);
+  // read them directly. UBI is modeled as near-universal per household; both the
+  // delivered UBI and the collected tax are flows over the represented
+  // population, so divide by represented (not national) household counts.
+  const perHouseholdUbi = inputs.ubiReceived / Math.max(1, representedHouseholds);
   const perHouseholdTaxYearOne = (group: UsWealthGroupBaseline): number =>
     (inputs.taxCollected * (inputs.groupTaxShare.get(group.id) ?? 0)) /
-    Math.max(1, group.households);
+    Math.max(1, group.households * scale);
 
   const bottom50 = groupOf("bottom-50");
-  const renterHouseholds = bottom50.households * BOTTOM_HALF_RENTER_SHARE;
-  const ownerHouseholds = bottom50.households - renterHouseholds;
+  const renterHouseholds = bottom50.households * BOTTOM_HALF_RENTER_SHARE * scale;
+  const ownerHouseholds = bottom50.households * scale - renterHouseholds;
   // The bottom half's taxable base (real estate, equity) sits with its owners;
   // renters hold negligible taxable wealth. So when a low exemption reaches into
   // the bottom half, attribute the whole group's tax to the owner cohort and
@@ -616,7 +645,7 @@ const buildGroupOutcomes = (inputs: GroupOutcomeInputs): WealthGroupOutcome[] =>
     outcomes.push({
       id: spec.id,
       label: spec.label,
-      households: group.households,
+      households: group.households * scale,
       primaryMetric: "real-wealth",
       purchasingPowerChange: null,
       realWealthChange: wealthChange,

@@ -100,6 +100,44 @@ export interface StressCell {
   readonly regime: InflationRegime;
 }
 
+export type WealthGroupOutcomeId =
+  | "bottom-50-renter"
+  | "bottom-50-owner"
+  | "middle-40"
+  | "top-10"
+  | "top-1"
+  | "top-0.1";
+
+/**
+ * A single wealth cohort's explicit ten-year outcome versus the no-policy path,
+ * combining the four channels the policy acts through: wealth tax paid, UBI
+ * received, real purchasing power after inflation, and asset-price effects.
+ */
+export interface WealthGroupOutcome {
+  readonly id: WealthGroupOutcomeId;
+  readonly label: string;
+  readonly households: number;
+  // The metric that leads this group's story: renters and the liquidity-
+  // constrained bottom half read on purchasing power; asset-holding groups
+  // read on real net worth (which already nets out the wealth tax they pay).
+  readonly primaryMetric: "purchasing-power" | "real-wealth";
+  // Year-10 real disposable buying power vs. the no-policy path (fractional
+  // change; e.g. 0.06 = +6%). Null when the cohort has no meaningful measure.
+  readonly purchasingPowerChange: number | null;
+  // Year-10 real net worth vs. the no-policy path (fractional change), after
+  // asset-price premia, inflationary debt erosion, and cumulative tax paid.
+  readonly realWealthChange: number | null;
+  // Year-1 nominal wealth tax paid and UBI received by the cohort, exposed as
+  // plain-dollar drivers behind the composite outcome.
+  readonly annualTaxPaid: number;
+  readonly annualUbiReceived: number;
+  // Year-10 housing-cost premium vs. no policy (fractional; renters pay it,
+  // owners bank the mirror-image asset gain).
+  readonly rentPremiumChange: number;
+  readonly rating: "better-off" | "worse-off" | "mixed";
+  readonly headline: string;
+}
+
 export interface PolicyProjection {
   readonly verdict: {
     readonly rating: "beneficial" | "mixed" | "harmful";
@@ -140,6 +178,7 @@ export interface PolicyProjection {
     readonly firstHyperinflationYear: number | null;
   };
   readonly years: readonly ProjectionYear[];
+  readonly groupOutcomes: readonly WealthGroupOutcome[];
   readonly stressTest: {
     readonly ubiMultipliers: readonly number[];
     readonly monetizationShares: readonly number[];

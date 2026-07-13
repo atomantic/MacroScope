@@ -125,6 +125,85 @@ describe("ten-year projection dynamics", () => {
     expect(Number.isFinite(flows.finalYear.m2Injection)).toBe(true);
   });
 
+  it("gives every wealth group an explicit ten-year winners/losers outcome", () => {
+    const result = runComparison(nationalRequest());
+    const outcomes = result.projection.groupOutcomes;
+    // Every named cohort in the issue is represented, in a stable order.
+    expect(outcomes.map((group) => group.id)).toEqual([
+      "bottom-50-renter",
+      "bottom-50-owner",
+      "middle-40",
+      "top-10",
+      "top-1",
+      "top-0.1",
+    ]);
+
+    const byId = Object.fromEntries(outcomes.map((group) => [group.id, group]));
+    // Under the default $10M exemption only the top groups carry a tax burden,
+    // and the top 0.1% pays more per household than the top 1%.
+    expect(byId["bottom-50-renter"].annualTaxPaid).toBe(0);
+    expect(byId["middle-40"].annualTaxPaid).toBe(0);
+    expect(byId["top-1"].annualTaxPaid).toBeGreaterThan(0);
+    expect(byId["top-0.1"].annualTaxPaid).toBeGreaterThan(byId["top-1"].annualTaxPaid);
+
+    // The winners/losers split: the transfer and asset/inflation channels leave
+    // the bottom and middle better off, the tax leaves the very top worse off.
+    expect(byId["bottom-50-renter"].rating).toBe("better-off");
+    expect(byId["bottom-50-owner"].rating).toBe("better-off");
+    expect(byId["top-1"].rating).toBe("worse-off");
+    expect(byId["top-0.1"].rating).toBe("worse-off");
+    // The most leveraged group gains most from inflationary debt erosion.
+    expect(byId["bottom-50-owner"].realWealthChange).toBeGreaterThan(
+      byId["middle-40"].realWealthChange ?? 0,
+    );
+    // The heavier tax makes the top 0.1% worse off than the top 1%.
+    expect(byId["top-0.1"].realWealthChange).toBeLessThan(
+      byId["top-1"].realWealthChange ?? 0,
+    );
+
+    // Renters read on purchasing power, asset holders on real wealth; every
+    // outcome is a finite number.
+    expect(byId["bottom-50-renter"].primaryMetric).toBe("purchasing-power");
+    expect(byId["top-1"].primaryMetric).toBe("real-wealth");
+    for (const group of outcomes) {
+      const change =
+        group.primaryMetric === "real-wealth"
+          ? group.realWealthChange
+          : group.purchasingPowerChange;
+      expect(change).not.toBeNull();
+      expect(Number.isFinite(change ?? Number.NaN)).toBe(true);
+      expect(Number.isFinite(group.annualUbiReceived)).toBe(true);
+    }
+  });
+
+  it("removes every group's tax burden when the wealth-tax rate is zero", () => {
+    const result = runComparison({
+      ...nationalRequest(),
+      wealthTax: { targetMode: "exemption", exemption: 10_000_000, topShare: 0.01, rate: 0 },
+    });
+    for (const group of result.projection.groupOutcomes) {
+      expect(group.annualTaxPaid).toBe(0);
+    }
+    // With no tax the top 1% is no longer dragged into worse-off territory.
+    const top1 = result.projection.groupOutcomes.find((group) => group.id === "top-1");
+    expect(top1?.rating).not.toBe("worse-off");
+  });
+
+  it("allocates the tax burden to the top when targeting a top wealth share", () => {
+    // Top-share targeting resolves the effective exemption from the population,
+    // which must reach buildPolicyProjection so the burden lands on the top.
+    const result = runComparison({
+      ...nationalRequest(),
+      wealthTax: { targetMode: "top-share", exemption: 0, topShare: 0.01, rate: 0.02 },
+    });
+    const byId = Object.fromEntries(
+      result.projection.groupOutcomes.map((group) => [group.id, group]),
+    );
+    expect(byId["top-1"].annualTaxPaid + byId["top-0.1"].annualTaxPaid).toBeGreaterThan(0);
+    expect(byId["bottom-50-renter"].annualTaxPaid).toBe(0);
+    expect(byId["middle-40"].annualTaxPaid).toBe(0);
+  });
+
   it("keeps M2 positive when a large tax surplus drains deposits", () => {
     const result = runComparison({
       ...nationalRequest(),

@@ -2,6 +2,7 @@ import { SCENARIO_SCHEMA_VERSION, type UbiFundingRule } from "../policies/schema
 import { US_BASELINE } from "./usBaseline.js";
 
 export type PaymentStrategy = "cash-first" | "borrow-first" | "sell-first";
+export type BenefitIndexation = "none" | "cpi";
 export type ConsumptionSector =
   | "housing"
   | "food"
@@ -34,6 +35,9 @@ export interface ComparisonRequestV1 {
     readonly adultMonthlyBenefit: number;
     readonly childMonthlyBenefit: number;
     readonly fundingRule: UbiFundingRule;
+    // Optional on the wire for schema-v1 compatibility; normalizeComparisonRequest
+    // defaults an omitted value to "none" (fixed nominal benefits).
+    readonly benefitIndexation?: BenefitIndexation;
     readonly directCashShare: number;
     readonly administrativeShare: number;
   };
@@ -116,6 +120,15 @@ export interface PolicyProjection {
     readonly assetSales: number;
     readonly governmentDeficit: number;
     readonly m2Injection: number;
+    readonly finalYear: {
+      readonly taxCollected: number;
+      readonly ubiReceived: number;
+      readonly publicServicesSpending: number;
+      readonly administrativeCost: number;
+      readonly newPrivateLoans: number;
+      readonly governmentDeficit: number;
+      readonly m2Injection: number;
+    };
   };
   readonly summary: {
     readonly peakAnnualInflation: number;
@@ -277,6 +290,7 @@ export const DEFAULT_COMPARISON_REQUEST: ComparisonRequestV1 = {
     adultMonthlyBenefit: 1_000,
     childMonthlyBenefit: 500,
     fundingRule: "revenue-constrained",
+    benefitIndexation: "none",
     directCashShare: 1,
     administrativeShare: 0.05,
   },

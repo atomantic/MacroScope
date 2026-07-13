@@ -123,13 +123,14 @@ describe("PortOS server", () => {
         sampleSize: 100,
         representedHouseholds: 50,
         wealthTax: { targetMode: "magic" },
-        ubi: { fundingRule: "magic" },
+        ubi: { fundingRule: "magic", benefitIndexation: "magic" },
       }).errors,
     ).toEqual(
       expect.arrayContaining([
         "representedHouseholds must be at least sampleSize.",
         "targetMode must be exemption or top-share.",
         "fundingRule must be fixed, revenue-constrained, or smoothed.",
+        "benefitIndexation must be none or cpi.",
       ]),
     );
   });

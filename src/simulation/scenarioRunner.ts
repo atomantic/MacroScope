@@ -111,7 +111,7 @@ export const runComparison = (
       "The current closed economy assumes domestic buyers absorb all equity and housing sales.",
       "Housing sales remain a national, closed-economy transfer channel; the ten-year owner-renter view adds reduced-form price, supply, and rent feedback rather than regional market clearing.",
       "Wealth Gini values treat negative net worth as zero for the inequality calculation.",
-      "The ten-year path is a transparent reduced-form projection with constant real policy flows, partial wage adjustment, and no private-loan bailout.",
+      `The ten-year path is a transparent reduced-form projection with ${request.ubi.benefitIndexation === "cpi" ? "CPI-indexed policy benefits (one-year recognition lag)" : "fixed nominal policy benefits"}, a wealth-tax base that compounds with asset returns and erodes with taxes paid, partial wage adjustment, and no private-loan bailout.`,
       "Cash purchasing-power measures do not assign a dollar welfare value to healthcare or social services delivered in kind.",
       "Percentile targeting resolves an effective exemption from the synthetic weighted population, so its dollar cutoff varies with calibration and sample size.",
     ],

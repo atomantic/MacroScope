@@ -38,17 +38,23 @@ describe("PortOS server", () => {
     const port = (server.address() as AddressInfo).port;
     const origin = `http://127.0.0.1:${port}`;
 
-    const [health, status, demo, baseline, shell] = await Promise.all([
+    const [health, status, demo, baseline, backtest, shell] = await Promise.all([
       fetch(`${origin}/health`),
       fetch(`${origin}/api/status`),
       fetch(`${origin}/api/demo`),
       fetch(`${origin}/api/baseline/us`),
+      fetch(`${origin}/api/validation/historical`),
       fetch(origin),
     ]);
 
     expect(health.status).toBe(200);
     expect(await health.json()).toMatchObject({ status: "healthy", service: "macroscope" });
     expect(await status.json()).toMatchObject({ deterministic: true });
+    expect(backtest.status).toBe(200);
+    expect(await backtest.json()).toMatchObject({
+      modeledPeak: { year: 2021 },
+      allWithinTolerance: true,
+    });
     expect(await demo.json()).toMatchObject({
       delta: { borrowVsCash: { deposits: 20, loans: 20 } },
     });
@@ -62,6 +68,8 @@ describe("PortOS server", () => {
     expect(shellMarkup).toContain('step="0.1"');
     expect(shellMarkup).toContain('data-preset="top-one"');
     expect(shellMarkup).toContain('id="theory-chart"');
+    expect(shellMarkup).toContain('id="backtest-chart"');
+    expect(shellMarkup).toContain('id="validation-heading"');
   });
 
   it("validates and runs comparison requests over HTTP", async () => {

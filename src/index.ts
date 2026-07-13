@@ -12,6 +12,7 @@ export * from "./simulation/population.js";
 export * from "./simulation/scenarioRunner.js";
 export * from "./simulation/usBaseline.js";
 export * from "./simulation/projection.js";
+export * from "./simulation/historicalValidation.js";
 export * from "./simulation/settlement.js";
 export * from "./server/config.js";
 export * from "./server/comparisonInput.js";

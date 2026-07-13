@@ -142,8 +142,20 @@ export const US_BASELINE = {
     {
       label: "The Role and Design of Net Wealth Taxes",
       organization: "OECD",
-      vintage: "2018; debt deductibility and tax-base design",
+      vintage: "2018; behavioral responses, debt deductibility, and tax-base design",
       url: "https://www.oecd.org/en/publications/the-role-and-design-of-net-wealth-taxes-in-the-oecd_9789264290303-en.html",
+    },
+    {
+      label: "Behavioral Responses to Wealth Taxes: Evidence from Sweden",
+      organization: "David Seim, American Economic Journal: Economic Policy",
+      vintage: "2017; low Scandinavian avoidance elasticity",
+      url: "https://www.aeaweb.org/articles?id=10.1257/pol.20150290",
+    },
+    {
+      label: "The Economic Consequences of the French Wealth Tax (ISF)",
+      organization: "Éric Pichet, La Revue de Droit Fiscal / SSRN",
+      vintage: "2007; ISF avoidance and expatriation experience",
+      url: "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=1268381",
     },
     {
       label: "Housing costs and renter burden",

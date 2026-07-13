@@ -56,6 +56,15 @@ export interface ComparisonRequestV1 {
     readonly assetHedgeShare: number;
     readonly housingHedgeShare: number;
     readonly rentPassThrough: number;
+    // Taxpayer-response dials (issue #6). Fraction of the reported taxable base
+    // erased per percentage point of statutory rate through avoidance and
+    // evasion; cumulative share of top-tier taxable wealth that expatriates over
+    // the decade; and the share of private-business value included in the base
+    // (the valuation-discount dial). Defaults reproduce full-compliance behavior
+    // with the model's historical 0.7 private-business inclusion.
+    readonly avoidanceElasticity: number;
+    readonly expatriationShare: number;
+    readonly privateBusinessInclusionRate: number;
   };
 }
 
@@ -353,5 +362,8 @@ export const DEFAULT_COMPARISON_REQUEST: ComparisonRequestV1 = {
     assetHedgeShare: 0.35,
     housingHedgeShare: 0.6,
     rentPassThrough: 0.3,
+    avoidanceElasticity: 0,
+    expatriationShare: 0,
+    privateBusinessInclusionRate: 0.7,
   },
 };

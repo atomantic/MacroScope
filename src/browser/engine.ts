@@ -1,0 +1,28 @@
+import { parseComparisonRequest } from "../server/comparisonInput.js";
+import { runComparison } from "../simulation/scenarioRunner.js";
+import type { ComparisonResultV1 } from "../simulation/contracts.js";
+
+export type BrowserCompareResponse =
+  | { readonly ok: true; readonly result: ComparisonResultV1 }
+  | {
+      readonly ok: false;
+      readonly error: string;
+      readonly details: readonly string[];
+    };
+
+/**
+ * Runs the same validate-then-simulate path as POST /api/scenarios/compare,
+ * so the in-browser engine and the server produce identical JSON for
+ * identical requests.
+ */
+export const compareScenarios = (input: unknown): BrowserCompareResponse => {
+  const parsed = parseComparisonRequest(input);
+  if (!parsed.value) {
+    return {
+      ok: false,
+      error: "Invalid comparison request.",
+      details: parsed.errors,
+    };
+  }
+  return { ok: true, result: runComparison(parsed.value) };
+};

@@ -44,16 +44,15 @@ const initialize = async () => {
       baseline = await baselineResponse.json();
       const snapshot = await snapshotResponse.json();
       byId("service-status").classList.add("online");
-      byId("service-status-text").textContent = "Published snapshot";
+      byId("service-status-text").textContent = "In-browser model";
       byId("baseline-label").textContent = `${baseline.label} · ${baseline.vintage} Fed wealth data · ${compactNumber(baseline.households)} households`;
       renderSources(baseline.sources);
       populateForm(defaults);
       latestResult = snapshot;
       render(snapshot);
       byId("scenario-summary").textContent = scenarioSummary(defaults, snapshot);
-      byId("run-button").textContent = "Interactive model runs locally";
-      byId("run-button").disabled = true;
-      setFormStatus("Published default scenario. Run the PortOS/PM2 app to change assumptions.");
+      setFormStatus("Default scenario shown. Change any assumption and recalculate — the model runs in your browser.");
+      if (typeof Worker !== "undefined") ensureEngineWorker();
       return;
     }
     const [healthResponse, defaultResponse, baselineResponse] = await Promise.all([
@@ -76,6 +75,9 @@ const initialize = async () => {
   } catch (error) {
     setFormStatus(error instanceof Error ? error.message : "Unable to initialize.", true);
     byId("service-status-text").textContent = "Unavailable";
+    // Without the fetched defaults the form would submit an invalid request
+    // (representedHouseholds 0) on every click — disable it instead.
+    byId("run-button").disabled = true;
   }
 };
 
@@ -90,6 +92,7 @@ const populateForm = (request) => {
   byId("adult-benefit").value = request.ubi.adultMonthlyBenefit;
   byId("child-benefit").value = request.ubi.childMonthlyBenefit;
   byId("funding-rule").value = request.ubi.fundingRule;
+  byId("benefit-indexation").value = request.ubi.benefitIndexation ?? "none";
   byId("direct-cash-share").value = request.ubi.directCashShare * 100;
   byId("administrative-share").value = request.ubi.administrativeShare * 100;
   byId("buyer-depth").value = request.market.buyerDepthRatio * 100;
@@ -122,6 +125,7 @@ const formRequest = () => ({
     adultMonthlyBenefit: Number(byId("adult-benefit").value),
     childMonthlyBenefit: Number(byId("child-benefit").value),
     fundingRule: byId("funding-rule").value,
+    benefitIndexation: byId("benefit-indexation").value,
     directCashShare: Number(byId("direct-cash-share").value) / 100,
     administrativeShare: Number(byId("administrative-share").value) / 100,
   },
@@ -143,30 +147,90 @@ const formRequest = () => ({
   },
 });
 
+let engineWorker = null;
+let engineWorkerFailed = false;
+let engineRequestId = 0;
+const enginePending = new Map();
+
+const ensureEngineWorker = () => {
+  if (engineWorker) return engineWorker;
+  const worker = new Worker("./engine-worker.js", { type: "module" });
+  worker.addEventListener("message", (event) => {
+    const { id } = event.data ?? {};
+    const respond = enginePending.get(id);
+    if (!respond) return;
+    enginePending.delete(id);
+    respond(event.data);
+  });
+  worker.addEventListener("error", () => {
+    worker.terminate();
+    // A late error from an already-replaced worker must not drain the
+    // replacement's pending requests.
+    if (engineWorker !== worker) return;
+    engineWorker = null;
+    engineWorkerFailed = true;
+    const waiting = [...enginePending.values()];
+    enginePending.clear();
+    waiting.forEach((respond) => respond({ ok: false, workerFailed: true }));
+  });
+  engineWorker = worker;
+  return worker;
+};
+
+const runInWorker = (request) =>
+  new Promise((resolve) => {
+    engineRequestId += 1;
+    enginePending.set(engineRequestId, resolve);
+    ensureEngineWorker().postMessage({ id: engineRequestId, request });
+  });
+
+const runOnMainThread = async (request) =>
+  (await import("./engine/browser/engine.js")).compareScenarios(request);
+
+const runLocalScenario = async (request) => {
+  const useWorker = typeof Worker !== "undefined" && !engineWorkerFailed;
+  let response = useWorker ? await runInWorker(request) : await runOnMainThread(request);
+  // Module workers can fail where Worker itself exists (older Firefox,
+  // blocked worker loading) — retry the same request on the main thread.
+  if (response?.workerFailed) response = await runOnMainThread(request);
+  if (!response?.ok) {
+    throw new Error(response?.details?.join(" ") || response?.error || "Scenario failed.");
+  }
+  return response.result;
+};
+
+const runServerScenario = async (request) => {
+  const response = await fetch("/api/scenarios/compare", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.details?.join(" ") || payload.error || "Scenario failed.");
+  }
+  return payload;
+};
+
 const runScenario = async () => {
-  if (isStaticSnapshot) return;
   const button = byId("run-button");
   button.disabled = true;
+  button.textContent = "Running the model…";
   setFormStatus("Running the U.S. distribution and ten-year projection…");
   try {
     const request = formRequest();
-    const response = await fetch("/api/scenarios/compare", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request),
-    });
-    const payload = await response.json();
-    if (!response.ok) {
-      throw new Error(payload.details?.join(" ") || payload.error || "Scenario failed.");
-    }
+    const payload = isStaticSnapshot
+      ? await runLocalScenario(request)
+      : await runServerScenario(request);
     latestResult = payload;
     render(payload);
     byId("scenario-summary").textContent = scenarioSummary(request, payload);
-    setFormStatus(`Updated from ${integer.format(payload.population.sampledHouseholds)} weighted household agents.`);
+    setFormStatus(`Updated from ${integer.format(payload.population.sampledHouseholds)} weighted household agents${isStaticSnapshot ? ", computed in your browser" : ""}.`);
   } catch (error) {
     setFormStatus(error instanceof Error ? error.message : "Scenario failed.", true);
   } finally {
     button.disabled = false;
+    button.textContent = "Recalculate verdict";
   }
 };
 
@@ -274,14 +338,26 @@ const renderLineChart = (id, options) => {
 
 const renderFlow = (projection) => {
   const { behaviorMix, annualFlows, summary } = projection;
+  const finalYear = annualFlows.finalYear;
   byId("flow-tax").textContent = compactMoney.format(annualFlows.taxCollected);
+  const baseTrend = finalYear && finalYear.taxCollected < annualFlows.taxCollected
+    ? "erodes"
+    : finalYear && finalYear.taxCollected > annualFlows.taxCollected
+      ? "grows"
+      : "holds steady";
+  byId("flow-tax-detail").textContent = finalYear
+    ? `${compactMoney.format(finalYear.taxCollected)} by year ten as the taxed base ${baseTrend}`
+    : "on net worth above the exemption";
   byId("flow-mix").textContent = `${percent.format(behaviorMix.borrowShare)} borrow · ${percent.format(behaviorMix.sellShare)} sell`;
-  byId("flow-loans").textContent = `${compactMoney.format(annualFlows.newPrivateLoans)} in new bank loans each year`;
+  byId("flow-loans").textContent = `${compactMoney.format(annualFlows.newPrivateLoans)} in new bank loans in year one${finalYear ? ` · ${compactMoney.format(finalYear.newPrivateLoans)} by year ten` : ""}`;
   byId("flow-ubi").textContent = `${compactMoney.format(annualFlows.ubiReceived)} cash · ${compactMoney.format(annualFlows.publicServicesSpending)} services`;
   byId("flow-balance").textContent = `${compactMoney.format(annualFlows.administrativeCost)} administration${annualFlows.governmentDeficit > 1 ? ` · ${compactMoney.format(annualFlows.governmentDeficit)} deficit` : " · no modeled deficit"}`;
   byId("flow-result").textContent = `${signedPercent(summary.bottom50PurchasingPowerChange)} buying power`;
   byId("flow-debt").textContent = `${compactMoney.format(summary.privateTaxDebt)} in private tax debt`;
-  byId("money-answer").innerHTML = `<strong>What this means:</strong><span>The tax-and-spending cycle itself reshuffles deposits. The selected borrowing behavior adds ${compactMoney.format(annualFlows.m2Injection)} to M2 in year one; selling assets does not create deposits economy-wide.</span>`;
+  const m2Sentence = annualFlows.m2Injection >= 0
+    ? `The selected borrowing behavior adds ${compactMoney.format(annualFlows.m2Injection)} to M2 in year one`
+    : `Unspent tax revenue parked at Treasury drains ${compactMoney.format(Math.abs(annualFlows.m2Injection))} from M2 in year one, outweighing loan-created deposits`;
+  byId("money-answer").innerHTML = `<strong>What this means:</strong><span>The tax-and-spending cycle itself reshuffles deposits. ${m2Sentence}; selling assets does not create deposits economy-wide.</span>`;
 };
 
 const renderTheory = (theory, projection) => {
@@ -332,7 +408,7 @@ const renderStress = (stress) => {
 
 const renderReasons = (projection) => {
   const { annualFlows, summary, behaviorMix } = projection;
-  byId("reason-benefit").textContent = `${compactMoney.format(annualFlows.ubiReceived)} reaches households as cash and ${compactMoney.format(annualFlows.publicServicesSpending)} funds services each year, after ${compactMoney.format(annualFlows.administrativeCost)} in modeled administration. Cash buying power for the bottom half ends ${plainDirection(summary.bottom50PurchasingPowerChange)} relative to a no-policy path; in-kind service value is reported separately.`;
+  byId("reason-benefit").textContent = `${compactMoney.format(annualFlows.ubiReceived)} reaches households as cash and ${compactMoney.format(annualFlows.publicServicesSpending)} funds services in year one, after ${compactMoney.format(annualFlows.administrativeCost)} in modeled administration${annualFlows.finalYear ? `; modeled year-ten flows deliver ${compactMoney.format(annualFlows.finalYear.ubiReceived)} in cash` : ""}. Cash buying power for the bottom half ends ${plainDirection(summary.bottom50PurchasingPowerChange)} relative to a no-policy path; in-kind service value is reported separately.`;
   byId("reason-risk").textContent = `${percent.format(behaviorMix.borrowShare)} of wealthy households’ payment behavior is represented by the borrow-first path. That leaves ${compactMoney.format(summary.privateTaxDebt)} of private tax debt after ten years and lifts M2 ${signedPercent(summary.cumulativeM2Change)}.`;
 };
 

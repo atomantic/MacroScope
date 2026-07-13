@@ -1,5 +1,6 @@
 import {
   DEFAULT_COMPARISON_REQUEST,
+  type BenefitIndexation,
   type ComparisonRequestV1,
 } from "../simulation/contracts.js";
 
@@ -98,6 +99,7 @@ export const parseComparisonRequest = (input: unknown): ParsedComparisonRequest 
     errors,
   );
   const fundingRule = readFundingRule(ubi.fundingRule, errors);
+  const benefitIndexation = readBenefitIndexation(ubi.benefitIndexation, errors);
   const directCashShare = readNumber(
     ubi,
     "directCashShare",
@@ -227,6 +229,7 @@ export const parseComparisonRequest = (input: unknown): ParsedComparisonRequest 
         adultMonthlyBenefit,
         childMonthlyBenefit,
         fundingRule,
+        benefitIndexation,
         directCashShare,
         administrativeShare,
       },
@@ -282,6 +285,16 @@ const readFundingRule = (
   }
   errors.push("fundingRule must be fixed, revenue-constrained, or smoothed.");
   return DEFAULT_COMPARISON_REQUEST.ubi.fundingRule;
+};
+
+const readBenefitIndexation = (
+  raw: unknown,
+  errors: string[],
+): BenefitIndexation => {
+  if (raw === undefined) return DEFAULT_COMPARISON_REQUEST.ubi.benefitIndexation ?? "none";
+  if (raw === "none" || raw === "cpi") return raw;
+  errors.push("benefitIndexation must be none or cpi.");
+  return DEFAULT_COMPARISON_REQUEST.ubi.benefitIndexation ?? "none";
 };
 
 const readTargetMode = (

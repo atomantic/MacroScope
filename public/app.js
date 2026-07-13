@@ -1,8 +1,9 @@
 import {
   FIELD_SPECS,
+  SCENARIO_FIELD_SPECS,
   encodeScenarioParams,
   decodeScenarioParams,
-} from "./scenario-params.js";
+} from "./scenario-params.js?v=10";
 
 const STRATEGIES = ["cash-first", "borrow-first", "sell-first"];
 const LABELS = {
@@ -218,13 +219,15 @@ const makeBracketRow = (thresholdMillions = "", ratePercent = "") => {
   const remove = document.createElement("button");
   remove.type = "button";
   remove.className = "bracket-remove";
-  remove.textContent = "Remove";
+  remove.textContent = "×";
   remove.setAttribute("aria-label", "Remove this bracket");
+  remove.title = "Remove bracket";
   remove.addEventListener("click", () => {
     row.remove();
     // A structural bracket change no longer matches a named preset.
     activePreset = null;
     syncBracketMode();
+    updateScenarioUrl();
   });
   row.append(element("span", "$"), threshold, element("span", "M →"), rate, element("span", "%"), remove);
   return row;
@@ -366,8 +369,20 @@ const scenarioQuery = () =>
     brackets: encodeBracketsParam(),
   });
 
+const scenarioQueryWithView = () => {
+  const params = new URLSearchParams(scenarioQuery());
+  const current = new URLSearchParams(location.search);
+  const step = current.get("step");
+  if (step) {
+    params.set("step", step);
+  } else if (document.body.dataset.view === "dashboard" || current.get("view") === "dashboard") {
+    params.set("view", "dashboard");
+  }
+  return params.toString();
+};
+
 const scenarioLink = () => {
-  const query = scenarioQuery();
+  const query = scenarioQueryWithView();
   return `${location.origin}${location.pathname}${query ? `?${query}` : ""}${location.hash}`;
 };
 
@@ -375,12 +390,7 @@ const scenarioLink = () => {
 // entries, so a reload or copied URL reproduces the current scenario.
 const updateScenarioUrl = () => {
   if (!defaultsReady()) return;
-  let query = scenarioQuery();
-  // Preserve the walkthrough's ?step alongside the scenario params so a story
-  // dial (which reruns the model, calling this) can't strip the step position —
-  // enterDashboard is the only place that intentionally drops it.
-  const step = new URLSearchParams(location.search).get("step");
-  if (step) query = query ? `${query}&step=${step}` : `step=${step}`;
+  const query = scenarioQueryWithView();
   history.replaceState(null, "", `${location.pathname}${query ? `?${query}` : ""}${location.hash}`);
 };
 
@@ -401,7 +411,8 @@ const hydrateFormFromUrl = () => {
   const appliedBrackets = bracketRows.length > 0;
   if (appliedBrackets) renderBrackets(bracketRows);
   // Explicit field or bracket overrides make the state no longer a pristine preset.
-  if (fieldIds.length > 0 || appliedBrackets) activePreset = null;
+  const scenarioFieldIds = new Set(SCENARIO_FIELD_SPECS.map((spec) => spec.id));
+  if (fieldIds.some((id) => scenarioFieldIds.has(id)) || appliedBrackets) activePreset = null;
   // A stale/unknown strategy would blank the <select> and later crash
   // renderDistribution (strategies[""]); ignore anything not in STRATEGIES.
   const appliedStrategy = Boolean(decoded.strategy && STRATEGIES.includes(decoded.strategy));
@@ -1373,7 +1384,7 @@ const setPresetFields = (name) => {
   // first so a dial the preset doesn't touch (e.g. an earlier loan-rate edit)
   // can't linger and make the shareable `?preset=name` link irreproducible.
   if (defaultsReady()) {
-    for (const spec of FIELD_SPECS) byId(spec.id).value = defaultFieldValues[spec.id];
+    for (const spec of SCENARIO_FIELD_SPECS) byId(spec.id).value = defaultFieldValues[spec.id];
   }
   byId("target-mode").value = preset.targetMode;
   if (preset.topShare !== undefined) byId("top-share").value = preset.topShare;
@@ -1395,6 +1406,7 @@ const applyPreset = (name) => {
   if (!PRESETS[name]) return;
   setPresetFields(name);
   activePreset = name;
+  updateScenarioUrl();
   void runScenario();
 };
 
@@ -1413,6 +1425,8 @@ const applyBehaviorPreset = (name) => {
   byId("avoidance-elasticity").value = preset.avoidance;
   byId("expatriation-share").value = preset.expatriation;
   byId("private-business-inclusion").value = preset.inclusion;
+  activePreset = null;
+  updateScenarioUrl();
   void runScenario();
 };
 
@@ -1434,6 +1448,7 @@ byId("run-button").addEventListener("click", (event) => {
 // falls back to explicit field params. Programmatic .value writes don't fire this.
 byId("scenario-form").addEventListener("input", () => {
   activePreset = null;
+  updateScenarioUrl();
 });
 byId("copy-link-button").addEventListener("click", () => void copyScenarioLink());
 byId("distribution-strategy").addEventListener("change", () => {
@@ -1445,15 +1460,20 @@ byId("add-bracket").addEventListener("click", () => {
   byId("bracket-rows").append(makeBracketRow());
   activePreset = null;
   syncBracketMode();
+  updateScenarioUrl();
 });
 byId("clear-brackets").addEventListener("click", () => {
   renderBrackets([]);
   activePreset = null;
+  updateScenarioUrl();
 });
 document.querySelectorAll("[data-preset]").forEach((button) => {
   button.addEventListener("click", () => applyPreset(button.dataset.preset));
 });
-byId("persona-form").addEventListener("input", () => renderPersona(latestResult));
+byId("persona-form").addEventListener("input", () => {
+  renderPersona(latestResult);
+  updateScenarioUrl();
+});
 byId("persona-form").addEventListener("submit", (event) => event.preventDefault());
 // Caveat links open the collapsed model-details panel so "see the limits"
 // always lands on the boundaries list rather than an unopened <details>.
@@ -1923,6 +1943,7 @@ const goToStep = async (index) => {
 const syncStoryUrl = () => {
   const url = new URL(window.location.href);
   url.searchParams.set("step", String(storyState.index + 1));
+  url.searchParams.delete("view");
   window.history.replaceState(null, "", url);
 };
 
@@ -1945,6 +1966,7 @@ const enterDashboard = () => {
   }
   const url = new URL(window.location.href);
   url.searchParams.delete("step");
+  url.searchParams.set("view", "dashboard");
   window.history.replaceState(null, "", url);
   byId("story-launch").hidden = false;
   window.scrollTo({ top: 0, behavior: "auto" });

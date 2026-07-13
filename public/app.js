@@ -67,7 +67,7 @@ const initialize = async () => {
       populateForm(defaults);
       captureDefaultFieldValues();
       const hasScenarioParams = hydrateFormFromUrl();
-      if (typeof Worker !== "undefined") ensureEngineWorker();
+      if (typeof Worker !== "undefined") comparisonChannel.warm();
       if (hasScenarioParams) {
         // A shared URL carries its own assumptions — recompute rather than
         // showing the prebuilt default snapshot.
@@ -457,42 +457,53 @@ const showToast = (message, isError = false) => {
   }, 3600);
 };
 
-let engineWorker = null;
-let engineWorkerFailed = false;
-let engineRequestId = 0;
-const enginePending = new Map();
-
-const ensureEngineWorker = () => {
-  if (engineWorker) return engineWorker;
-  const worker = new Worker("./engine-worker.js", { type: "module" });
-  worker.addEventListener("message", (event) => {
-    const { id } = event.data ?? {};
-    const respond = enginePending.get(id);
-    if (!respond) return;
-    enginePending.delete(id);
-    respond(event.data);
-  });
-  worker.addEventListener("error", () => {
-    worker.terminate();
-    // A late error from an already-replaced worker must not drain the
-    // replacement's pending requests.
-    if (engineWorker !== worker) return;
-    engineWorker = null;
-    engineWorkerFailed = true;
-    const waiting = [...enginePending.values()];
-    enginePending.clear();
-    waiting.forEach((respond) => respond({ ok: false, workerFailed: true }));
-  });
-  engineWorker = worker;
-  return worker;
+// One engine worker channel: its own Worker thread, pending-request map, and
+// failure state. The comparison and sensitivity sweeps get SEPARATE channels so
+// a long ~80-run sensitivity sweep runs on its own thread and never queues
+// behind — or delays — the interactive comparison the verdict depends on.
+const createEngineChannel = () => {
+  let worker = null;
+  let failed = false;
+  let requestId = 0;
+  const pending = new Map();
+  const ensure = () => {
+    if (worker) return worker;
+    const created = new Worker("./engine-worker.js", { type: "module" });
+    created.addEventListener("message", (event) => {
+      const { id } = event.data ?? {};
+      const respond = pending.get(id);
+      if (!respond) return;
+      pending.delete(id);
+      respond(event.data);
+    });
+    created.addEventListener("error", () => {
+      created.terminate();
+      // A late error from an already-replaced worker must not drain the
+      // replacement's pending requests.
+      if (worker !== created) return;
+      worker = null;
+      failed = true;
+      const waiting = [...pending.values()];
+      pending.clear();
+      waiting.forEach((respond) => respond({ ok: false, workerFailed: true }));
+    });
+    worker = created;
+    return created;
+  };
+  return {
+    hasFailed: () => failed,
+    warm: () => ensure(),
+    run: (request, mode) =>
+      new Promise((resolve) => {
+        requestId += 1;
+        pending.set(requestId, resolve);
+        ensure().postMessage({ id: requestId, request, mode });
+      }),
+  };
 };
 
-const runInWorker = (request, mode = "compare") =>
-  new Promise((resolve) => {
-    engineRequestId += 1;
-    enginePending.set(engineRequestId, resolve);
-    ensureEngineWorker().postMessage({ id: engineRequestId, request, mode });
-  });
+const comparisonChannel = createEngineChannel();
+const sensitivityChannel = createEngineChannel();
 
 const runOnMainThread = async (request, mode = "compare") => {
   const engine = await import("./engine/browser/engine.js");
@@ -502,8 +513,9 @@ const runOnMainThread = async (request, mode = "compare") => {
 };
 
 const runLocalScenario = async (request, mode = "compare") => {
-  const useWorker = typeof Worker !== "undefined" && !engineWorkerFailed;
-  let response = useWorker ? await runInWorker(request, mode) : await runOnMainThread(request, mode);
+  const channel = mode === "sensitivity" ? sensitivityChannel : comparisonChannel;
+  const useWorker = typeof Worker !== "undefined" && !channel.hasFailed();
+  let response = useWorker ? await channel.run(request, mode) : await runOnMainThread(request, mode);
   // Module workers can fail where Worker itself exists (older Firefox,
   // blocked worker loading) — retry the same request on the main thread.
   if (response?.workerFailed) response = await runOnMainThread(request, mode);
@@ -544,19 +556,33 @@ const runSensitivity = async (request) =>
     ? runLocalScenario(request, "sensitivity")
     : runServerSensitivity(request);
 
-// The tornado sweep runs ~2N scenarios, so it is computed after the main verdict
-// renders rather than blocking it. A monotonically increasing token guarantees a
-// slower earlier run can never overwrite a newer scenario's chart.
+// The tornado sweep runs many scenarios (2N endpoints plus a bounded flip
+// search), so it is computed on its own worker after the main verdict renders
+// rather than blocking it. A monotonically increasing token guarantees a slower
+// earlier run can never overwrite a newer scenario's chart.
 let sensitivityToken = 0;
+// Mark the panel stale the moment a new sweep begins: the previously rendered
+// bars and tipping-point button describe the OLD scenario, so leaving them live
+// would let a click apply a value computed for a scenario that no longer matches
+// the form. The `is-stale` class disables pointer/keyboard interaction until the
+// fresh results render (or an error clears it).
+const setSensitivityStale = (stale) => {
+  byId("sensitivity").classList.toggle("is-stale", stale);
+  const apply = byId("sensitivity-flip-apply");
+  if (apply) apply.disabled = stale;
+};
 const refreshSensitivity = async (request) => {
   const token = (sensitivityToken += 1);
+  setSensitivityStale(true);
   byId("sensitivity-note").textContent = "Sweeping every assumption across its range…";
   try {
     const analysis = await runSensitivity(request);
     if (token !== sensitivityToken) return;
     renderSensitivity(analysis);
+    setSensitivityStale(false);
   } catch (error) {
     if (token !== sensitivityToken) return;
+    setSensitivityStale(false);
     byId("sensitivity-note").textContent =
       error instanceof Error ? error.message : "Sensitivity analysis unavailable.";
   }

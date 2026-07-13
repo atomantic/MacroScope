@@ -246,6 +246,10 @@ text.series-d { stroke: none; fill: var(--gold); }
 .sensitivity-reading span { display: block; margin-bottom: 12px; color: var(--muted); font-size: 0.68rem; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }
 .sensitivity-reading p { margin: 0 0 14px; color: var(--muted); font-size: 0.84rem; line-height: 1.6; }
 .sensitivity-note { color: var(--ink); font-weight: 600; }
+/* While a fresh sweep runs, the rendered bars/button describe the old scenario —
+   dim them and block interaction so a click can't apply a now-stale value. */
+.sensitivity-section.is-stale .tornado-chart,
+.sensitivity-section.is-stale .sensitivity-flip { opacity: 0.45; pointer-events: none; }
 
 .persona-card { display: grid; grid-template-columns: 1fr 1fr; gap: 30px 40px; margin-top: 40px; padding: 34px; border: 1px solid var(--ink); background: var(--green-soft); }
 .persona-intro { grid-column: 1 / -1; }

@@ -425,8 +425,7 @@ const findVerdictFlip = (
   for (const result of dials) {
     const dial = specById.get(result.id);
     if (!dial) continue;
-    const bracket = scanDialForFlip(dial, result, baseRequest, base.verdict, evaluate);
-    if (bracket) brackets.push(bracket);
+    brackets.push(...scanDialForFlip(dial, result, baseRequest, base.verdict, evaluate));
   }
   if (brackets.length === 0) return null;
 
@@ -466,7 +465,12 @@ const findVerdictFlip = (
 
 // Scan a dial across a coarse uniform grid (reusing the two tornado endpoints,
 // so only the interior points cost new runs) and return the flip transition
-// nearest the base value, or null when no sampled point leaves the base verdict.
+// nearest the base value on EACH side (up to two brackets), or an empty array
+// when no sampled point leaves the base verdict. Returning both directions —
+// rather than only the closer-by-lower-bound one — matters when the samples on
+// both sides of base already flipped: both brackets then have lowerBound 0, but
+// their true (bisected) thresholds can differ, so both must be refined before
+// the caller picks the minimum.
 // The grid catches interior flips that endpoint-only checks miss, down to its
 // resolution (~1/(FLIP_SCAN_SAMPLES-1) of the dial's range). A flip occupying a
 // window narrower than one grid cell and touching no grid point can still be
@@ -478,7 +482,7 @@ const scanDialForFlip = (
   baseRequest: ComparisonRequestV1,
   baseVerdict: SensitivityVerdict,
   evaluate: (candidate: ComparisonRequestV1) => HeadlineOutputs,
-): FlipBracket | null => {
+): FlipBracket[] => {
   const span = Math.abs(dial.high - dial.low) || 1;
   const samples: { value: number; verdict: SensitivityVerdict }[] = [];
   for (let index = 0; index < FLIP_SCAN_SAMPLES; index += 1) {
@@ -500,40 +504,38 @@ const scanDialForFlip = (
   const baseIndex = samples.findIndex(
     (sample) => sample.value === result.baseValue && sample.verdict === baseVerdict,
   );
-  if (baseIndex < 0) return null;
+  if (baseIndex < 0) return [];
 
-  let bracket: FlipBracket | null = null;
-  const consider = (nearIndex: number, farIndex: number) => {
+  const brackets: FlipBracket[] = [];
+  const add = (nearIndex: number, farIndex: number) => {
     const near = samples[nearIndex];
     const far = samples[farIndex];
     if (!near || !far || far.verdict === baseVerdict) return;
-    const lowerBound = Math.abs(near.value - result.baseValue) / span;
-    if (!bracket || lowerBound < bracket.lowerBound) {
-      bracket = {
-        dial,
-        baseValue: result.baseValue,
-        near: near.value,
-        far: far.value,
-        farVerdict: far.verdict,
-        lowerBound,
-      };
-    }
+    brackets.push({
+      dial,
+      baseValue: result.baseValue,
+      near: near.value,
+      far: far.value,
+      farVerdict: far.verdict,
+      lowerBound: Math.abs(near.value - result.baseValue) / span,
+    });
   };
   // Walk right from base to the first non-base sample, and left likewise; the
-  // sample just before each transition (toward base) has the base verdict.
+  // sample just before each transition (toward base) has the base verdict. Both
+  // directions are kept so the caller bisects and compares both.
   for (let index = baseIndex; index + 1 < samples.length; index += 1) {
     if (samples[index + 1]?.verdict !== baseVerdict) {
-      consider(index, index + 1);
+      add(index, index + 1);
       break;
     }
   }
   for (let index = baseIndex; index - 1 >= 0; index -= 1) {
     if (samples[index - 1]?.verdict !== baseVerdict) {
-      consider(index, index - 1);
+      add(index, index - 1);
       break;
     }
   }
-  return bracket;
+  return brackets;
 };
 
 // Binary-search within a bracket [near (base verdict) → far (a different

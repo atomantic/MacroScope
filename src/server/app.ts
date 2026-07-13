@@ -46,6 +46,35 @@ const analyzeSensitivity = (
     });
   });
 };
+
+// Each sweep is a CPU-bound worker running ~80 comparisons, so an unbounded
+// burst of requests could spawn unbounded native threads and exhaust the box.
+// Admit at most MAX concurrently; queue a bounded backlog; shed load past that
+// with a 503 rather than piling on more threads. Cheap on the fast inline path
+// too — inline runs release the slot almost immediately.
+const MAX_SENSITIVITY_WORKERS = 2;
+const MAX_SENSITIVITY_QUEUE = 16;
+let activeSensitivity = 0;
+const sensitivityWaiters: Array<() => void> = [];
+
+const acquireSensitivitySlot = (): Promise<boolean> => {
+  if (activeSensitivity < MAX_SENSITIVITY_WORKERS) {
+    activeSensitivity += 1;
+    return Promise.resolve(true);
+  }
+  if (sensitivityWaiters.length >= MAX_SENSITIVITY_QUEUE) return Promise.resolve(false);
+  return new Promise<boolean>((admit) => {
+    sensitivityWaiters.push(() => {
+      activeSensitivity += 1;
+      admit(true);
+    });
+  });
+};
+
+const releaseSensitivitySlot = (): void => {
+  activeSensitivity -= 1;
+  sensitivityWaiters.shift()?.();
+};
 import { US_BASELINE } from "../simulation/usBaseline.js";
 import { HISTORICAL_BACKTEST } from "../simulation/historicalValidation.js";
 
@@ -140,7 +169,16 @@ export const createApp = (options: AppOptions = {}): Express => {
       });
       return;
     }
-    response.json(await analyzeSensitivity(parsed.value));
+    const admitted = await acquireSensitivitySlot();
+    if (!admitted) {
+      response.status(503).json({ error: "Sensitivity analysis is busy; retry shortly." });
+      return;
+    }
+    try {
+      response.json(await analyzeSensitivity(parsed.value));
+    } finally {
+      releaseSensitivitySlot();
+    }
   });
 
   app.use("/api", (_request, response) => {

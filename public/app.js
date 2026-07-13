@@ -5,7 +5,7 @@ import {
   decodeScenarioParams,
   // Versioned so a bumped app.js always pulls the matching FIELD_SPECS rather
   // than a browser-cached copy that predates newly added fields.
-} from "./scenario-params.js?v=12";
+} from "./scenario-params.js?v=13";
 
 const STRATEGIES = ["cash-first", "borrow-first", "sell-first"];
 const LABELS = {
@@ -71,7 +71,7 @@ const initialize = async () => {
       populateForm(defaults);
       captureDefaultFieldValues();
       const hasScenarioParams = hydrateFormFromUrl();
-      if (typeof Worker !== "undefined") ensureEngineWorker();
+      if (typeof Worker !== "undefined") comparisonChannel.warm();
       if (hasScenarioParams) {
         // A shared URL carries its own assumptions — recompute rather than
         // showing the prebuilt default snapshot.
@@ -81,6 +81,7 @@ const initialize = async () => {
         render(snapshot);
         byId("scenario-summary").textContent = scenarioSummary(defaults, snapshot);
         setFormStatus("Default scenario shown. Change any assumption and recalculate — the model runs in your browser.");
+        void refreshSensitivity(formRequest());
       }
       return;
     }
@@ -489,52 +490,68 @@ const showToast = (message, isError = false) => {
   }, 3600);
 };
 
-let engineWorker = null;
-let engineWorkerFailed = false;
-let engineRequestId = 0;
-const enginePending = new Map();
-
-const ensureEngineWorker = () => {
-  if (engineWorker) return engineWorker;
-  const worker = new Worker("./engine-worker.js", { type: "module" });
-  worker.addEventListener("message", (event) => {
-    const { id } = event.data ?? {};
-    const respond = enginePending.get(id);
-    if (!respond) return;
-    enginePending.delete(id);
-    respond(event.data);
-  });
-  worker.addEventListener("error", () => {
-    worker.terminate();
-    // A late error from an already-replaced worker must not drain the
-    // replacement's pending requests.
-    if (engineWorker !== worker) return;
-    engineWorker = null;
-    engineWorkerFailed = true;
-    const waiting = [...enginePending.values()];
-    enginePending.clear();
-    waiting.forEach((respond) => respond({ ok: false, workerFailed: true }));
-  });
-  engineWorker = worker;
-  return worker;
+// One engine worker channel: its own Worker thread, pending-request map, and
+// failure state. The comparison and sensitivity sweeps get SEPARATE channels so
+// a long ~80-run sensitivity sweep runs on its own thread and never queues
+// behind — or delays — the interactive comparison the verdict depends on.
+const createEngineChannel = () => {
+  let worker = null;
+  let failed = false;
+  let requestId = 0;
+  const pending = new Map();
+  const ensure = () => {
+    if (worker) return worker;
+    const created = new Worker("./engine-worker.js", { type: "module" });
+    created.addEventListener("message", (event) => {
+      const { id } = event.data ?? {};
+      const respond = pending.get(id);
+      if (!respond) return;
+      pending.delete(id);
+      respond(event.data);
+    });
+    created.addEventListener("error", () => {
+      created.terminate();
+      // A late error from an already-replaced worker must not drain the
+      // replacement's pending requests.
+      if (worker !== created) return;
+      worker = null;
+      failed = true;
+      const waiting = [...pending.values()];
+      pending.clear();
+      waiting.forEach((respond) => respond({ ok: false, workerFailed: true }));
+    });
+    worker = created;
+    return created;
+  };
+  return {
+    hasFailed: () => failed,
+    warm: () => ensure(),
+    run: (request, mode) =>
+      new Promise((resolve) => {
+        requestId += 1;
+        pending.set(requestId, resolve);
+        ensure().postMessage({ id: requestId, request, mode });
+      }),
+  };
 };
 
-const runInWorker = (request) =>
-  new Promise((resolve) => {
-    engineRequestId += 1;
-    enginePending.set(engineRequestId, resolve);
-    ensureEngineWorker().postMessage({ id: engineRequestId, request });
-  });
+const comparisonChannel = createEngineChannel();
+const sensitivityChannel = createEngineChannel();
 
-const runOnMainThread = async (request) =>
-  (await import("./engine/browser/engine.js")).compareScenarios(request);
+const runOnMainThread = async (request, mode = "compare") => {
+  const engine = await import("./engine/browser/engine.js");
+  return mode === "sensitivity"
+    ? engine.analyzeSensitivity(request)
+    : engine.compareScenarios(request);
+};
 
-const runLocalScenario = async (request) => {
-  const useWorker = typeof Worker !== "undefined" && !engineWorkerFailed;
-  let response = useWorker ? await runInWorker(request) : await runOnMainThread(request);
+const runLocalScenario = async (request, mode = "compare") => {
+  const channel = mode === "sensitivity" ? sensitivityChannel : comparisonChannel;
+  const useWorker = typeof Worker !== "undefined" && !channel.hasFailed();
+  let response = useWorker ? await channel.run(request, mode) : await runOnMainThread(request, mode);
   // Module workers can fail where Worker itself exists (older Firefox,
   // blocked worker loading) — retry the same request on the main thread.
-  if (response?.workerFailed) response = await runOnMainThread(request);
+  if (response?.workerFailed) response = await runOnMainThread(request, mode);
   if (!response?.ok) {
     throw new Error(response?.details?.join(" ") || response?.error || "Scenario failed.");
   }
@@ -552,6 +569,73 @@ const runServerScenario = async (request) => {
     throw new Error(payload.details?.join(" ") || payload.error || "Scenario failed.");
   }
   return payload;
+};
+
+const runServerSensitivity = async (request) => {
+  const response = await fetch("/api/scenarios/sensitivity", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.details?.join(" ") || payload.error || "Sensitivity run failed.");
+  }
+  return payload;
+};
+
+const runSensitivity = async (request) =>
+  isStaticSnapshot
+    ? runLocalScenario(request, "sensitivity")
+    : runServerSensitivity(request);
+
+// The tornado sweep runs many scenarios (2N endpoints plus a bounded flip
+// search), so it is computed on its own worker after the main verdict renders
+// rather than blocking it. A monotonically increasing token guarantees a slower
+// earlier run can never overwrite a newer scenario's chart.
+let sensitivityToken = 0;
+// Mark the panel stale the moment a new sweep begins: the previously rendered
+// bars and tipping-point button describe the OLD scenario, so leaving them live
+// would let a click apply a value computed for a scenario that no longer matches
+// the form. The `is-stale` class disables pointer/keyboard interaction until the
+// fresh results render (or an error clears it).
+const setSensitivityStale = (stale) => {
+  byId("sensitivity").classList.toggle("is-stale", stale);
+  const apply = byId("sensitivity-flip-apply");
+  if (apply) apply.disabled = stale;
+};
+// A sweep requested while the dashboard panel is hidden (the guided walkthrough)
+// is stashed, not run, so repeated story-dial exploration doesn't burn ~80 runs
+// per change on a panel nobody can see; enterDashboard flushes the latest one.
+let pendingSensitivityRequest = null;
+const refreshSensitivity = async (request) => {
+  if (document.body.dataset.view !== "dashboard") {
+    pendingSensitivityRequest = request;
+    return;
+  }
+  const token = (sensitivityToken += 1);
+  setSensitivityStale(true);
+  byId("sensitivity-note").textContent = "Sweeping every assumption across its range…";
+  try {
+    const analysis = await runSensitivity(request);
+    if (token !== sensitivityToken) return;
+    renderSensitivity(analysis);
+    setSensitivityStale(false);
+  } catch (error) {
+    if (token !== sensitivityToken) return;
+    // Leave the panel stale on failure: the previously rendered bars/flip belong
+    // to the old scenario, so they must not become interactive again just because
+    // the new sweep errored (e.g. a 503 from the server queue).
+    byId("sensitivity-note").textContent =
+      error instanceof Error ? error.message : "Sensitivity analysis unavailable.";
+  }
+};
+
+const flushPendingSensitivity = () => {
+  if (!pendingSensitivityRequest) return;
+  const request = pendingSensitivityRequest;
+  pendingSensitivityRequest = null;
+  void refreshSensitivity(request);
 };
 
 const runScenario = async () => {
@@ -578,6 +662,8 @@ const runScenario = async () => {
     byId("scenario-summary").textContent = scenarioSummary(request, payload);
     updateScenarioUrl();
     setFormStatus(`Updated from ${integer.format(payload.population.sampledHouseholds)} weighted household agents${isStaticSnapshot ? ", computed in your browser" : ""}.`);
+    // Rank the assumptions behind this verdict without blocking the main render.
+    void refreshSensitivity(request);
     return true;
   } catch (error) {
     setFormStatus(error instanceof Error ? error.message : "Scenario failed.", true);
@@ -923,6 +1009,143 @@ const renderStress = (stress) => {
   byId("hyper-threshold").textContent = stress.threshold.firstUbiMultiplierAtFullMonetization === null
     ? stress.threshold.explanation
     : `First modeled breach: about ${integer.format(stress.threshold.firstUbiMultiplierAtFullMonetization)}× this UBI with the unfunded portion fully monetized. This is an extreme boundary, not a forecast.`;
+};
+
+// Load a swept assumption's value into its form field and recompute. The write
+// is programmatic, so the form's input listener won't fire — clear the active
+// preset here so the URL falls back to explicit field params. `snap` controls
+// how the value is rounded onto the field's step grid: verdict-flip values snap
+// "up"/"down" AWAY from the base so the rounded value stays past the tipping
+// point (rounding to nearest could land just short and not actually flip);
+// tornado endpoints are exact dial bounds, so they snap to the nearest step.
+const applyDialValue = (formId, formValue, snap = "nearest") => {
+  // While the panel is stale (a newer sweep is running), the bars/flip describe
+  // the old scenario — ignore activation from any source, including keyboard
+  // Enter/Space on a focused bar, which `pointer-events: none` does not block.
+  if (byId("sensitivity")?.classList.contains("is-stale")) return;
+  const field = byId(formId);
+  if (!field) return;
+  const step = Number(field.step) || 0.01;
+  const decimals = step >= 1 ? 0 : String(step).split(".")[1]?.length ?? 2;
+  const min = field.min !== "" ? Number(field.min) : -Infinity;
+  let max = field.max !== "" ? Number(field.max) : Infinity;
+  // Borrow and sell shares are jointly capped at 100% (borrowShare + sellShare
+  // <= 1); the static field max is 100, so cap dynamically against the current
+  // complementary share or a step-rounded value could submit an infeasible total
+  // and make recalculation fail.
+  if (formId === "borrow-share" || formId === "sell-share") {
+    const otherId = formId === "borrow-share" ? "sell-share" : "borrow-share";
+    max = Math.min(max, 100 - (Number(byId(otherId)?.value) || 0));
+  }
+  const rounder = snap === "up" ? Math.ceil : snap === "down" ? Math.floor : Math.round;
+  let snapped = rounder(Number(formValue) / step) * step;
+  // Step-rounding can overshoot a dynamic max; floor back onto the grid so the
+  // applied value never exceeds the feasible ceiling.
+  if (snapped > max) snapped = Math.floor(max / step) * step;
+  field.value = clamp(snapped, min, max).toFixed(decimals);
+  activePreset = null;
+  void runScenario();
+  byId("assumptions-anchor")?.scrollIntoView({ behavior: "smooth", block: "start" });
+};
+
+const TORNADO_TONE = {
+  beneficial: "bar-beneficial",
+  harmful: "bar-harmful",
+  flat: "bar-flat",
+};
+
+const renderSensitivity = (analysis) => {
+  renderVerdictFlip(analysis.verdictFlip);
+  const base = analysis.base.bottom50PurchasingPowerChange;
+  byId("sensitivity-note").textContent =
+    `Ranked across ${analysis.dials.length} assumptions in ${integer.format(analysis.runs)} model runs. ` +
+    `Baseline bottom-half buying power: ${signedPercent(base)}.`;
+
+  const root = byId("tornado-chart");
+  root.replaceChildren();
+  const dials = analysis.dials;
+  if (dials.length === 0) return;
+  const rowHeight = 34;
+  const width = 720;
+  const margin = { top: 16, right: 60, bottom: 34, left: 196 };
+  const height = margin.top + margin.bottom + dials.length * rowHeight;
+
+  // Domain is the full span of endpoint outcomes (in percentage points off the
+  // baseline), symmetric around 0 so the center line reads as "no change".
+  const deltas = dials.flatMap((dial) => [dial.low.bottom50Delta, dial.high.bottom50Delta]);
+  const extent = Math.max(0.005, ...deltas.map((delta) => Math.abs(delta)));
+  const domain = extent * 1.15;
+  const plotLeft = margin.left;
+  const plotRight = width - margin.right;
+  const x = (delta) => plotLeft + ((delta + domain) / (2 * domain)) * (plotRight - plotLeft);
+  const centerX = x(0);
+
+  const svg = svgNode("svg", {
+    viewBox: `0 0 ${width} ${height}`,
+    role: "img",
+    "aria-label": `Assumptions ranked by their impact on bottom-50 buying power. ${dials[0].label} moves it most.`,
+  });
+
+  // Axis: percentage-point offsets from the baseline outcome.
+  for (const tick of [-domain, 0, domain]) {
+    const xPos = x(tick);
+    svg.append(svgNode("line", { x1: xPos, y1: margin.top, x2: xPos, y2: height - margin.bottom, class: tick === 0 ? "tornado-center" : "grid-line" }));
+    svg.append(svgNode("text", { x: xPos, y: height - margin.bottom + 18, class: "tornado-axis", "text-anchor": "middle" }, `${tick > 0 ? "+" : ""}${(tick * 100).toFixed(1)} pp`));
+  }
+
+  dials.forEach((dial, index) => {
+    const rowY = margin.top + index * rowHeight;
+    const barY = rowY + 6;
+    const barHeight = rowHeight - 16;
+    const lowX = x(dial.low.bottom50Delta);
+    const highX = x(dial.high.bottom50Delta);
+    const left = Math.min(lowX, highX);
+    const right = Math.max(lowX, highX);
+    const group = svgNode("g", { class: "tornado-bar", tabindex: "0", role: "button" });
+    const barTitle =
+      `${dial.label}: low end → ${signedPercent(dial.low.bottom50PurchasingPowerChange)} buying power, ` +
+      `high end → ${signedPercent(dial.high.bottom50PurchasingPowerChange)}. Click to load the stronger end into the form.`;
+    group.append(svgNode("title", {}, barTitle));
+    group.append(svgNode("rect", { x: left, y: barY, width: Math.max(1.5, right - left), height: barHeight, class: TORNADO_TONE[dial.direction] ?? "bar-flat", rx: 2 }));
+
+    // The endpoint with the larger absolute swing is the informative extreme;
+    // clicking the bar loads it into the form.
+    const strongEnd = Math.abs(dial.high.bottom50Delta) >= Math.abs(dial.low.bottom50Delta) ? dial.high : dial.low;
+    const activate = () => applyDialValue(dial.formId, strongEnd.formValue);
+    group.addEventListener("click", activate);
+    group.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        activate();
+      }
+    });
+
+    svg.append(svgNode("text", { x: plotLeft - 12, y: barY + barHeight / 2 + 4, class: "tornado-label", "text-anchor": "end" }, dial.label));
+    const valueX = right + 8 > plotRight - 4 ? left - 8 : right + 8;
+    const valueAnchor = right + 8 > plotRight - 4 ? "end" : "start";
+    svg.append(svgNode("text", { x: valueX, y: barY + barHeight / 2 + 4, class: "tornado-value", "text-anchor": valueAnchor }, `${(dial.impact * 100).toFixed(1)} pp`));
+    svg.append(group);
+  });
+
+  root.append(svg);
+};
+
+const renderVerdictFlip = (flip) => {
+  const panel = byId("sensitivity-flip");
+  const text = byId("sensitivity-flip-text");
+  const apply = byId("sensitivity-flip-apply");
+  if (!flip) {
+    panel.hidden = true;
+    apply.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  text.textContent = flip.sentence;
+  apply.hidden = false;
+  apply.textContent = `Apply ${flip.label.toLowerCase()} and recalculate`;
+  // Snap away from the base value so the step-rounded field stays past the flip.
+  const snap = flip.value >= flip.fromValue ? "up" : "down";
+  apply.onclick = () => applyDialValue(flip.formId, flip.formValue, snap);
 };
 
 const renderReasons = (projection) => {
@@ -1793,6 +2016,8 @@ const enterStory = (index = 0) => {
 
 const enterDashboard = () => {
   document.body.dataset.view = "dashboard";
+  // The panel is now visible — run the sweep deferred during the walkthrough.
+  flushPendingSensitivity();
   try {
     window.localStorage.setItem(STORY_SEEN_KEY, "1");
   } catch {

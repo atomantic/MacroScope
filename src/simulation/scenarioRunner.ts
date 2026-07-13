@@ -62,19 +62,39 @@ const SECTORS: readonly ConsumptionSector[] = [
 
 const SUPPLY_SENSITIVITY = MODEL_CONSTANTS.supplySensitivity;
 
+// Build the calibrated synthetic population a comparison runs against. Depends
+// only on the sampling dials (seed, sampleSize, representedHouseholds), so a
+// sensitivity sweep that perturbs policy/behavior assumptions can generate this
+// once and reuse it across every run for determinism and speed (issue #11).
+export const buildCalibratedPopulation = (
+  request: ComparisonRequestV1,
+): readonly SyntheticHousehold[] =>
+  calibratePopulationToUs(
+    generateSyntheticPopulation({
+      seed: request.seed,
+      sampleSize: request.sampleSize,
+      representedHouseholds: request.representedHouseholds,
+    }),
+    request.representedHouseholds,
+  );
+
 export const runComparison = (
   request: ComparisonRequestV1 = DEFAULT_COMPARISON_REQUEST,
 ): ComparisonResultV1 => {
+  const normalized = normalizeComparisonRequest(request);
+  return runComparisonWithPopulation(normalized, buildCalibratedPopulation(normalized));
+};
+
+// The comparison body, given an already-normalized request and a calibrated
+// population. `households` must have been built for the same seed, sampleSize,
+// and representedHouseholds as `request`; the sensitivity engine passes one
+// shared population across all perturbed runs so the only thing that varies is
+// the perturbed dial.
+export const runComparisonWithPopulation = (
+  request: ComparisonRequestV1,
+  households: readonly SyntheticHousehold[],
+): ComparisonResultV1 => {
   request = normalizeComparisonRequest(request);
-  const generatedHouseholds = generateSyntheticPopulation({
-    seed: request.seed,
-    sampleSize: request.sampleSize,
-    representedHouseholds: request.representedHouseholds,
-  });
-  const households = calibratePopulationToUs(
-    generatedHouseholds,
-    request.representedHouseholds,
-  );
   const population = summarizePopulation(households);
   const effectiveExemption = resolveEffectiveExemption(households, request);
   const policy = buildWealthTaxPolicy(request, effectiveExemption);
@@ -118,7 +138,7 @@ export const runComparison = (
   };
 };
 
-const normalizeComparisonRequest = (
+export const normalizeComparisonRequest = (
   request: ComparisonRequestV1,
 ): ComparisonRequestV1 => ({
   ...DEFAULT_COMPARISON_REQUEST,

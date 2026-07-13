@@ -3,11 +3,78 @@ import express, {
   type Express,
 } from "express";
 import { resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { Worker } from "node:worker_threads";
 import { SCENARIO_SCHEMA_VERSION } from "../policies/schema.js";
 import { createDemoComparison } from "./demo.js";
-import { DEFAULT_COMPARISON_REQUEST } from "../simulation/contracts.js";
+import {
+  DEFAULT_COMPARISON_REQUEST,
+  type ComparisonRequestV1,
+} from "../simulation/contracts.js";
 import { runComparison } from "../simulation/scenarioRunner.js";
+import {
+  runSensitivityAnalysis,
+  type SensitivityAnalysis,
+} from "../simulation/sensitivity.js";
 import { parseComparisonRequest } from "./comparisonInput.js";
+
+// The sensitivity sweep runs ~80 full comparisons — ~1.7s at 4,000 agents — so
+// running it inline would block the Express event loop (and /health, and every
+// other request) for that whole time. Offload it to a worker thread. The
+// compiled worker only exists in dist/, so under the vitest TS-source runner
+// (where a raw node:worker Worker can't load an un-transpiled .ts) we fall back
+// to running the same deterministic function inline; production always offloads.
+const sensitivityWorkerPath = fileURLToPath(
+  new URL("./sensitivityWorker.js", import.meta.url),
+);
+const canOffloadSensitivity = existsSync(sensitivityWorkerPath);
+
+const analyzeSensitivity = (
+  request: ComparisonRequestV1,
+): Promise<SensitivityAnalysis> => {
+  if (!canOffloadSensitivity) return Promise.resolve(runSensitivityAnalysis(request));
+  return new Promise<SensitivityAnalysis>((resolvePromise, reject) => {
+    const worker = new Worker(sensitivityWorkerPath, { workerData: request });
+    worker.once("message", (message: { result: SensitivityAnalysis }) => {
+      void worker.terminate();
+      resolvePromise(message.result);
+    });
+    worker.once("error", (error) => {
+      void worker.terminate();
+      reject(error);
+    });
+  });
+};
+
+// Each sweep is a CPU-bound worker running ~80 comparisons, so an unbounded
+// burst of requests could spawn unbounded native threads and exhaust the box.
+// Admit at most MAX concurrently; queue a bounded backlog; shed load past that
+// with a 503 rather than piling on more threads. Cheap on the fast inline path
+// too — inline runs release the slot almost immediately.
+const MAX_SENSITIVITY_WORKERS = 2;
+const MAX_SENSITIVITY_QUEUE = 16;
+let activeSensitivity = 0;
+const sensitivityWaiters: Array<() => void> = [];
+
+const acquireSensitivitySlot = (): Promise<boolean> => {
+  if (activeSensitivity < MAX_SENSITIVITY_WORKERS) {
+    activeSensitivity += 1;
+    return Promise.resolve(true);
+  }
+  if (sensitivityWaiters.length >= MAX_SENSITIVITY_QUEUE) return Promise.resolve(false);
+  return new Promise<boolean>((admit) => {
+    sensitivityWaiters.push(() => {
+      activeSensitivity += 1;
+      admit(true);
+    });
+  });
+};
+
+const releaseSensitivitySlot = (): void => {
+  activeSensitivity -= 1;
+  sensitivityWaiters.shift()?.();
+};
 import { US_BASELINE } from "../simulation/usBaseline.js";
 import { HISTORICAL_BACKTEST } from "../simulation/historicalValidation.js";
 import { MODEL_CONSTANT_DOCS } from "../simulation/modelConstants.js";
@@ -58,6 +125,7 @@ export const createApp = (options: AppOptions = {}): Express => {
         "ten-year-purchasing-power-projection",
         "inflation-and-monetization-stress-test",
         "owner-renter-asset-feedback-theory-test",
+        "one-at-a-time-sensitivity-tornado",
         "percentile-or-dollar-wealth-tax-targeting",
         "cash-services-and-administration-allocation",
         "historical-inflation-backtest-2020-2023",
@@ -95,6 +163,27 @@ export const createApp = (options: AppOptions = {}): Express => {
       return;
     }
     response.json(runComparison(parsed.value));
+  });
+
+  app.post("/api/scenarios/sensitivity", async (request, response) => {
+    const parsed = parseComparisonRequest(request.body);
+    if (!parsed.value) {
+      response.status(400).json({
+        error: "Invalid comparison request.",
+        details: parsed.errors,
+      });
+      return;
+    }
+    const admitted = await acquireSensitivitySlot();
+    if (!admitted) {
+      response.status(503).json({ error: "Sensitivity analysis is busy; retry shortly." });
+      return;
+    }
+    try {
+      response.json(await analyzeSensitivity(parsed.value));
+    } finally {
+      releaseSensitivitySlot();
+    }
   });
 
   app.use("/api", (_request, response) => {

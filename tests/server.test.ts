@@ -132,6 +132,39 @@ describe("PortOS server", () => {
     });
   });
 
+  it("validates and runs sensitivity requests over HTTP", async () => {
+    const app = createApp();
+    const server = app.listen(0, "127.0.0.1");
+    servers.push(server);
+    await new Promise<void>((resolve) => server.once("listening", () => resolve()));
+    const port = (server.address() as AddressInfo).port;
+    const origin = `http://127.0.0.1:${port}`;
+    const defaults = await fetch(`${origin}/api/scenarios/default`).then((response) =>
+      response.json(),
+    );
+
+    const validResponse = await fetch(`${origin}/api/scenarios/sensitivity`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...defaults, sampleSize: 500, representedHouseholds: 5_000 }),
+    });
+    expect(validResponse.status).toBe(200);
+    const analysis = await validResponse.json();
+    expect(analysis.dials.length).toBeGreaterThan(0);
+    expect(["beneficial", "mixed", "harmful"]).toContain(analysis.base.verdict);
+    expect(analysis.runs).toBeGreaterThan(analysis.dials.length);
+
+    const invalidResponse = await fetch(`${origin}/api/scenarios/sensitivity`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sampleSize: 5 }),
+    });
+    expect(invalidResponse.status).toBe(400);
+    expect(await invalidResponse.json()).toMatchObject({
+      error: "Invalid comparison request.",
+    });
+  });
+
   it("runs the engine-backed comparison deterministically", () => {
     expect(createDemoComparison()).toEqual(createDemoComparison());
   });

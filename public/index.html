@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f2efe7" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./styles.css?v=12" />
+    <link rel="stylesheet" href="./styles.css?v=13" />
     <title>MacroScope</title>
   </head>
   <body>
@@ -91,6 +91,27 @@
             <label for="persona-tenure">Home<select id="persona-tenure" name="personaTenure"><option value="renter">I rent</option><option value="owner">I own</option></select></label>
           </form>
           <div class="persona-result" id="persona-result" role="status">Enter a few details to see your modeled outcome.</div>
+        </div>
+      </section>
+
+      <section class="sensitivity-section" id="sensitivity" aria-labelledby="sensitivity-heading">
+        <div class="section-intro">
+          <p class="kicker">What drives the verdict</p>
+          <h2 id="sensitivity-heading">Which assumption moves the answer most?</h2>
+          <p>Each bar sweeps one assumption across its full plausible range while every other dial holds still, then measures the swing in the bottom half's ten-year buying power. Longer bars matter more. Green means raising that dial helps the bottom half; orange means it hurts. <a href="#assumptions-anchor" class="caveat-link">Click any bar to load that value into the form.</a></p>
+        </div>
+        <div class="sensitivity-flip" id="sensitivity-flip" role="status" hidden>
+          <span>Tipping point</span>
+          <p id="sensitivity-flip-text"></p>
+          <button type="button" class="link-button" id="sensitivity-flip-apply" hidden>Apply this value and recalculate</button>
+        </div>
+        <div class="sensitivity-layout">
+          <div class="tornado-chart" id="tornado-chart" aria-label="Tornado chart ranking assumptions by their impact on bottom-50 buying power"></div>
+          <aside class="sensitivity-reading">
+            <span>How to read this</span>
+            <p>The center line is the current scenario's bottom-half outcome. Every bar reaches left and right to where that outcome lands at the assumption's low and high ends, so a wide bar is a dial the verdict hinges on and a narrow one barely matters.</p>
+            <p class="sensitivity-note" id="sensitivity-note">Recalculate to rank this scenario's assumptions.</p>
+          </aside>
         </div>
       </section>
 
@@ -256,7 +277,7 @@
         <p class="debt-answer" id="debt-answer"><strong>Does rich-people debt get passed to the poor?</strong> Not automatically. It remains the borrower’s liability unless government later socializes losses through bailouts, guarantees, or monetary financing.</p>
       </section>
 
-      <details class="assumptions-panel" open>
+      <details class="assumptions-panel" id="assumptions-anchor" open>
         <summary><span>Change the policy and behavior assumptions</span><small>Re-run the U.S. model</small></summary>
         <form id="scenario-form">
           <div class="policy-presets" aria-label="Policy scenario presets">
@@ -442,6 +463,6 @@
       <nav aria-label="Developer endpoints"><a href="/health">Health</a><a href="/api/status">Engine</a><a href="/api/baseline/us">U.S. baseline</a><a href="/api/scenarios/default">Scenario JSON</a></nav>
     </footer>
     <div class="toast-container" id="toast-container" aria-live="polite" aria-atomic="true"></div>
-    <script src="./app.js?v=12" type="module"></script>
+    <script src="./app.js?v=13" type="module"></script>
   </body>
 </html>

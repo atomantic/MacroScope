@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_STRATEGY,
   FIELD_SPECS,
+  SCENARIO_FIELD_SPECS,
   PRESET_PARAM,
   STRATEGY_PARAM,
   decodeScenarioParams,
@@ -46,6 +47,23 @@ describe("scenario URL parameters", () => {
     expect(decoded.preset).toBeNull();
   });
 
+  it("round-trips taxpayer-response and household settings", () => {
+    const values = {
+      ...defaults,
+      "avoidance-elasticity": "7",
+      "expatriation-share": "4",
+      "private-business-inclusion": "85",
+      "persona-net-worth": "250000",
+      "persona-tenure": "owner",
+    };
+    const decoded = decodeScenarioParams(encodeScenarioParams({ values, defaults }));
+    expect(decoded.fields["avoidance-elasticity"]).toBe("7");
+    expect(decoded.fields["expatriation-share"]).toBe("4");
+    expect(decoded.fields["private-business-inclusion"]).toBe("85");
+    expect(decoded.fields["persona-net-worth"]).toBe("250000");
+    expect(decoded.fields["persona-tenure"]).toBe("owner");
+  });
+
   it("encodes a pristine preset as ?preset=name without field params", () => {
     const values = { ...defaults, "tax-rate": "10" };
     const query = encodeScenarioParams({ values, defaults, preset: "billionaire" });
@@ -53,6 +71,16 @@ describe("scenario URL parameters", () => {
     expect(params.get(PRESET_PARAM)).toBe("billionaire");
     expect(params.get("tr")).toBeNull();
     expect(decodeScenarioParams(query).preset).toBe("billionaire");
+  });
+
+  it("keeps household settings alongside a pristine policy preset", () => {
+    const values = { ...defaults, "tax-rate": "10", "persona-children": "3" };
+    const query = encodeScenarioParams({ values, defaults, preset: "billionaire" });
+    const params = new URLSearchParams(query);
+    expect(params.get(PRESET_PARAM)).toBe("billionaire");
+    expect(params.get("tr")).toBeNull();
+    expect(params.get("pc")).toBe("3");
+    expect(SCENARIO_FIELD_SPECS.some((spec) => spec.id === "persona-children")).toBe(false);
   });
 
   it("decodes a preset alongside explicit field overrides (fields win)", () => {

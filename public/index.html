@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f2efe7" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./styles.css?v=9" />
+    <link rel="stylesheet" href="./styles.css?v=10" />
     <title>MacroScope</title>
   </head>
   <body>
@@ -271,6 +271,7 @@
             <button type="button" data-preset="warren-2020">Warren 2020</button>
             <button type="button" data-preset="sanders-2020">Sanders 2020</button>
             <button type="button" data-preset="current-law">Current law (no tax)</button>
+            <button class="preset-share-button" id="copy-link-button" type="button">Copy scenario link</button>
             <a class="preset-reference-link" href="#policy-references">See real-world precedents ↓</a>
           </div>
           <fieldset>
@@ -345,7 +346,6 @@
           </details>
           <div class="form-actions">
             <button class="run-button" id="run-button" type="submit">Recalculate verdict</button>
-            <button class="link-button" id="copy-link-button" type="button">Copy link to this scenario</button>
             <p class="form-status" id="form-status" role="status">Loading baseline scenario…</p>
           </div>
         </form>
@@ -421,6 +421,6 @@
       <nav aria-label="Developer endpoints"><a href="/health">Health</a><a href="/api/status">Engine</a><a href="/api/baseline/us">U.S. baseline</a><a href="/api/scenarios/default">Scenario JSON</a></nav>
     </footer>
     <div class="toast-container" id="toast-container" aria-live="polite" aria-atomic="true"></div>
-    <script src="./app.js?v=9" type="module"></script>
+    <script src="./app.js?v=10" type="module"></script>
   </body>
 </html>

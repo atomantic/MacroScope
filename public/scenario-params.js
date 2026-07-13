@@ -6,7 +6,7 @@
 // the display-unit transforms (percent, $M) that formRequest() applies. Only
 // values that differ from the fetched defaults are serialized, so shared URLs
 // stay short and stable regardless of how many dials the model grows.
-export const FIELD_SPECS = [
+export const SCENARIO_FIELD_SPECS = [
   { id: "target-mode", param: "tm" },
   { id: "exemption", param: "ex" },
   { id: "top-share", param: "ts" },
@@ -20,6 +20,9 @@ export const FIELD_SPECS = [
   { id: "borrow-share", param: "bs" },
   { id: "sell-share", param: "ss" },
   { id: "loan-rate", param: "lr" },
+  { id: "avoidance-elasticity", param: "ae" },
+  { id: "expatriation-share", param: "es" },
+  { id: "private-business-inclusion", param: "pb" },
   { id: "asset-return", param: "ar" },
   { id: "monetization", param: "mon" },
   { id: "buyer-depth", param: "bd" },
@@ -33,16 +36,27 @@ export const FIELD_SPECS = [
   { id: "maximum-ltv", param: "ltv" },
 ];
 
+export const PERSONA_FIELD_SPECS = [
+  { id: "persona-net-worth", param: "nw" },
+  { id: "persona-adults", param: "pa" },
+  { id: "persona-children", param: "pc" },
+  { id: "persona-tenure", param: "pt" },
+];
+
+export const FIELD_SPECS = [...SCENARIO_FIELD_SPECS, ...PERSONA_FIELD_SPECS];
+
+const SCENARIO_FIELD_IDS = new Set(SCENARIO_FIELD_SPECS.map((spec) => spec.id));
+
 export const PRESET_PARAM = "preset";
 export const STRATEGY_PARAM = "strat";
 export const BRACKETS_PARAM = "br";
 export const DEFAULT_STRATEGY = "cash-first";
 
 // Serialize the current form state to a compact query string. When `preset` is
-// set the scenario is a pristine named preset and encodes as `?preset=name`;
-// otherwise only fields differing from `defaults` are emitted. A custom graduated
-// schedule (which has no single form field) rides along as `br` when present. The
-// decile strategy selector round-trips alongside either form.
+// set the policy is encoded as `?preset=name`; household settings may accompany
+// it. Otherwise only fields differing from `defaults` are emitted. A custom
+// graduated schedule (which has no single form field) rides along as `br` when
+// present. The decile strategy selector round-trips alongside either form.
 export const encodeScenarioParams = ({
   values,
   defaults,
@@ -51,19 +65,19 @@ export const encodeScenarioParams = ({
   brackets = null,
 } = {}) => {
   const params = new URLSearchParams();
-  if (preset) {
-    params.set(PRESET_PARAM, preset);
-  } else {
-    for (const spec of FIELD_SPECS) {
-      const value = values?.[spec.id];
-      if (value !== undefined && String(value) !== String(defaults?.[spec.id])) {
-        params.set(spec.param, String(value));
-      }
+  if (preset) params.set(PRESET_PARAM, preset);
+  for (const spec of FIELD_SPECS) {
+    // A pristine policy preset reconstructs all scenario controls, but personal
+    // household settings still need to accompany it in a shared link.
+    if (preset && SCENARIO_FIELD_IDS.has(spec.id)) continue;
+    const value = values?.[spec.id];
+    if (value !== undefined && String(value) !== String(defaults?.[spec.id])) {
+      params.set(spec.param, String(value));
     }
-    // Brackets only carry outside a pristine preset — a preset reconstructs its
-    // own schedule on decode, so emitting br there would be redundant.
-    if (brackets) params.set(BRACKETS_PARAM, brackets);
   }
+  // Brackets only carry outside a pristine preset — a preset reconstructs its
+  // own schedule on decode, so emitting br there would be redundant.
+  if (!preset && brackets) params.set(BRACKETS_PARAM, brackets);
   if (strategy && strategy !== DEFAULT_STRATEGY) params.set(STRATEGY_PARAM, strategy);
   return params.toString();
 };

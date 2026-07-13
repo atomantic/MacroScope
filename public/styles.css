@@ -295,6 +295,8 @@ body[data-view="story"] #dashboard-view { display: none; }
 .split-seg.seg-sell { background: var(--gold); }
 
 .story-readout { max-width: 760px; margin: 0; padding: 16px 20px; background: var(--green-soft); color: #244236; font-size: 0.95rem; font-weight: 600; line-height: 1.5; }
+.story-error { max-width: 760px; margin: 0; padding: 14px 20px; background: var(--orange-soft); color: var(--red); font-size: 0.9rem; font-weight: 650; line-height: 1.5; }
+.story-error[hidden] { display: none; }
 
 .story-verdict { display: grid; gap: 16px; padding: 26px 30px; border: 1px solid var(--ink); background: var(--panel); }
 .story-verdict .verdict-badge { width: max-content; }

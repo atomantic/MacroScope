@@ -226,8 +226,10 @@ const runScenario = async () => {
     render(payload);
     byId("scenario-summary").textContent = scenarioSummary(request, payload);
     setFormStatus(`Updated from ${integer.format(payload.population.sampledHouseholds)} weighted household agents${isStaticSnapshot ? ", computed in your browser" : ""}.`);
+    return true;
   } catch (error) {
     setFormStatus(error instanceof Error ? error.message : "Scenario failed.", true);
+    return false;
   } finally {
     button.disabled = false;
     button.textContent = "Recalculate verdict";
@@ -595,6 +597,27 @@ document.querySelectorAll("[data-preset]").forEach((button) => {
 
 const STORY_SEEN_KEY = "macroscope-story-seen";
 
+// Dial `prepare` hooks run after the dial writes its field, before the rerun,
+// to keep hidden companion fields consistent so the visible dial always moves
+// the model (the story deliberately exposes one control per step).
+const forceExemptionTargeting = () => {
+  byId("target-mode").value = "exemption";
+  syncTargetControls();
+};
+// borrow + sell must stay <= 100 (parser rule); the story doesn't expose sell,
+// so shrink it to make room as the borrow dial climbs past the remaining share.
+const capBorrowAgainstSell = () => {
+  const borrow = Number(byId("borrow-share").value);
+  const sell = Number(byId("sell-share").value);
+  if (borrow + sell > 100) byId("sell-share").value = String(Math.max(0, 100 - borrow));
+};
+// The default revenue-constrained rule caps spending at tax receipts, so the
+// deficit — and thus monetization — is zero. Switch to fixed-benefit funding so
+// the monetization dial has a deficit to act on and inflation actually responds.
+const enableDeficitFunding = () => {
+  byId("funding-rule").value = "fixed";
+};
+
 // Each step reads live values off `latestResult`, so its copy adapts to the
 // reader's current settings. `dial` binds a range input to an existing form
 // field (values are in the field's own units).
@@ -619,13 +642,7 @@ const STORY_STEPS = [
       min: 0,
       max: 50,
       step: 1,
-      // A top-share preset (e.g. "1% on top 1%") makes the engine ignore the
-      // exemption field; dragging the exemption line switches targeting back to
-      // dollar-exemption so the dial actually moves the model.
-      prepare: () => {
-        byId("target-mode").value = "exemption";
-        syncTargetControls();
-      },
+      prepare: forceExemptionTargeting,
     },
     viz: (host, r) => renderWealthStrip(host, r),
     readout: (r) =>
@@ -637,7 +654,7 @@ const STORY_STEPS = [
     title: "They rarely sell. They borrow against their wealth.",
     body: (r) =>
       `A wealth-tax bill can be paid with cash, by selling assets, or by borrowing against them. The more the reader assumes is borrowed, the more new bank lending the policy triggers. Right now ${percent.format(r.projection.behaviorMix.borrowShare)} is borrowed.`,
-    dial: { field: "borrow-share", label: "Share paid by borrowing (%)", min: 0, max: 100, step: 5 },
+    dial: { field: "borrow-share", label: "Share paid by borrowing (%)", min: 0, max: 100, step: 5, prepare: capBorrowAgainstSell },
     viz: (host, r) => renderPaymentSplit(host, r),
     readout: (r) =>
       `${compactMoney.format(r.projection.annualFlows.newPrivateLoans)} in new bank loans in year one — deposits created out of nothing.`,
@@ -648,7 +665,7 @@ const STORY_STEPS = [
     title: "New loans expand the money supply.",
     body: () =>
       "Taxing and transferring existing deposits just reshuffles money. New bank loans are different: they create fresh deposits. Keep moving the borrow dial and watch M2 respond over ten years.",
-    dial: { field: "borrow-share", label: "Share paid by borrowing (%)", min: 0, max: 100, step: 5 },
+    dial: { field: "borrow-share", label: "Share paid by borrowing (%)", min: 0, max: 100, step: 5, prepare: capBorrowAgainstSell },
     viz: (host, r) => renderStoryChart(host, "story-money-chart", moneyChartOptions(r.projection)),
     readout: (r) =>
       `M2 ends ${signedPercent(r.projection.summary.cumulativeM2Change)} versus the no-policy path.`,
@@ -659,7 +676,7 @@ const STORY_STEPS = [
     title: "More money chasing goods can lift prices.",
     body: (r) =>
       `Whether new money shows up as inflation depends on how much of any deficit the central bank monetizes. Peak annual inflation in this run is ${formatRate(r.projection.summary.peakAnnualInflation)}. Turn the monetization dial to test it.`,
-    dial: { field: "monetization", label: "Deficit monetized (%)", min: 0, max: 100, step: 5 },
+    dial: { field: "monetization", label: "Deficit monetized (%)", min: 0, max: 100, step: 5, prepare: enableDeficitFunding },
     viz: (host, r) => renderStoryChart(host, "story-price-chart", moneyChartOptions(r.projection)),
     readout: (r) =>
       `Peak annual inflation ${formatRate(r.projection.summary.peakAnnualInflation)} — ${regimeFor(r.projection.summary.peakAnnualInflation)} regime.`,
@@ -820,7 +837,19 @@ const renderStory = () => {
     stage.append(presetWrap);
   }
 
+  let dialNeedsResync = false;
   if (step.dial) {
+    const field = byId(step.dial.field);
+    const inRange = clamp(Number(field.value), step.dial.min, step.dial.max);
+    // A preset can leave the field outside the dial's range (e.g. the $1B
+    // billionaire exemption against a $50M dial). Snap the field into range and
+    // resync the model so the dial, copy, chart, and result all agree instead
+    // of the control silently showing a clamped value the model doesn't use.
+    if (Number(field.value) !== inRange) {
+      field.value = String(inRange);
+      if (step.dial.prepare) step.dial.prepare();
+      dialNeedsResync = true;
+    }
     stage.append(buildStoryDial(step.dial));
   }
 
@@ -836,11 +865,7 @@ const renderStory = () => {
     stage.append(readout);
   }
 
-  // Refs the dial-driven rerun refreshes in place, so the live <input> the
-  // reader is dragging is never torn down mid-gesture (only these data-bound
-  // nodes update).
-  storyState.dynamic = { bodyNode, viz: step.viz ? viz : null, readout };
-
+  let verdictRefs = null;
   if (step.verdict) {
     const verdict = latestResult.projection.verdict;
     document.body.dataset.verdict = verdict.rating;
@@ -848,15 +873,32 @@ const renderStory = () => {
     panel.className = "story-verdict";
     const badge = element("span", verdict.rating);
     badge.className = "verdict-badge";
-    panel.append(badge);
-    panel.append(element("strong", verdict.headline));
+    const headline = element("strong", verdict.headline);
+    panel.append(badge, headline);
     stage.append(panel);
+    verdictRefs = { badge, headline };
     const enter = element("button", "Explore the full dashboard →");
     enter.type = "button";
     enter.className = "run-button story-enter";
     enter.addEventListener("click", () => enterDashboard());
     stage.append(enter);
   }
+
+  // Story-scoped error line: runScenario reports failures only to the hidden
+  // dashboard status, so surface them here when a rerun fails.
+  const errorNode = element("p", "");
+  errorNode.className = "story-error";
+  errorNode.hidden = true;
+  stage.append(errorNode);
+
+  // Refs the dial-driven rerun refreshes in place, so the live <input> the
+  // reader is dragging is never torn down mid-gesture (only these data-bound
+  // nodes update).
+  storyState.dynamic = { bodyNode, viz: step.viz ? viz : null, readout, verdict: verdictRefs, errorNode };
+
+  // The model still reflects the pre-clamp value — rerun once to bring copy,
+  // chart, and verdict in line with the now-in-range dial.
+  if (dialNeedsResync) void storyRerun();
 
   renderStoryProgress();
   byId("story-counter").textContent = `Step ${storyState.index + 1} of ${STORY_STEPS.length}`;
@@ -905,7 +947,6 @@ const renderStoryProgress = () => {
       const dot = document.createElement("button");
       dot.type = "button";
       dot.className = "story-dot";
-      dot.setAttribute("role", "listitem");
       dot.setAttribute("aria-label", `Go to step ${index + 1}: ${step.kicker}`);
       if (index === storyState.index) dot.setAttribute("aria-current", "step");
       dot.addEventListener("click", () => goToStep(index));
@@ -921,6 +962,7 @@ const refreshStoryDynamic = () => {
   const dynamic = storyState.dynamic;
   if (!dynamic) return;
   const step = STORY_STEPS[storyState.index];
+  if (dynamic.errorNode) dynamic.errorNode.hidden = true;
   dynamic.bodyNode.textContent = step.body(latestResult);
   if (dynamic.viz && step.viz) {
     dynamic.viz.replaceChildren();
@@ -928,6 +970,15 @@ const refreshStoryDynamic = () => {
   }
   if (dynamic.readout && step.readout) {
     dynamic.readout.textContent = step.readout(latestResult);
+  }
+  // The verdict panel is not a plain text node; refresh its badge + headline so
+  // navigating to the verdict step before an in-flight rerun settles can't leave
+  // it showing the previous run's rating.
+  if (dynamic.verdict) {
+    const verdict = latestResult.projection.verdict;
+    document.body.dataset.verdict = verdict.rating;
+    dynamic.verdict.badge.textContent = verdict.rating;
+    dynamic.verdict.headline.textContent = verdict.headline;
   }
 };
 
@@ -941,13 +992,21 @@ const storyRerun = async () => {
   }
   storyState.running = true;
   byId("story-stage").classList.add("is-busy");
+  let ok = true;
   do {
     storyState.pending = false;
-    await runScenario();
+    ok = await runScenario();
   } while (storyState.pending);
   storyState.running = false;
   byId("story-stage").classList.remove("is-busy");
-  refreshStoryDynamic();
+  if (ok) {
+    refreshStoryDynamic();
+  } else if (storyState.dynamic?.errorNode) {
+    // Keep the visible view honest: the model rejected this setting, so don't
+    // silently leave stale results next to the moved dial.
+    storyState.dynamic.errorNode.textContent = "That setting couldn't be modeled. Adjust the dial and try again.";
+    storyState.dynamic.errorNode.hidden = false;
+  }
 };
 
 const goToStep = (index) => {

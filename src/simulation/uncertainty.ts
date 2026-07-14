@@ -14,6 +14,8 @@ import {
 export const UNCERTAINTY_MODEL_VERSION = "joint-uncertainty-v1";
 export const MIN_UNCERTAINTY_DRAWS = 32;
 export const MAX_UNCERTAINTY_DRAWS = 1_000;
+export const MIN_MATCHED_PARAMETER_DRAWS = 32;
+export const MAX_POPULATION_REPLICATES = 16;
 
 export type UncertaintyPopulationMode = "fixed" | "combined";
 export type UncertaintyKind = "empirical" | "structural" | "normative";
@@ -508,7 +510,9 @@ export interface UncertaintyAnalysis {
   readonly options: UncertaintyOptions;
   readonly note: string;
   readonly runs: number;
+  readonly parameterDraws: number;
   readonly populationSeeds: readonly number[];
+  readonly populationDesign: "fixed-population" | "matched-parameter-draws";
   readonly constraintChecks: {
     readonly borrowPlusSellAtMostOne: true;
     readonly allocationSharesValid: true;
@@ -526,7 +530,7 @@ export interface UncertaintyAnalysis {
   readonly groups: readonly UncertaintyGroupBand[];
   readonly influenceTarget: "bottom50PurchasingPowerChange";
   readonly influenceMethod: "absolute-standardized-regression-coefficient";
-  readonly populationInfluenceMethod: "categorical-correlation-ratio" | null;
+  readonly populationInfluenceMethod: "matched-draw-categorical-correlation-ratio" | null;
   readonly interactionMethod: "pair-product-partial-correlation-after-main-effects";
   readonly influences: readonly UncertaintyInfluence[];
   readonly interactions: readonly UncertaintyInteraction[];
@@ -561,13 +565,21 @@ export const parseUncertaintyOptions = (input: unknown): ParsedUncertaintyOption
     input.populationReplicates,
     DEFAULT_UNCERTAINTY_OPTIONS.populationReplicates,
     2,
-    32,
+    MAX_POPULATION_REPLICATES,
     "populationReplicates",
     errors,
   );
   const populationMode = input.populationMode ?? DEFAULT_UNCERTAINTY_OPTIONS.populationMode;
   if (populationMode !== "fixed" && populationMode !== "combined") {
     errors.push("populationMode must be fixed or combined.");
+  }
+  if (
+    populationMode === "combined" &&
+    draws < populationReplicates * MIN_MATCHED_PARAMETER_DRAWS
+  ) {
+    errors.push(
+      `combined population uncertainty requires at least ${MIN_MATCHED_PARAMETER_DRAWS} matched parameter draws per population seed; increase draws or reduce populationReplicates.`,
+    );
   }
   if (errors.length > 0) return { errors };
   return {
@@ -583,6 +595,7 @@ export const parseUncertaintyOptions = (input: unknown): ParsedUncertaintyOption
 
 interface DrawRecord {
   readonly parameterValues: readonly number[];
+  readonly parameterReplicate: number;
   readonly populationReplicate: number;
   readonly verdict: "beneficial" | "mixed" | "harmful";
   readonly metrics: readonly number[];
@@ -638,10 +651,15 @@ export const runUncertaintyAnalysis = (
   const baseRequest = normalizeComparisonRequest(request);
   const metadata = parameterMetadata(baseRequest);
   const random = mulberry32(options.seed);
-  const uniforms = correlatedLatinHypercubeColumns(PARAMETER_SPECS, options.draws, random);
   const populationCount = options.populationMode === "combined"
     ? Math.min(options.populationReplicates, options.draws)
     : 1;
+  // Combined runs use a crossed design within the fixed run budget: each
+  // parameter row is replayed against every population seed before the next
+  // row. Seed effects therefore cannot absorb differences between disjoint LHS
+  // subsets.
+  const parameterDraws = Math.ceil(options.draws / populationCount);
+  const uniforms = correlatedLatinHypercubeColumns(PARAMETER_SPECS, parameterDraws, random);
   const populationSeeds = Array.from({ length: populationCount }, (_, index) =>
     options.populationMode === "fixed"
       ? baseRequest.seed
@@ -659,7 +677,9 @@ export const runUncertaintyAnalysis = (
     if (populationSeed === undefined) throw new Error("Uncertainty population seed missing.");
     const populationRequest = { ...baseRequest, seed: populationSeed };
     const households = buildCalibratedPopulation(populationRequest);
-    for (let draw = populationReplicate; draw < options.draws; draw += populationCount) {
+    for (let parameterReplicate = 0; parameterReplicate < parameterDraws; parameterReplicate += 1) {
+      const runIndex = parameterReplicate * populationCount + populationReplicate;
+      if (runIndex >= options.draws) continue;
       if (hooks.shouldCancel?.()) throw new UncertaintyCancelledError();
       let candidate = baseRequest;
       for (let parameterIndex = 0; parameterIndex < PARAMETER_SPECS.length; parameterIndex += 1) {
@@ -667,7 +687,7 @@ export const runUncertaintyAnalysis = (
         const column = uniforms[parameterIndex];
         const meta = metadata[parameterIndex];
         if (!spec || !column || !meta) throw new Error("Uncertainty sampler metadata mismatch.");
-        const uniform = column[draw];
+        const uniform = column[parameterReplicate];
         if (uniform === undefined) throw new Error("Uncertainty sampler draw missing.");
         candidate = spec.apply(candidate, triangularQuantile(uniform, meta.low, meta.base, meta.high));
       }
@@ -694,6 +714,7 @@ export const runUncertaintyAnalysis = (
       }
       records.push({
         parameterValues,
+        parameterReplicate,
         populationReplicate,
         verdict: projection.verdict.rating,
         metrics: [
@@ -774,10 +795,15 @@ export const runUncertaintyAnalysis = (
     options,
     note:
       "These are assumption distributions, not statistical confidence intervals or a forecast. " +
-      "Declared structural dependencies use rank-factor loadings, and public-service value " +
-      "currently uses dollars spent as a transparent proxy.",
+      "Declared structural dependencies use rank-factor loadings; combined runs replay matched " +
+      "parameter draws across population seeds. Public-service value currently uses dollars " +
+      "spent as a transparent proxy.",
     runs: records.length,
+    parameterDraws,
     populationSeeds,
+    populationDesign: options.populationMode === "combined"
+      ? "matched-parameter-draws"
+      : "fixed-population",
     constraintChecks: {
       borrowPlusSellAtMostOne: true,
       allocationSharesValid: true,
@@ -797,7 +823,7 @@ export const runUncertaintyAnalysis = (
     influenceTarget: "bottom50PurchasingPowerChange",
     influenceMethod: "absolute-standardized-regression-coefficient",
     populationInfluenceMethod: options.populationMode === "combined"
-      ? "categorical-correlation-ratio"
+      ? "matched-draw-categorical-correlation-ratio"
       : null,
     interactionMethod: "pair-product-partial-correlation-after-main-effects",
     influences,
@@ -846,7 +872,9 @@ const fixedAssumptions = (
       ? request.wealthTax.brackets
         .map((bracket) => `${bracket.rate * 100}% above $${bracket.threshold.toLocaleString("en-US")}`)
         .join("; ")
-      : `${request.wealthTax.rate * 100}% above $${request.wealthTax.exemption.toLocaleString("en-US")}`,
+      : request.wealthTax.targetMode === "top-share"
+        ? `${request.wealthTax.rate * 100}% on the top ${request.wealthTax.topShare * 100}% of households (population-derived threshold)`
+        : `${request.wealthTax.rate * 100}% above $${request.wealthTax.exemption.toLocaleString("en-US")}`,
     kind: "normative",
     sampled: false,
     reason: "Defining policy choice; compare schedules as separate scenarios rather than blending them.",
@@ -952,7 +980,7 @@ const summarizeGroups = (records: readonly DrawRecord[]): readonly UncertaintyGr
   return ids.map((id) => ({
     id,
     label: labels[id],
-    metric: id === "bottom-50-renter" || id === "bottom-50-owner"
+    metric: id === "bottom-50-renter"
       ? "purchasing-power"
       : "real-wealth",
     band: percentileBand(records.map((record) => record.groups.get(id) ?? 0)),
@@ -1011,20 +1039,50 @@ const categoricalPopulationInfluence = (
   outcome: readonly number[],
   populationCount: number,
 ): UncertaintyInfluence => {
-  const overallMean = outcome.reduce((sum, value) => sum + value, 0) /
-    Math.max(1, outcome.length);
+  const countsByParameterReplicate = new Map<number, number>();
+  for (const record of records) {
+    countsByParameterReplicate.set(
+      record.parameterReplicate,
+      (countsByParameterReplicate.get(record.parameterReplicate) ?? 0) + 1,
+    );
+  }
+  const observations = records
+    .map((record, index) => ({ record, value: outcome[index] ?? 0 }))
+    // A final partial row is still valid for percentile bands, but excluding it
+    // here keeps the population-effect comparison exactly matched.
+    .filter(({ record }) =>
+      countsByParameterReplicate.get(record.parameterReplicate) === populationCount);
+  // Remove the mean of each matched parameter row before comparing population
+  // categories. This controls the categorical effect for the sampled parameter
+  // vector instead of attributing row-to-row variation to the seed label.
+  const meanByParameterReplicate = new Map<number, number>();
+  for (const replicate of new Set(observations.map(({ record }) => record.parameterReplicate))) {
+    const values = observations
+      .filter(({ record }) => record.parameterReplicate === replicate)
+      .map(({ value }) => value);
+    meanByParameterReplicate.set(
+      replicate,
+      values.reduce((sum, value) => sum + value, 0) / Math.max(1, values.length),
+    );
+  }
+  const controlledObservations = observations.map(({ record, value }) => ({
+    record,
+    value: value - (meanByParameterReplicate.get(record.parameterReplicate) ?? 0),
+  }));
+  const controlledOutcome = controlledObservations.map(({ value }) => value);
+  const overallMean = controlledOutcome.reduce((sum, value) => sum + value, 0) /
+    Math.max(1, controlledOutcome.length);
   let between = 0;
   let total = 0;
   for (let replicate = 0; replicate < populationCount; replicate += 1) {
-    const values = records
-      .map((record, index) => ({ record, value: outcome[index] ?? 0 }))
+    const values = controlledObservations
       .filter(({ record }) => record.populationReplicate === replicate)
       .map(({ value }) => value);
     if (values.length === 0) continue;
     const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
     between += values.length * (mean - overallMean) ** 2;
   }
-  for (const value of outcome) total += (value - overallMean) ** 2;
+  for (const value of controlledOutcome) total += (value - overallMean) ** 2;
   return {
     parameterId: "population-seed",
     label: "Synthetic-population seed",

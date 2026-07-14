@@ -99,13 +99,17 @@ describe("joint uncertainty analysis", () => {
   it("separates parameter-only from combined population uncertainty", () => {
     const combined = runUncertaintyAnalysis(request, {
       ...options,
+      draws: 128,
       populationMode: "combined",
       populationReplicates: 4,
     });
     expect(combined.sampledParameters.some((parameter) => parameter.id === "population-seed"))
       .toBe(true);
     expect(combined.options.populationMode).toBe("combined");
-    expect(combined.populationInfluenceMethod).toBe("categorical-correlation-ratio");
+    expect(combined.populationDesign).toBe("matched-parameter-draws");
+    expect(combined.parameterDraws).toBe(32);
+    expect(combined.populationInfluenceMethod)
+      .toBe("matched-draw-categorical-correlation-ratio");
     expect(combined.influences.find((influence) => influence.parameterId === "population-seed"))
       .toMatchObject({ direction: "flat" });
   });
@@ -113,14 +117,32 @@ describe("joint uncertainty analysis", () => {
   it("keeps adversarial derived population seeds distinct without retaining every population", () => {
     const combined = runUncertaintyAnalysis(request, {
       ...options,
-      draws: 32,
+      draws: 512,
       seed: -1_640_531_527,
       populationMode: "combined",
-      populationReplicates: 32,
+      populationReplicates: 16,
     });
-    expect(combined.populationSeeds).toHaveLength(32);
-    expect(new Set(combined.populationSeeds).size).toBe(32);
-    expect(combined.runs).toBe(32);
+    expect(combined.populationSeeds).toHaveLength(16);
+    expect(new Set(combined.populationSeeds).size).toBe(16);
+    expect(combined.runs).toBe(512);
+    expect(combined.parameterDraws).toBe(32);
+  });
+
+  it("labels cohort bands and top-share policy metadata with their actual semantics", () => {
+    const analysis = runUncertaintyAnalysis({
+      ...request,
+      wealthTax: {
+        ...request.wealthTax,
+        targetMode: "top-share",
+        topShare: 0.001,
+      },
+    }, options);
+    expect(analysis.groups.find((group) => group.id === "bottom-50-renter")?.metric)
+      .toBe("purchasing-power");
+    expect(analysis.groups.find((group) => group.id === "bottom-50-owner")?.metric)
+      .toBe("real-wealth");
+    expect(analysis.fixedAssumptions.find((assumption) => assumption.id === "wealth-tax-design")?.value)
+      .toMatch(/top 0\.1% of households/i);
   });
 
   it("reports progress and validates the run budget", () => {
@@ -135,6 +157,13 @@ describe("joint uncertainty analysis", () => {
       "draws must be a safe integer from 32 to 1000.",
     );
     expect(parseUncertaintyOptions({ draws: 1_001 }).value).toBeUndefined();
+    expect(parseUncertaintyOptions({
+      draws: 32,
+      populationMode: "combined",
+      populationReplicates: 8,
+    }).errors).toContain(
+      "combined population uncertainty requires at least 32 matched parameter draws per population seed; increase draws or reduce populationReplicates.",
+    );
     expect(() =>
       runUncertaintyAnalysis(request, options, { shouldCancel: () => true }))
       .toThrow("Uncertainty analysis cancelled.");

@@ -644,8 +644,12 @@ const sensitivityChannel = createEngineChannel();
 const uncertaintyChannel = createEngineChannel();
 
 const runOnMainThread = async (request, mode = "compare", options, onProgress) => {
+  if (mode === "uncertainty") {
+    throw new Error(
+      "Joint uncertainty requires a browser worker, which is unavailable in this browser.",
+    );
+  }
   const engine = await import(versioned("./engine/browser/engine.js"));
-  if (mode === "uncertainty") return engine.analyzeUncertainty(request, options, onProgress);
   return mode === "sensitivity"
     ? engine.analyzeSensitivity(request)
     : engine.compareScenarios(request);
@@ -663,7 +667,14 @@ const runLocalScenario = async (request, mode = "compare", options, onProgress) 
     : await runOnMainThread(request, mode, options, onProgress);
   // Module workers can fail where Worker itself exists (older Firefox,
   // blocked worker loading) — retry the same request on the main thread.
-  if (response?.workerFailed) response = await runOnMainThread(request, mode, options, onProgress);
+  if (response?.workerFailed) {
+    if (mode === "uncertainty") {
+      throw new Error(
+        "Joint uncertainty could not start its browser worker. Check static asset access and try again.",
+      );
+    }
+    response = await runOnMainThread(request, mode, options, onProgress);
+  }
   if (response?.cancelled) throw new DOMException("Uncertainty analysis cancelled.", "AbortError");
   if (!response?.ok) {
     throw new Error(response?.details?.join(" ") || response?.error || "Scenario failed.");
@@ -2065,11 +2076,15 @@ const renderUncertainty = (analysis) => {
     return item;
   });
   byId("uncertainty-interactions").replaceChildren(...interactions);
+  const populationDesign = analysis.populationDesign === "matched-parameter-draws"
+    ? `${analysis.parameterDraws} matched parameter rows replayed across ${analysis.populationSeeds.length} population seeds. `
+    : "The synthetic population stays fixed across all parameter draws. ";
   byId("uncertainty-note").textContent =
     `${analysis.note} Seed ${analysis.options.seed}; ${analysis.sampledParameters.length} sampled assumptions; ` +
     `${analysis.fixedAssumptions.length} policy or judgment choices held fixed. ` +
+    populationDesign +
     "Declared dependency groups use rank-factor loadings while preserving each Latin-hypercube marginal. " +
-    "Influence scores are standardized regression coefficients (categorical correlation ratio for population seeds); interaction scores partial out linear main effects from both the outcome and each parameter pair.";
+    "Influence scores are standardized regression coefficients (matched-draw categorical correlation ratio for population seeds); interaction scores partial out linear main effects from both the outcome and each parameter pair.";
   byId("uncertainty-results").hidden = false;
 };
 

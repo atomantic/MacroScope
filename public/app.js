@@ -102,6 +102,7 @@ const initialize = async () => {
       byId("service-status").classList.add("online");
       byId("service-status-text").textContent = "In-browser model";
       byId("baseline-label").textContent = `${baseline.label} · ${baseline.vintage} Fed wealth data · ${compactNumber(baseline.households)} households`;
+      renderCalibrationSummary(baseline.calibration);
       renderSources(baseline.sources);
       populateForm(defaults);
       captureDefaultFieldValues();
@@ -142,6 +143,7 @@ const initialize = async () => {
     byId("service-status").classList.add("online");
     byId("service-status-text").textContent = health.status;
     byId("baseline-label").textContent = `${baseline.label} · ${baseline.vintage} Fed wealth data · ${compactNumber(baseline.households)} households`;
+    renderCalibrationSummary(baseline.calibration);
     renderSources(baseline.sources);
     populateForm(defaults);
     captureDefaultFieldValues();
@@ -2066,6 +2068,13 @@ const renderSources = (sources) => {
     item.append(element("span", `0${index + 1}`), element("strong", source.label), element("small", `${source.organization} · ${source.vintage}`));
     return item;
   }));
+};
+
+const renderCalibrationSummary = (calibration) => {
+  const summary = byId("calibration-summary");
+  if (!summary || !calibration) return;
+  const residual = calibration.residualAssetClass;
+  summary.textContent = `${calibration.vintage} DFA instrument calibration · ${(calibration.tolerance * 100).toFixed(0)}% reconciliation tolerance. ${residual.label} is an explicit ${residual.modelClass} balance-sheet class, preserving source instruments that do not have a narrower model analogue.`;
 };
 
 const renderValidation = (backtest) => {

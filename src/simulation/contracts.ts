@@ -423,6 +423,24 @@ export interface ComparisonResultV1 {
     readonly topShare: number;
     readonly effectiveExemption: number;
   };
+  // Canonical, dollar-denominated tax-schedule result. Consumers such as the
+  // browser persona card use this rather than interpreting the headline flat
+  // rate when a graduated schedule is active.
+  readonly wealthTaxAssessment: {
+    readonly taxableBase: number;
+    readonly fullComplianceTax: number;
+    readonly responseAdjustedTax: number;
+    readonly avoidedTax: number;
+    readonly effectiveRate: number;
+    readonly taxpayerHouseholds: number;
+    readonly brackets: readonly {
+      readonly threshold: number;
+      readonly upperThreshold: number | null;
+      readonly rate: number;
+      readonly taxableAmount: number;
+      readonly tax: number;
+    }[];
+  };
   readonly population: PopulationSummary;
   readonly strategies: Readonly<Record<PaymentStrategy, StrategyOutcome>>;
   readonly projection: PolicyProjection;

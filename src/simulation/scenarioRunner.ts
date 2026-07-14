@@ -1,5 +1,9 @@
 import type { TaxBracket, WealthTaxPolicyV1 } from "../policies/schema.js";
-import { assessWealthTax } from "../policies/wealthTax.js";
+import {
+  applyWealthTaxpayerResponse,
+  assessWealthTax,
+  type TaxBracketAssessment,
+} from "../policies/wealthTax.js";
 import {
   DEFAULT_COMPARISON_REQUEST,
   type ComparisonRequestV1,
@@ -51,7 +55,9 @@ interface HouseholdTaxAssessment {
   readonly weight: number;
   readonly taxableBase: number;
   readonly fullComplianceTax: number;
+  readonly avoidedTax: number;
   readonly taxAssessed: number;
+  readonly bracketBreakdown: readonly TaxBracketAssessment[];
 }
 
 interface StrategyRunResult {
@@ -177,10 +183,15 @@ export const runComparisonWithPopulation = (
       topShare: request.wealthTax.topShare,
       effectiveExemption,
     },
+    wealthTaxAssessment: summarizeWealthTaxAssessment(
+      householdTaxAssessments,
+      policy,
+      effectiveExemption,
+    ),
     population,
     strategies,
     projection: buildPolicyProjection(request, strategies, {
-      effectiveTaxRate: resolveEffectiveTaxRate(householdTaxAssessments, policy),
+      effectiveTaxRate: resolveEffectiveTaxRate(householdTaxAssessments),
       householdAssessments: projectionHouseholdAssessments,
       demandProfiles: Object.fromEntries(
         STRATEGIES.map((strategy) => [strategy, strategyRuns[strategy].demandProfile]),
@@ -832,12 +843,15 @@ const buildHouseholdTaxAssessments = (
   policy: WealthTaxPolicyV1,
   request: ComparisonRequestV1,
 ): ReadonlyMap<string, HouseholdTaxAssessment> => {
-  const complianceFactor = avoidanceComplianceFactor(request);
   return new Map(
     households.map((household) => {
       const assessment = assessWealthTax(
         { assets: household.assets, liabilities: household.liabilities },
         policy,
+      );
+      const response = applyWealthTaxpayerResponse(
+        assessment,
+        request.behavior.avoidanceElasticity,
       );
       return [
         household.id,
@@ -845,41 +859,73 @@ const buildHouseholdTaxAssessments = (
           weight: household.weight,
           taxableBase: assessment.taxableBase,
           fullComplianceTax: assessment.annualTax,
-          taxAssessed: assessment.annualTax * complianceFactor,
+          avoidedTax: response.avoidedTax,
+          taxAssessed: response.taxAssessed,
+          bracketBreakdown: assessment.bracketBreakdown,
         },
       ];
     }),
   );
 };
 
-// Weighted average rate paid out of the taxable base (full-compliance assessed
-// tax ÷ base). For a flat policy this collapses to the single rate; for a
-// graduated schedule it is the blended effective rate the projection needs to
-// erode the out-year base consistently with year-one collections.
+// Weighted average response-adjusted rate paid out of the taxable base. This
+// prevents avoided tax from eroding the projection's wealth base as if it had
+// been collected; with no avoidance it reduces to the full statutory rate.
 const resolveEffectiveTaxRate = (
   assessments: ReadonlyMap<string, HouseholdTaxAssessment>,
-  policy: WealthTaxPolicyV1,
 ): number => {
   let weightedTax = 0;
   let weightedBase = 0;
   for (const household of assessments.values()) {
-    weightedTax += household.fullComplianceTax * household.weight;
+    weightedTax += household.taxAssessed * household.weight;
     weightedBase += household.taxableBase * household.weight;
   }
-  return weightedBase > 0 ? weightedTax / weightedBase : policy.brackets[0]?.rate ?? 0;
+  return weightedBase > 0 ? weightedTax / weightedBase : 0;
 };
 
-// Avoidance and evasion erode the reported taxable base in proportion to the
-// statutory rate (issue #6). avoidanceElasticity is the fraction of the base
-// lost per percentage point of rate, so a 2% rate at elasticity 0.1 loses 20%
-// of the base. Because the single-bracket tax is linear in the post-exemption
-// base, scaling the assessed tax by this factor is exactly a base reduction.
-// Elasticity 0 reproduces the full-compliance revenue.
-const avoidanceComplianceFactor = (request: ComparisonRequestV1): number =>
-  Math.max(
-    0,
-    1 - request.behavior.avoidanceElasticity * request.wealthTax.rate * 100,
-  );
+const summarizeWealthTaxAssessment = (
+  assessments: ReadonlyMap<string, HouseholdTaxAssessment>,
+  policy: WealthTaxPolicyV1,
+  exemption: number,
+) => {
+  let taxableBase = 0;
+  let fullComplianceTax = 0;
+  let responseAdjustedTax = 0;
+  let avoidedTax = 0;
+  let taxpayerHouseholds = 0;
+  const brackets = policy.brackets.map((bracket, index) => {
+    const nextThreshold = policy.brackets[index + 1]?.threshold;
+    return {
+      threshold: bracket.threshold + exemption,
+      upperThreshold: nextThreshold === undefined ? null : nextThreshold + exemption,
+      rate: bracket.rate,
+      taxableAmount: 0,
+      tax: 0,
+    };
+  });
+  for (const assessment of assessments.values()) {
+    taxableBase += assessment.taxableBase * assessment.weight;
+    fullComplianceTax += assessment.fullComplianceTax * assessment.weight;
+    responseAdjustedTax += assessment.taxAssessed * assessment.weight;
+    avoidedTax += assessment.avoidedTax * assessment.weight;
+    if (assessment.taxAssessed > 0) taxpayerHouseholds += assessment.weight;
+    for (const [index, bracket] of assessment.bracketBreakdown.entries()) {
+      const summary = brackets[index];
+      if (!summary) continue;
+      summary.taxableAmount += bracket.taxableAmount * assessment.weight;
+      summary.tax += bracket.tax * assessment.weight;
+    }
+  }
+  return {
+    taxableBase,
+    fullComplianceTax,
+    responseAdjustedTax,
+    avoidedTax,
+    effectiveRate: taxableBase > 0 ? responseAdjustedTax / taxableBase : 0,
+    taxpayerHouseholds,
+    brackets,
+  };
+};
 
 const resolveEffectiveExemption = (
   households: readonly SyntheticHousehold[],

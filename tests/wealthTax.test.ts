@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyWealthTaxpayerResponse,
   assessWealthTax,
+  assessProgressiveTax,
   calculateProgressiveTax,
   type AssetClass,
   type LiabilityClass,
@@ -46,6 +48,56 @@ describe("wealth-tax policy", () => {
     expect(calculateProgressiveTax(1_000_000, policy.brackets)).toBe(0);
     expect(calculateProgressiveTax(1_000_001, policy.brackets)).toBeCloseTo(0.01);
     expect(calculateProgressiveTax(6_000_000, policy.brackets)).toBe(60_000);
+  });
+
+  it("reports bracket-level liabilities and applies avoidance at the marginal rate", () => {
+    const progressive = assessProgressiveTax(6_000_000, policy.brackets);
+
+    expect(progressive.marginalRate).toBe(0.02);
+    expect(progressive.effectiveRate).toBe(0.01);
+    expect(progressive.bracketBreakdown).toEqual([
+      {
+        threshold: 0,
+        upperThreshold: 1_000_000,
+        rate: 0,
+        taxableAmount: 1_000_000,
+        tax: 0,
+      },
+      {
+        threshold: 1_000_000,
+        upperThreshold: 5_000_000,
+        rate: 0.01,
+        taxableAmount: 4_000_000,
+        tax: 40_000,
+      },
+      {
+        threshold: 5_000_000,
+        upperThreshold: null,
+        rate: 0.02,
+        taxableAmount: 1_000_000,
+        tax: 20_000,
+      },
+    ]);
+    expect(
+      applyWealthTaxpayerResponse(
+        assessWealthTax(
+          {
+            assets: {
+              deposits: 0,
+              governmentBonds: 0,
+              publicEquity: 7_000_000,
+              housing: 0,
+              privateBusiness: 0,
+              retirementAssets: 0,
+              otherAssets: 0,
+            },
+            liabilities: { mortgage: 0, collateralizedLoan: 0, consumerDebt: 0 },
+          },
+          policy,
+        ),
+        0.1,
+      ),
+    ).toMatchObject({ complianceFactor: 0.8, taxAssessed: 48_000 });
   });
 
   it("applies inclusion, valuation, debt, exemption, and installment rules", () => {

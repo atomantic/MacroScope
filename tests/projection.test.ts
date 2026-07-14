@@ -139,10 +139,12 @@ describe("ten-year projection dynamics", () => {
     ]);
 
     const byId = Object.fromEntries(outcomes.map((group) => [group.id, group]));
-    // Under the default $10M exemption only the top groups carry a tax burden,
-    // and the top 0.1% pays more per household than the top 1%.
+    // The default $10M exemption cuts through the synthetic 90th–99th-percentile
+    // cohort even though that DFA cohort's average wealth is below $10M. Its
+    // paying households must not disappear from the projected burden.
     expect(byId["bottom-50-renter"].annualTaxPaid).toBe(0);
     expect(byId["middle-40"].annualTaxPaid).toBe(0);
+    expect(byId["top-10"].annualTaxPaid).toBeGreaterThan(0);
     expect(byId["top-1"].annualTaxPaid).toBeGreaterThan(0);
     expect(byId["top-0.1"].annualTaxPaid).toBeGreaterThan(byId["top-1"].annualTaxPaid);
 
@@ -174,6 +176,79 @@ describe("ten-year projection dynamics", () => {
       expect(Number.isFinite(change ?? Number.NaN)).toBe(true);
       expect(Number.isFinite(group.annualUbiReceived)).toBe(true);
     }
+  });
+
+  it("reconciles cohort tax burdens to household-level year-one collection", () => {
+    const result = runComparison(nationalRequest());
+    const attributedCollection = result.projection.groupOutcomes.reduce(
+      (sum, group) => sum + group.annualTaxPaid * group.households,
+      0,
+    );
+
+    expect(attributedCollection).toBeCloseTo(
+      result.projection.annualFlows.taxCollected,
+      2,
+    );
+  });
+
+  it("uses collected revenue to weight the top tier under graduated rates", () => {
+    const request = nationalRequest();
+    const topTierRevenueShare = (result: ReturnType<typeof runComparison>): number => {
+      const topTierCollection = result.projection.groupOutcomes
+        .filter((group) => group.id === "top-1" || group.id === "top-0.1")
+        .reduce((sum, group) => sum + group.annualTaxPaid * group.households, 0);
+      return topTierCollection / result.projection.annualFlows.taxCollected;
+    };
+    const flat = runComparison({
+      ...request,
+      wealthTax: {
+        targetMode: "exemption",
+        exemption: 10_000_000,
+        topShare: 0.01,
+        rate: 0.01,
+      },
+    });
+    const graduated = runComparison({
+      ...request,
+      wealthTax: {
+        targetMode: "exemption",
+        exemption: 10_000_000,
+        topShare: 0.01,
+        rate: 0.01,
+        brackets: [
+          { threshold: 10_000_000, rate: 0.01 },
+          { threshold: 50_000_000, rate: 0.02 },
+          { threshold: 250_000_000, rate: 0.03 },
+          { threshold: 500_000_000, rate: 0.04 },
+          { threshold: 1_000_000_000, rate: 0.05 },
+        ],
+      },
+    });
+
+    // Higher marginal rates on the very top raise its share of actual revenue,
+    // even though the exemption and household population are unchanged.
+    expect(topTierRevenueShare(graduated)).toBeGreaterThan(
+      topTierRevenueShare(flat),
+    );
+  });
+
+  it("retains the default policy's non-top revenue under full expatriation", () => {
+    const request = nationalRequest();
+    const result = runComparison({
+      ...request,
+      behavior: {
+        ...request.behavior,
+        expatriationShare: 1,
+      },
+    });
+
+    // Full expatriation removes the top-tier sub-base after year one, but the
+    // default $10M cutoff also reaches some 90th–99th-percentile households.
+    // Their revenue remains, proving the tier split is not the old coarse 100%.
+    expect(result.projection.annualFlows.finalYear.taxCollected).toBeGreaterThan(0);
+    expect(result.projection.annualFlows.finalYear.taxCollected).toBeLessThan(
+      result.projection.annualFlows.taxCollected,
+    );
   });
 
   it("charges the bottom-50 owner cohort when a zero exemption reaches it", () => {

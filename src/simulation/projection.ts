@@ -42,9 +42,24 @@ const CAPITAL_INDEX_FLOOR = 0.05;
 
 type Strategies = Readonly<Record<PaymentStrategy, StrategyOutcome>>;
 
-// Wealth groups whose taxed wealth counts as "top tier" for the expatriation
-// dial (issue #6/#17): the top 1% and above. Whenever a positive exemption
-// confines the tax to these cohorts the top-tier share of the taxed base is 1.
+// Household-level tax records are the attribution backbone for the projection.
+// They carry the same assessed and actually collected amounts used by the
+// strategy engine, so cohort burdens and the top-tier revenue split cannot
+// drift away from the authoritative year-one collection total.
+export interface HouseholdProjectionTaxAssessment {
+  readonly percentile: number;
+  readonly weight: number;
+  readonly taxAssessed: number;
+  readonly taxCollected: Readonly<Record<PaymentStrategy, number>>;
+}
+
+export interface PolicyProjectionTaxInputs {
+  readonly effectiveTaxRate: number;
+  readonly householdAssessments: readonly HouseholdProjectionTaxAssessment[];
+}
+
+// Wealth groups whose collected revenue counts as "top tier" for the
+// expatriation dial (issue #6/#17): the top 1% and above.
 const TOP_TIER_GROUP_IDS = new Set<string>(
   US_BASELINE.wealthGroups
     .filter((group) => group.percentileMinimum >= MODEL_CONSTANTS.topOnePercentPercentile)
@@ -72,11 +87,8 @@ type BaseDynamics = {
 // the inflation stress grid (issue #17). Asset returns plus partial pass-through
 // of policy-driven excess inflation grow the base; the effective rate paid out
 // of it erodes it. Both act on the whole taxed base. Expatriation drains ONLY
-// the top-tier sub-base: whenever a positive exemption confines the tax to the
-// top the top-tier share is 1 and this reduces to a single base eroded uniformly
-// by expatriation (the #6 behavior); under a universal (zero-exemption) tax the
-// non-top-tier remainder is retained, matching the dial's "top-tier taxable
-// wealth" definition.
+// the top-tier sub-base; the household-derived revenue split determines how
+// much remains in the non-top-tier sub-base.
 const evolveTaxBase = (
   state: TaxBaseState,
   input: {
@@ -100,23 +112,16 @@ const evolveTaxBase = (
   };
 };
 
-// Effective base multiplier: the top-tier sub-base weighted by its share of the
-// taxed base plus the retained non-top-tier remainder. A top-tier share of 1
-// (any positive exemption reaching only the top) returns the top sub-base alone.
+// Effective base multiplier: the top-tier sub-base weighted by its share of
+// collected revenue plus the retained non-top-tier remainder. A top-tier share
+// of 1 returns the top sub-base alone.
 const combinedBaseMultiplier = (state: TaxBaseState, topTierShare: number): number =>
   topTierShare * state.top + (1 - topTierShare) * state.rest;
 
 export const buildPolicyProjection = (
   request: ComparisonRequestV1,
   strategies: Strategies,
-  effectiveExemption: number = request.wealthTax.exemption,
-  // Average rate actually paid out of the taxable base in year one (assessed
-  // tax ÷ taxable base). For a flat schedule this equals wealthTax.rate; for a
-  // graduated schedule (Warren/Sanders) it is the blended effective rate, so
-  // the out-year base erosion below stays consistent with year-one collections
-  // instead of under-eroding at the lowest bracket rate. Defaults to the flat
-  // rate for callers that don't compute it.
-  effectiveTaxRate: number = request.wealthTax.rate,
+  taxInputs: PolicyProjectionTaxInputs,
 ): PolicyProjection => {
   const weights = strategyWeights(request);
   const blended = <T>(select: (outcome: StrategyOutcome) => T): number => {
@@ -159,59 +164,15 @@ export const buildPolicyProjection = (
   );
   const requestedUbi = blended((outcome) => outcome.fiscal.requestedUbi);
 
-  // Allocate each year's collected tax across the calibrated U.S. wealth groups
-  // by their net worth above the effective exemption. The engine's total tax is
-  // authoritative; this only apportions it so every cohort gets an explicit
-  // burden. Under a high exemption only the top groups carry a positive share.
-  const groupTaxShare = new Map<string, number>();
-  const groupTaxableBase = US_BASELINE.wealthGroups.map((group) => ({
-    id: group.id,
-    taxable: Math.max(0, group.netWorth - effectiveExemption * group.households),
-  }));
-  const totalTaxableBase = groupTaxableBase.reduce((sum, group) => sum + group.taxable, 0);
-  // Share of the taxed base held by the top tier (>= 99th percentile). Under any
-  // positive exemption that reaches only the top this is 1, so expatriation acts
-  // on the whole taxed base exactly as in #6; under a universal (zero-exemption)
-  // tax it scopes expatriation to the top-tier sub-base (issue #17). The
-  // zero-base edge case (a very high exemption) attributes the whole synthetic
-  // top-tail burden to the wealthiest cohort, which is top tier, so 1 applies.
-  // This is a share of taxable BASE, which the model treats as the share of
-  // revenue everywhere it apportions collections (groupTaxShare below is likewise
-  // base-weighted) — exact under a flat rate. Under a graduated schedule the top
-  // tier's revenue share exceeds its base share, so this modestly understates the
-  // expatriation drain; a base-share proxy keeps it consistent with the model's
-  // established revenue apportionment rather than mixing two conventions.
-  // NOTE: like groupTaxShare, this uses COARSE cohort-average net worth, not the
-  // synthetic per-household assessments that produce taxCollected. So an exemption
-  // cutting through a DFA cohort (e.g. the default $10M through the 90th–99th
-  // group, whose average is sub-$10M) zeroes that cohort's base and yields
-  // topTierShare = 1 — which makes expatriation drain the whole base exactly as
-  // in #6 at positive exemptions (no regression here; #17 only narrows the drain
-  // under a universal tax). Deriving the tier split from the synthetic population
-  // — and reconciling groupTaxShare with it — is tracked separately as backbone
-  // work, out of #17's reduced-form scope.
-  const topTierTaxableBase = groupTaxableBase
-    .filter((group) => TOP_TIER_GROUP_IDS.has(group.id))
-    .reduce((sum, group) => sum + group.taxable, 0);
-  const topTierShare = totalTaxableBase > 0 ? topTierTaxableBase / totalTaxableBase : 1;
-  if (totalTaxableBase > 0) {
-    for (const group of groupTaxableBase) {
-      groupTaxShare.set(group.id, group.taxable / totalTaxableBase);
-    }
-  } else {
-    // A very high exemption (e.g. the "10% over $1B" preset) sits above every
-    // cohort's AVERAGE wealth, so no group-level base is positive — yet the
-    // synthetic top tail still pays. Attribute the whole burden to the
-    // wealthiest cohort rather than reporting $0 tax for everyone.
-    const wealthiest = [...US_BASELINE.wealthGroups].sort(
-      (left, right) =>
-        right.netWorth / Math.max(1, right.households) -
-        left.netWorth / Math.max(1, left.households),
-    )[0];
-    for (const group of groupTaxableBase) {
-      groupTaxShare.set(group.id, group.id === wealthiest?.id ? 1 : 0);
-    }
-  }
+  // Apportion year-one collections with the exact synthetic households that
+  // produced them. This captures exemptions that cut through a DFA cohort and
+  // makes graduated schedules revenue-weighted instead of taxable-base-weighted.
+  const { groupTaxShare, topTierShare } = deriveHouseholdTaxAttribution(
+    taxInputs.householdAssessments,
+    weights,
+    taxCollected,
+  );
+  const effectiveTaxRate = taxInputs.effectiveTaxRate;
   const cumulativeGroupTax = new Map<string, number>(
     US_BASELINE.wealthGroups.map((group) => [group.id, 0]),
   );
@@ -226,12 +187,11 @@ export const buildPolicyProjection = (
   let taxBaseState: TaxBaseState = { top: 1, rest: 1 };
   // Expatriation drains a cumulative share of the TOP-TIER taxable base over the
   // decade (issue #6/#17). evolveTaxBase applies this retention to the top-tier
-  // sub-base only: whenever a positive exemption confines the tax to the top the
-  // top-tier share is 1 and the whole taxed base leaves; under a universal
-  // (zero-exemption) tax only the top-tier share of revenue is drained. Spread
-  // geometrically so each year retains an equal fraction and the top-tier base
-  // has lost expatriationShare by year ten. Share 0 leaves the retention at 1 and
-  // reproduces the prior path.
+  // sub-base only. The household-derived share can be below 1 even with a
+  // positive exemption when that cutoff reaches part of a non-top cohort.
+  // Spread geometrically so each year retains an equal fraction and the
+  // top-tier base has lost expatriationShare by year ten. Share 0 leaves the
+  // retention at 1 and reproduces the prior path.
   const expatriationRetention =
     (1 - request.behavior.expatriationShare) ** (1 / YEARS);
 
@@ -459,8 +419,8 @@ export const buildPolicyProjection = (
     // topTaxIncidenceShare scopes ONLY this aggregate top-1% wealth trajectory
     // (a reduced-form "how much of all collected tax lands on the top tier"
     // proxy). Per-cohort outcomes in buildGroupOutcomes attribute tax precisely
-    // by each cohort's taxable base (groupRealWealthChange), so they intentionally
-    // do not read this dial — keeping default per-cohort output unchanged.
+    // by each cohort's household-level collected revenue
+    // (groupRealWealthChange), so they intentionally do not read this dial.
     const topTaxBurden = taxCollectedYear * request.model.topTaxIncidenceShare;
     const interestCost =
       privateTaxDebt * request.behavior.loanInterestRate * request.model.topTaxIncidenceShare;
@@ -876,6 +836,101 @@ const strategyWeights = (request: ComparisonRequestV1) => ({
   sell: request.behavior.sellShare,
   cash: Math.max(0, 1 - request.behavior.borrowShare - request.behavior.sellShare),
 });
+
+const wealthGroupForPercentile = (percentile: number): UsWealthGroupBaseline => {
+  const group = US_BASELINE.wealthGroups.find(
+    (candidate) =>
+      percentile >= candidate.percentileMinimum &&
+      (percentile < candidate.percentileMaximum ||
+        (candidate.percentileMaximum === 1 && percentile <= 1)),
+  );
+  if (!group) {
+    throw new Error(`Household percentile ${percentile} is outside the wealth groups.`);
+  }
+  return group;
+};
+
+const deriveHouseholdTaxAttribution = (
+  assessments: readonly HouseholdProjectionTaxAssessment[],
+  weights: ReturnType<typeof strategyWeights>,
+  authoritativeTaxCollected: number,
+): {
+  readonly groupTaxShare: ReadonlyMap<string, number>;
+  readonly topTierShare: number;
+} => {
+  const groupTaxCollected = new Map<string, number>(
+    US_BASELINE.wealthGroups.map((group) => [group.id, 0]),
+  );
+
+  for (const assessment of assessments) {
+    if (
+      !Number.isFinite(assessment.percentile) ||
+      !Number.isFinite(assessment.weight) ||
+      !Number.isFinite(assessment.taxAssessed) ||
+      assessment.weight < 0 ||
+      assessment.taxAssessed < 0
+    ) {
+      throw new Error("Household projection tax inputs must be finite and nonnegative.");
+    }
+    const collectedByStrategy = assessment.taxCollected;
+    for (const strategy of ["cash-first", "borrow-first", "sell-first"] as const) {
+      const collected = collectedByStrategy[strategy];
+      const householdTolerance = Math.max(
+        MODEL_CONSTANTS.absoluteToleranceFloor,
+        assessment.taxAssessed * MODEL_CONSTANTS.convergenceEpsilon,
+      );
+      if (
+        !Number.isFinite(collected) ||
+        collected < 0 ||
+        collected - assessment.taxAssessed > householdTolerance
+      ) {
+        throw new Error("Household collected tax must be finite and no greater than assessed tax.");
+      }
+    }
+
+    const blendedCollection =
+      collectedByStrategy["cash-first"] * weights.cash +
+      collectedByStrategy["borrow-first"] * weights.borrow +
+      collectedByStrategy["sell-first"] * weights.sell;
+    const group = wealthGroupForPercentile(assessment.percentile);
+    groupTaxCollected.set(
+      group.id,
+      (groupTaxCollected.get(group.id) ?? 0) + blendedCollection * assessment.weight,
+    );
+  }
+
+  const attributedTaxCollected = [...groupTaxCollected.values()].reduce(
+    (sum, collected) => sum + collected,
+    0,
+  );
+  const aggregateTolerance = Math.max(
+    MODEL_CONSTANTS.absoluteToleranceFloor,
+    Math.max(authoritativeTaxCollected, attributedTaxCollected) *
+      MODEL_CONSTANTS.convergenceEpsilon,
+  );
+  if (Math.abs(attributedTaxCollected - authoritativeTaxCollected) > aggregateTolerance) {
+    throw new Error("Household tax attribution does not reconcile to collected tax.");
+  }
+
+  const groupTaxShare = new Map<string, number>();
+  for (const [id, collected] of groupTaxCollected) {
+    groupTaxShare.set(
+      id,
+      attributedTaxCollected > 0 ? collected / attributedTaxCollected : 0,
+    );
+  }
+  const topTierTaxCollected = [...groupTaxCollected]
+    .filter(([id]) => TOP_TIER_GROUP_IDS.has(id))
+    .reduce((sum, [, collected]) => sum + collected, 0);
+
+  return {
+    groupTaxShare,
+    // No revenue means the tier split has no effect. Preserve the historical
+    // neutral edge value so the empty top sub-base cannot create a false rest.
+    topTierShare:
+      attributedTaxCollected > 0 ? topTierTaxCollected / attributedTaxCollected : 1,
+  };
+};
 
 const averageBottomHalf = (
   strategies: Strategies,

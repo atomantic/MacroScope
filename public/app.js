@@ -19,6 +19,9 @@ const {
   encodeScenarioParams,
   decodeScenarioParams,
 } = await import(versioned("./scenario-params.js"));
+const { calculatePersonaCashBenefit } = await import(
+  versioned("./persona-calculation.js")
+);
 
 const STRATEGIES = ["cash-first", "borrow-first", "sell-first"];
 const LABELS = {
@@ -1291,10 +1294,13 @@ const renderPersona = (result) => {
   // persona shows delivered cash, matching the per-cohort cards, not the gross
   // schedule.
   const requestedUbi = result.strategies?.["cash-first"]?.fiscal?.requestedUbi ?? 0;
-  const deliveryRatio = requestedUbi > 0
-    ? result.projection.annualFlows.ubiReceived / requestedUbi
-    : 0;
-  const annualUbi = grossUbi * deliveryRatio;
+  const annualCashBenefit = calculatePersonaCashBenefit({
+    grossScheduledBenefit: grossUbi,
+    aggregateRequestedBenefit: requestedUbi,
+    aggregateCashDelivered: result.projection.annualFlows.ubiReceived,
+    aggregateRebate: result.projection.annualFlows.rebate ?? 0,
+    representedHouseholds: result.population.representedHouseholds,
+  });
   const exemption = result.wealthTaxTarget?.effectiveExemption ?? request.wealthTax.exemption;
   const annualTax = Math.max(0, netWorth - exemption) * request.wealthTax.rate;
   const change = groupChange(group) ?? 0;
@@ -1308,7 +1314,7 @@ const renderPersona = (result) => {
   node.append(
     element(
       "span",
-      `You'd pay about ${money.format(annualTax)} in wealth tax and receive about ${money.format(annualUbi)} per year in UBI. Over ten years you'd end with about ${signedPercent(change)} ${groupMetricLabel(group)} versus the no-policy path${rentNote}.`,
+      `You'd pay about ${money.format(annualTax)} in wealth tax and receive about ${money.format(annualCashBenefit)} per year in cash benefits. Over ten years you'd end with about ${signedPercent(change)} ${groupMetricLabel(group)} versus the no-policy path${rentNote}.`,
     ),
   );
   const note = document.createElement("small");

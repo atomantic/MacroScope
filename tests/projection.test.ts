@@ -397,7 +397,7 @@ describe("ten-year projection dynamics", () => {
         targetMode: "exemption",
         exemption: 0,
         topShare: 0.01,
-        rate: 0.2,
+        rate: 0.01,
       },
       ubi: {
         ...base.ubi,
@@ -417,7 +417,7 @@ describe("ten-year projection dynamics", () => {
         targetMode: "exemption",
         exemption: 0,
         topShare: 0.01,
-        rate: 0.2,
+        rate: 0.01,
       },
       ubi: {
         ...base.ubi,
@@ -489,6 +489,9 @@ describe("ten-year projection dynamics", () => {
     expect(services.projection.annualFlows.publicServicesSpending).toBeGreaterThan(0);
     expect(services.projection.annualFlows.ubiReceived).toBe(0);
     expect(rebate.projection.annualFlows.ubiReceived).toBeGreaterThan(0);
+    expect(rebate.projection.annualFlows.rebate).toBe(
+      rebate.projection.annualFlows.ubiReceived,
+    );
     expect(rebate.projection.annualFlows.publicServicesSpending).toBe(0);
     expect(
       Object.values(rebate.strategies).every((outcome) => outcome.accounting.passed),

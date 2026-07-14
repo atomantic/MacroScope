@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { projectFiscalPath } from "../src/index.js";
+import { projectFiscalPath, US_BASELINE } from "../src/index.js";
 
 const path = (
   fundingRule: "fixed" | "revenue-constrained" | "smoothed",
@@ -95,5 +95,21 @@ describe("explicit fiscal closure", () => {
       expect(year).toBeDefined();
       expect(year?.budgetIdentityResidual).toBeCloseTo(0, 12);
     }
+  });
+
+  it("caps debt reduction at outstanding public debt and parks any remainder", () => {
+    const excess = 100;
+    const year = projectFiscalPath({
+      fundingRule: "fixed",
+      surplusUse: "debt-reduction",
+      taxRevenues: [US_BASELINE.publicDebtHeldByPublic + excess],
+      requestedProgramOutlays: [0],
+    })[0];
+
+    expect(year?.debtRepaid).toBe(US_BASELINE.publicDebtHeldByPublic);
+    expect(year?.publicDebtStock).toBe(0);
+    expect(year?.treasuryBalance).toBe(excess);
+    expect(year?.netPublicDebtChange).toBe(-US_BASELINE.publicDebtHeldByPublic);
+    expect(year?.budgetIdentityResidual).toBe(0);
   });
 });

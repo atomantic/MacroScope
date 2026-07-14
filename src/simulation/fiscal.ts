@@ -4,9 +4,11 @@ import type {
 } from "./contracts.js";
 import type { SurplusUse, UbiFundingRule } from "../policies/schema.js";
 import { MODEL_CONSTANTS } from "./modelConstants.js";
+import { US_BASELINE } from "./usBaseline.js";
 
 export interface FiscalState {
   readonly programDebt: number;
+  readonly externalPublicDebt: number;
   readonly treasuryBalance: number;
   readonly cumulativeDebtIssued: number;
   readonly cumulativeDebtRepaid: number;
@@ -27,13 +29,29 @@ export interface FiscalYearTransition {
   readonly state: FiscalState;
 }
 
-export const EMPTY_FISCAL_STATE: FiscalState = {
-  programDebt: 0,
-  treasuryBalance: 0,
-  cumulativeDebtIssued: 0,
-  cumulativeDebtRepaid: 0,
-  revenueHistory: [],
+export const createFiscalState = (
+  externalPublicDebt: number = US_BASELINE.publicDebtHeldByPublic,
+): FiscalState => {
+  assertFiniteNonnegative(externalPublicDebt, "Opening public debt");
+  return {
+    programDebt: 0,
+    externalPublicDebt,
+    treasuryBalance: 0,
+    cumulativeDebtIssued: 0,
+    cumulativeDebtRepaid: 0,
+    revenueHistory: [],
+  };
 };
+
+export const initialFiscalStateForRequest = (
+  request: ComparisonRequestV1,
+): FiscalState =>
+  createFiscalState(
+    US_BASELINE.publicDebtHeldByPublic *
+      (request.representedHouseholds / US_BASELINE.households),
+  );
+
+export const EMPTY_FISCAL_STATE: FiscalState = createFiscalState();
 
 /**
  * Applies one explicit government budget identity:
@@ -94,7 +112,14 @@ export const resolveFiscalYear = (
   let endingTreasuryBalance = reservedTreasury;
   switch (input.surplusUse) {
     case "debt-reduction":
-      externalDebtRepaid = unallocatedSurplus;
+      externalDebtRepaid = Math.min(
+        unallocatedSurplus,
+        opening.externalPublicDebt,
+      );
+      unallocatedSurplus -= externalDebtRepaid;
+      // Debt cannot fall below zero. Once all outstanding public debt is
+      // retired, any remaining cash is explicitly carried at Treasury.
+      endingTreasuryBalance += unallocatedSurplus;
       break;
     case "additional-services":
       additionalServices = unallocatedSurplus;
@@ -108,6 +133,10 @@ export const resolveFiscalYear = (
   }
 
   const debtRepaid = programDebtRepaid + externalDebtRepaid;
+  const externalPublicDebt = Math.max(
+    0,
+    opening.externalPublicDebt - externalDebtRepaid,
+  );
   const programDebt = Math.max(
     0,
     programDebtBeforeRepayment - programDebtRepaid,
@@ -139,6 +168,7 @@ export const resolveFiscalYear = (
     // program-debt savings appear as lower interestExpense in later years.
     interestSavings: debtRepaid * interestRate,
     programDebt,
+    publicDebtStock: externalPublicDebt + programDebt,
     treasuryBalance: endingTreasuryBalance,
     netPublicDebtChange,
     budgetIdentityResidual,
@@ -147,6 +177,7 @@ export const resolveFiscalYear = (
     year,
     state: {
       programDebt,
+      externalPublicDebt,
       treasuryBalance: endingTreasuryBalance,
       cumulativeDebtIssued,
       cumulativeDebtRepaid,
@@ -205,8 +236,8 @@ const scheduledOutlay = (
   }
 };
 
-const assertFiniteNonnegative = (value: number, label: string): void => {
+function assertFiniteNonnegative(value: number, label: string): void {
   if (!Number.isFinite(value) || value < 0) {
     throw new Error(`${label} must be finite and nonnegative.`);
   }
-};
+}

@@ -28,6 +28,7 @@ import {
 import { computeStrategyAccounting } from "./ledgerAudit.js";
 import { MODEL_CONSTANTS } from "./modelConstants.js";
 import {
+  initialFiscalStateForRequest,
   normalizedSurplusUse,
   resolveFiscalYear,
 } from "./fiscal.js";
@@ -279,13 +280,16 @@ const runStrategy = (
         household.children * request.ubi.childMonthlyBenefit),
   );
   const leakageRate = MODEL_CONSTANTS.programLeakageRate;
-  const fiscal = resolveFiscalYear({
-    year: 1,
-    taxRevenue: taxCollected,
-    requestedProgramOutlay: requestedUbi,
-    fundingRule: request.ubi.fundingRule,
-    surplusUse: normalizedSurplusUse(request),
-  }).year;
+  const fiscal = resolveFiscalYear(
+    {
+      year: 1,
+      taxRevenue: taxCollected,
+      requestedProgramOutlay: requestedUbi,
+      fundingRule: request.ubi.fundingRule,
+      surplusUse: normalizedSurplusUse(request),
+    },
+    initialFiscalStateForRequest(request),
+  ).year;
   const programBudget = fiscal.scheduledProgramOutlay;
   const fundingRatio = programBudget / Math.max(1, requestedUbi);
   const administrativeCost =

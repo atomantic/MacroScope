@@ -11,7 +11,8 @@ import type {
 import { US_BASELINE, type UsWealthGroupBaseline } from "./usBaseline.js";
 import { MODEL_CONSTANTS } from "./modelConstants.js";
 import {
-  EMPTY_FISCAL_STATE,
+  createFiscalState,
+  initialFiscalStateForRequest,
   normalizedSurplusUse,
   resolveFiscalYear,
   type FiscalState,
@@ -180,13 +181,17 @@ export const buildPolicyProjection = (
   );
   const requestedUbi = blended((outcome) => outcome.fiscal.requestedUbi);
   const surplusUse = normalizedSurplusUse(request);
-  const yearOneFiscal = resolveFiscalYear({
-    year: 1,
-    taxRevenue: taxCollected,
-    requestedProgramOutlay: requestedUbi,
-    fundingRule: request.ubi.fundingRule,
-    surplusUse,
-  }).year;
+  const initialFiscalState = initialFiscalStateForRequest(request);
+  const yearOneFiscal = resolveFiscalYear(
+    {
+      year: 1,
+      taxRevenue: taxCollected,
+      requestedProgramOutlay: requestedUbi,
+      fundingRule: request.ubi.fundingRule,
+      surplusUse,
+    },
+    initialFiscalState,
+  ).year;
   const yearOneAllocation = allocateProgramOutlay(yearOneFiscal, request);
   const { ubiReceived, publicServicesSpending, administrativeCost } =
     yearOneAllocation;
@@ -250,6 +255,7 @@ export const buildPolicyProjection = (
   let finalYearFlows = {
     taxCollected,
     ubiReceived,
+    rebate: yearOneFiscal.rebate,
     publicServicesSpending,
     administrativeCost,
     newPrivateLoans,
@@ -262,7 +268,8 @@ export const buildPolicyProjection = (
   let baselinePriceLevel = 1;
   let privateTaxDebt = 0;
   let publicDebt = 0;
-  let fiscalState: FiscalState = EMPTY_FISCAL_STATE;
+  const openingPublicDebt = initialFiscalState.externalPublicDebt;
+  let fiscalState: FiscalState = initialFiscalState;
   const fiscalYears: FiscalProjectionYear[] = [];
   let confidence = 1;
   let bottomWageBase =
@@ -531,6 +538,7 @@ export const buildPolicyProjection = (
     finalYearFlows = {
       taxCollected: taxCollectedYear,
       ubiReceived: allocation.ubiReceived,
+      rebate: fiscalYear.rebate,
       publicServicesSpending: allocation.publicServicesSpending,
       administrativeCost: allocation.administrativeCost,
       newPrivateLoans: newPrivateLoansYear,
@@ -556,7 +564,8 @@ export const buildPolicyProjection = (
   const bottom50PurchasingPowerChange = finalYear.bottom50PurchasingPowerIndex / 100 - 1;
   const top1RealWealthChange = finalYear.top1RealWealthIndex / 100 - 1;
   const gdpChange = finalYear.gdpIndex / 100 - 1;
-  const publicBurdenPerHousehold = publicDebt / US_BASELINE.households;
+  const publicBurdenPerHousehold =
+    Math.max(0, publicDebt) / Math.max(1, request.representedHouseholds);
   const verdict = makeVerdict({
     bottom50PurchasingPowerChange,
     peakAnnualInflation,
@@ -609,6 +618,7 @@ export const buildPolicyProjection = (
     annualFlows: {
       taxCollected,
       ubiReceived,
+      rebate: yearOneFiscal.rebate,
       publicServicesSpending,
       administrativeCost,
       newPrivateLoans,
@@ -624,6 +634,8 @@ export const buildPolicyProjection = (
       cumulativeDebtIssued: fiscalState.cumulativeDebtIssued,
       cumulativeDebtRepaid: fiscalState.cumulativeDebtRepaid,
       netPublicDebtChange: publicDebt,
+      openingPublicDebt,
+      endingPublicDebt: fiscalState.externalPublicDebt + fiscalState.programDebt,
       endingProgramDebt: fiscalState.programDebt,
       endingTreasuryBalance: fiscalState.treasuryBalance,
       years: fiscalYears,
@@ -646,7 +658,7 @@ export const buildPolicyProjection = (
     theoryTest,
     interpretation: [
       "A tax-funded UBI moves existing deposits between households; it does not by itself create money.",
-      `The ${request.ubi.fundingRule} rule determines scheduled outlays, while ${surplusUse} explicitly closes surpluses. Only a growing Treasury balance is modeled as a deposit drain; debt retirement, rebates, and additional services recycle the collected cash.`,
+      `The ${request.ubi.fundingRule} rule determines scheduled outlays, while ${surplusUse} explicitly closes surpluses. Debt reduction is capped by the opening public-debt stock and any remainder stays at Treasury. Only a growing Treasury balance is modeled as a deposit drain; debt retirement, rebates, and additional services recycle the collected cash.`,
       "Bank borrowing creates deposits while the tax loans remain outstanding, so borrowing can expand M2 and add inflation pressure even when the federal budget balances.",
       "Private loans remain liabilities of the wealthy borrowers. They become a burden on other households only if losses are later socialized through bailouts, guarantees, or inflationary deficit finance; this model assumes no such bailout.",
       "Purchasing-power results compare the bottom half with a no-policy baseline after prices; they include partial wage adjustment and an annual UBI flow.",
@@ -1068,6 +1080,7 @@ const buildStressTest = (
   const ubiMultipliers = MODEL_CONSTANTS.stress.ubiMultipliers;
   const monetizationShares = MODEL_CONSTANTS.stress.monetizationShares;
   const requestedUbi = strategies["cash-first"].fiscal.requestedUbi;
+  const initialPublicDebt = initialFiscalStateForRequest(request).externalPublicDebt;
   const cells: StressCell[] = [];
   for (const multiplier of ubiMultipliers) {
     for (const monetizationShare of monetizationShares) {
@@ -1082,6 +1095,7 @@ const buildStressTest = (
         loanAmortizationRate,
         baselineProgramOutlay,
         baselineDemandInflation,
+        initialPublicDebt,
         baseDynamics,
       });
       cells.push({
@@ -1111,6 +1125,7 @@ const buildStressTest = (
       loanAmortizationRate,
       baselineProgramOutlay,
       baselineDemandInflation,
+      initialPublicDebt,
       baseDynamics,
     });
     if (annualToMonthly(peak) >= STRICT_HYPER_MONTHLY_RATE) {
@@ -1148,6 +1163,7 @@ const stressPeak = (input: {
   loanAmortizationRate: number;
   baselineProgramOutlay: number;
   baselineDemandInflation: number;
+  initialPublicDebt: number;
   baseDynamics: BaseDynamics;
 }): number => {
   let m2 = US_BASELINE.m2;
@@ -1155,7 +1171,7 @@ const stressPeak = (input: {
   let privateDebt = 0;
   let priceLevel = 1;
   let peak: number = US_BASELINE.baselineInflation;
-  let fiscalState: FiscalState = EMPTY_FISCAL_STATE;
+  let fiscalState: FiscalState = createFiscalState(input.initialPublicDebt);
   // Same base-dynamics evolution as the main projection loop (issue #17), so the
   // stressed revenue and private-loan flows respond to asset returns, statutory-
   // rate erosion, and top-tier expatriation across the horizon instead of being

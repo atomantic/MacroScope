@@ -157,6 +157,7 @@ export interface FiscalProjectionYear {
   readonly debtRepaid: number;
   readonly interestSavings: number;
   readonly programDebt: number;
+  readonly publicDebtStock: number;
   readonly treasuryBalance: number;
   readonly netPublicDebtChange: number;
   readonly budgetIdentityResidual: number;
@@ -232,6 +233,7 @@ export interface PolicyProjection {
   readonly annualFlows: {
     readonly taxCollected: number;
     readonly ubiReceived: number;
+    readonly rebate: number;
     readonly publicServicesSpending: number;
     readonly administrativeCost: number;
     readonly newPrivateLoans: number;
@@ -241,6 +243,7 @@ export interface PolicyProjection {
     readonly finalYear: {
       readonly taxCollected: number;
       readonly ubiReceived: number;
+      readonly rebate: number;
       readonly publicServicesSpending: number;
       readonly administrativeCost: number;
       readonly newPrivateLoans: number;
@@ -255,6 +258,8 @@ export interface PolicyProjection {
     readonly cumulativeDebtIssued: number;
     readonly cumulativeDebtRepaid: number;
     readonly netPublicDebtChange: number;
+    readonly openingPublicDebt: number;
+    readonly endingPublicDebt: number;
     readonly endingProgramDebt: number;
     readonly endingTreasuryBalance: number;
     readonly years: readonly FiscalProjectionYear[];

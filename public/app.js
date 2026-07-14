@@ -19,7 +19,11 @@ const {
   encodeScenarioParams,
   decodeScenarioParams,
 } = await import(versioned("./scenario-params.js"));
-const { calculatePersonaCashBenefit } = await import(
+const {
+  calculatePersonaCashBenefit,
+  calculatePersonaWealthTax,
+  personaScheduleFromRequest,
+} = await import(
   versioned("./persona-calculation.js")
 );
 
@@ -1411,8 +1415,11 @@ const renderPersona = (result) => {
     aggregateRebate: result.projection.annualFlows.rebate ?? 0,
     representedHouseholds: result.population.representedHouseholds,
   });
-  const exemption = result.wealthTaxTarget?.effectiveExemption ?? request.wealthTax.exemption;
-  const annualTax = Math.max(0, netWorth - exemption) * request.wealthTax.rate;
+  const annualTax = calculatePersonaWealthTax({
+    netWorth,
+    brackets:
+      result.wealthTaxAssessment?.brackets ?? personaScheduleFromRequest(request.wealthTax),
+  });
   const change = groupChange(group) ?? 0;
   const rentNote = Math.abs(group.rentPremiumChange) >= 0.0005
     ? `, with modeled rent about ${signedPercent(group.rentPremiumChange)}`
@@ -1428,7 +1435,9 @@ const renderPersona = (result) => {
     ),
   );
   const note = document.createElement("small");
-  note.append(document.createTextNode("This maps you to the nearest synthetic cohort — a conditional scenario, not personal advice. "));
+  note.append(document.createTextNode(
+    "The tax figure is a net-worth-only estimate using the model's active schedule; it cannot infer your asset mix, deductions, or filing status. Your outcome maps to the nearest synthetic cohort — a conditional scenario, not personal advice. ",
+  ));
   const link = document.createElement("a");
   link.href = "#caveats";
   link.className = "caveat-link";

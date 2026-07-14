@@ -29,28 +29,62 @@ export interface WealthTaxAssessment {
   readonly taxableBase: number;
   readonly annualTax: number;
   readonly installmentAmount: number;
+  readonly marginalRate: number;
+  readonly effectiveRate: number;
+  readonly bracketBreakdown: readonly TaxBracketAssessment[];
+}
+
+export interface TaxBracketAssessment {
+  readonly threshold: number;
+  readonly upperThreshold: number | null;
+  readonly rate: number;
+  readonly taxableAmount: number;
+  readonly tax: number;
+}
+
+export interface ResponseAdjustedWealthTaxAssessment {
+  readonly complianceFactor: number;
+  readonly avoidedTax: number;
+  readonly taxAssessed: number;
 }
 
 export const calculateProgressiveTax = (
   taxableBase: number,
   brackets: readonly TaxBracket[],
-): number => {
+): number => assessProgressiveTax(taxableBase, brackets).annualTax;
+
+export const assessProgressiveTax = (
+  taxableBase: number,
+  brackets: readonly TaxBracket[],
+): Pick<WealthTaxAssessment, "annualTax" | "marginalRate" | "effectiveRate" | "bracketBreakdown"> => {
   if (!Number.isFinite(taxableBase) || taxableBase < 0) {
     throw new Error("Taxable base must be finite and nonnegative.");
   }
-  let tax = 0;
-  for (let index = 0; index < brackets.length; index += 1) {
-    const bracket = brackets[index];
-    if (!bracket) continue;
-    const next = brackets[index + 1];
-    const upperBound = next?.threshold ?? Infinity;
-    const amountInBracket = Math.max(
+  const bracketBreakdown = brackets.map((bracket, index) => {
+    const upperThreshold = brackets[index + 1]?.threshold;
+    const taxableAmount = Math.max(
       0,
-      Math.min(taxableBase, upperBound) - bracket.threshold,
+      Math.min(taxableBase, upperThreshold ?? Infinity) - bracket.threshold,
     );
-    tax += amountInBracket * bracket.rate;
-  }
-  return tax;
+    return {
+      threshold: bracket.threshold,
+      upperThreshold: upperThreshold ?? null,
+      rate: bracket.rate,
+      taxableAmount,
+      tax: taxableAmount * bracket.rate,
+    };
+  });
+  const annualTax = bracketBreakdown.reduce((total, bracket) => total + bracket.tax, 0);
+  const marginalRate =
+    [...bracketBreakdown]
+      .reverse()
+      .find((bracket) => bracket.taxableAmount > 0)?.rate ?? 0;
+  return {
+    annualTax,
+    marginalRate,
+    effectiveRate: taxableBase > 0 ? annualTax / taxableBase : 0,
+    bracketBreakdown,
+  };
 };
 
 export const assessWealthTax = (
@@ -73,14 +107,37 @@ export const assessWealthTax = (
     0,
     includedAssets - deductibleLiabilities - policy.exemption,
   );
-  const annualTax = calculateProgressiveTax(taxableBase, policy.brackets);
+  const progressiveAssessment = assessProgressiveTax(taxableBase, policy.brackets);
   return {
     includedAssets,
     deductibleLiabilities,
     exemption: policy.exemption,
     taxableBase,
-    annualTax,
-    installmentAmount: annualTax / policy.installments,
+    annualTax: progressiveAssessment.annualTax,
+    installmentAmount: progressiveAssessment.annualTax / policy.installments,
+    marginalRate: progressiveAssessment.marginalRate,
+    effectiveRate: progressiveAssessment.effectiveRate,
+    bracketBreakdown: progressiveAssessment.bracketBreakdown,
+  };
+};
+
+// Avoidance elasticity is the fraction of a household's taxable base that is
+// removed per percentage point of the household's marginal statutory rate.
+// Applying it to the assessed liability preserves the prior flat-tax identity,
+// while allowing progressive schedules to respond at the bracket actually faced.
+export const applyWealthTaxpayerResponse = (
+  assessment: WealthTaxAssessment,
+  avoidanceElasticity: number,
+): ResponseAdjustedWealthTaxAssessment => {
+  const complianceFactor = Math.max(
+    0,
+    1 - avoidanceElasticity * assessment.marginalRate * 100,
+  );
+  const taxAssessed = assessment.annualTax * complianceFactor;
+  return {
+    complianceFactor,
+    avoidedTax: assessment.annualTax - taxAssessed,
+    taxAssessed,
   };
 };
 

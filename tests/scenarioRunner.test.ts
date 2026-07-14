@@ -437,6 +437,13 @@ describe("vertical-slice scenario runner", () => {
       flat.strategies["cash-first"].fiscal.taxAssessed,
     );
     expect(warren.strategies["cash-first"].accounting.passed).toBe(true);
+    expect(warren.wealthTaxAssessment.brackets).toEqual([
+      expect.objectContaining({ threshold: 50_000_000, rate: 0.02 }),
+      expect.objectContaining({ threshold: 1_000_000_000, rate: 0.06 }),
+    ]);
+    expect(warren.wealthTaxAssessment.fullComplianceTax).toBeGreaterThan(
+      flat.wealthTaxAssessment.fullComplianceTax,
+    );
 
     // The out-year projection must erode the base at the graduated schedule's
     // blended effective rate, not the (lower) flat 2% floor rate. With the same
@@ -445,5 +452,44 @@ describe("vertical-slice scenario runner", () => {
     expect(warren.projection.summary.top1RealWealthChange).toBeLessThan(
       flat.projection.summary.top1RealWealthChange,
     );
+  });
+
+  it("uses each household's graduated marginal rate for taxpayer response", () => {
+    const base = compactRequest();
+    const request = {
+      ...base,
+      wealthTax: {
+        targetMode: "exemption" as const,
+        topShare: 0.01,
+        exemption: 50_000_000,
+        rate: 0.02,
+        brackets: [
+          { threshold: 50_000_000, rate: 0.02 },
+          { threshold: 1_000_000_000, rate: 0.06 },
+        ],
+      },
+      behavior: { ...base.behavior, avoidanceElasticity: 0.1 },
+    };
+    const graduated = runComparison(request);
+    const flat = runComparison({
+      ...request,
+      wealthTax: {
+        targetMode: "exemption",
+        topShare: 0.01,
+        exemption: 50_000_000,
+        rate: 0.02,
+      },
+    });
+
+    expect(graduated.wealthTaxAssessment.avoidedTax).toBeGreaterThan(
+      flat.wealthTaxAssessment.avoidedTax,
+    );
+    expect(graduated.wealthTaxAssessment.responseAdjustedTax).toBeLessThan(
+      graduated.wealthTaxAssessment.fullComplianceTax,
+    );
+    expect(
+      graduated.wealthTaxAssessment.responseAdjustedTax /
+        graduated.wealthTaxAssessment.fullComplianceTax,
+    ).toBeLessThan(0.8);
   });
 });

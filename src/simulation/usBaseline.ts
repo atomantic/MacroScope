@@ -17,6 +17,10 @@ export interface UsWealthGroupBaseline {
   readonly assets: number;
   readonly liabilities: number;
   readonly netWorth: number;
+  /** Compatibility aliases retained for existing `/api/baseline/us` clients. */
+  readonly deposits: number;
+  readonly publicEquity: number;
+  readonly realEstate: number;
   readonly assetClasses: Readonly<Record<AssetClass, number>>;
   readonly liabilityClasses: Readonly<Record<LiabilityClass, number>>;
 }
@@ -133,6 +137,9 @@ export const US_WEALTH_GROUPS: readonly UsWealthGroupBaseline[] = [
     assets: 10_348_948 * MILLION,
     liabilities: 6_082_588 * MILLION,
     netWorth: 4_266_359 * MILLION,
+    deposits: 793_232 * MILLION,
+    publicEquity: 587_223 * MILLION,
+    realEstate: 4_826_745 * MILLION,
     assetClasses: {
       deposits: 793_232 * MILLION,
       governmentBonds: 28_583 * MILLION,
@@ -157,6 +164,9 @@ export const US_WEALTH_GROUPS: readonly UsWealthGroupBaseline[] = [
     assets: 60_280_257 * MILLION,
     liabilities: 8_795_392 * MILLION,
     netWorth: 51_484_864 * MILLION,
+    deposits: 5_185_020 * MILLION,
+    publicEquity: 6_400_950 * MILLION,
+    realEstate: 22_650_205 * MILLION,
     assetClasses: {
       deposits: 5_185_020 * MILLION,
       governmentBonds: 1_193_186 * MILLION,
@@ -181,6 +191,9 @@ export const US_WEALTH_GROUPS: readonly UsWealthGroupBaseline[] = [
     assets: 67_334_132 * MILLION,
     liabilities: 4_108_736 * MILLION,
     netWorth: 63_225_396 * MILLION,
+    deposits: 5_054_244 * MILLION,
+    publicEquity: 20_514_327 * MILLION,
+    realEstate: 14_762_255 * MILLION,
     assetClasses: {
       deposits: 5_054_244 * MILLION,
       governmentBonds: 2_386_708 * MILLION,
@@ -205,6 +218,9 @@ export const US_WEALTH_GROUPS: readonly UsWealthGroupBaseline[] = [
     assets: 30_730_484 * MILLION,
     liabilities: 769_766 * MILLION,
     netWorth: 29_960_718 * MILLION,
+    deposits: 1_946_235 * MILLION,
+    publicEquity: 14_312_130 * MILLION,
+    realEstate: 4_546_853 * MILLION,
     assetClasses: {
       deposits: 1_946_235 * MILLION,
       governmentBonds: 1_150_715 * MILLION,
@@ -229,6 +245,9 @@ export const US_WEALTH_GROUPS: readonly UsWealthGroupBaseline[] = [
     assets: 25_311_992 * MILLION,
     liabilities: 239_711 * MILLION,
     netWorth: 25_072_282 * MILLION,
+    deposits: 1_473_775 * MILLION,
+    publicEquity: 13_331_518 * MILLION,
+    realEstate: 1_937_284 * MILLION,
     assetClasses: {
       deposits: 1_473_775 * MILLION,
       governmentBonds: 1_104_402 * MILLION,
@@ -342,6 +361,24 @@ export const calibratePopulationToUsWithDiagnostics = (
   representedHouseholds: number,
 ): PopulationCalibration => {
   const economyScale = representedHouseholds / US_BASELINE.households;
+  const weightScalars = new Map<UsWealthGroupId, number>();
+  for (const group of US_WEALTH_GROUPS) {
+    const members = households.filter((household) => inGroup(household.percentile, group));
+    weightScalars.set(
+      group.id,
+      calibrationScalar(
+        weightedInstrumentTotal(members, () => 1),
+        group.households * economyScale,
+        `${group.id} household weight`,
+      ),
+    );
+  }
+  const reweighted = households.map((household) => {
+    const group = groupForPercentile(household.percentile);
+    const scalar = weightScalars.get(group.id);
+    if (scalar === undefined) throw new Error(`Missing U.S. weight scalar for ${group.id}.`);
+    return { ...household, weight: household.weight * scalar };
+  });
   const scalars = new Map<
     UsWealthGroupId,
     {
@@ -351,7 +388,7 @@ export const calibratePopulationToUsWithDiagnostics = (
   >();
 
   for (const group of US_WEALTH_GROUPS) {
-    const members = households.filter((household) => inGroup(household.percentile, group));
+    const members = reweighted.filter((household) => inGroup(household.percentile, group));
     const assetScalars = mapTargets(group.assetClasses, (assetClass, target) =>
       calibrationScalar(
         weightedInstrumentTotal(members, (household) => household.assets[assetClass]),
@@ -374,7 +411,7 @@ export const calibratePopulationToUsWithDiagnostics = (
     scalars.set(group.id, { assets: assetScalars, liabilities: liabilityScalars });
   }
 
-  const calibrated = households.map((household) => {
+  const calibrated = reweighted.map((household) => {
     const group = groupForPercentile(household.percentile);
     const groupScalars = scalars.get(group.id);
     if (!groupScalars) throw new Error(`Missing U.S. calibration scalars for ${group.id}.`);

@@ -29,7 +29,13 @@ export interface WealthTaxPolicyV1 {
   readonly unit: "individual" | "tax-household";
   readonly exemption: number;
   readonly brackets: readonly TaxBracket[];
-  readonly assets: Readonly<Record<AssetClass, AssetTaxRule>>;
+  // `otherAssets` was added after schema v1 shipped. Keep it optional in the
+  // versioned contract so saved v1 scenarios remain valid; assessment supplies
+  // the compatibility default when the rule is absent.
+  readonly assets: Readonly<
+    Record<Exclude<AssetClass, "otherAssets">, AssetTaxRule> &
+      Partial<Record<"otherAssets", AssetTaxRule>>
+  >;
   readonly liabilities: Readonly<Record<LiabilityClass, DebtTaxRule>>;
   readonly installments: 1 | 2 | 4 | 12;
   readonly allowDeferral: boolean;

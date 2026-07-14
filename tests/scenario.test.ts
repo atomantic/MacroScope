@@ -63,6 +63,20 @@ describe("scenario schema", () => {
     expect(validateScenario(scenario())).toEqual([]);
   });
 
+  it("accepts schema-v1 asset rules created before otherAssets existed", () => {
+    const current = scenario();
+    const { otherAssets: _otherAssets, ...legacyAssets } = current.policies.wealthTax.assets;
+    const legacy: ScenarioV1 = {
+      ...current,
+      policies: {
+        ...current.policies,
+        wealthTax: { ...current.policies.wealthTax, assets: legacyAssets },
+      },
+    };
+
+    expect(validateScenario(legacy)).toEqual([]);
+  });
+
   it("rejects decreasing progressive rates", () => {
     const invalid = scenario();
     const withInvalidBrackets: ScenarioV1 = {

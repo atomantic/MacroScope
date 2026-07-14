@@ -25,6 +25,9 @@ describe("DFA instrument calibration", () => {
     for (const group of US_WEALTH_GROUPS) {
       expect(recordTotal(group.assetClasses)).toBe(group.assets);
       expect(recordTotal(group.liabilityClasses)).toBe(group.liabilities);
+      expect(group.deposits).toBe(group.assetClasses.deposits);
+      expect(group.publicEquity).toBe(group.assetClasses.publicEquity);
+      expect(group.realEstate).toBe(group.assetClasses.housing);
       // The published net-worth column can differ from rounded assets less
       // rounded liabilities by $1 million.
       expect(Math.abs(group.assets - group.liabilities - group.netWorth)).toBeLessThanOrEqual(
@@ -52,6 +55,17 @@ describe("DFA instrument calibration", () => {
         ),
       ),
     ).toBe(true);
+    for (const group of US_WEALTH_GROUPS) {
+      const represented = result.households
+        .filter(
+          (household) =>
+            household.percentile >= group.percentileMinimum &&
+            (household.percentile < group.percentileMaximum ||
+              group.percentileMaximum === 1),
+        )
+        .reduce((total, household) => total + household.weight, 0);
+      expect(represented).toBeCloseTo(group.households, 5);
+    }
   });
 
   it("preserves instrument targets when a scenario represents a scaled population", () => {

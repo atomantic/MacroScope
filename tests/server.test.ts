@@ -65,13 +65,19 @@ describe("PortOS server", () => {
     expect(await demo.json()).toMatchObject({
       delta: { borrowVsCash: { deposits: 20, loans: 20 } },
     });
-    expect(await baseline.json()).toMatchObject({
+    const baselinePayload = await baseline.json();
+    expect(baselinePayload).toMatchObject({
       id: "us-2026-q1",
       households: 135_134_121,
       calibration: {
         vintage: "2026:Q1",
         tolerance: 0.01,
       },
+    });
+    expect(baselinePayload.wealthGroups[0]).toMatchObject({
+      deposits: 793_232_000_000,
+      publicEquity: 587_223_000_000,
+      realEstate: 4_826_745_000_000,
     });
     expect(constants.status).toBe(200);
     const constantsPayload = await constants.json();

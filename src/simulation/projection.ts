@@ -1391,13 +1391,19 @@ const makeVerdict = (input: {
       !harmfulInflation &&
       !harmfulDebt &&
       (input.peakAnnualInflation < 0.05 || !harmfulPurchasingPower);
+    const growthDespitePurchasingPowerGain =
+      growthDriven && input.bottom50PurchasingPowerChange >= 0;
     return {
       rating: "harmful",
       headline: growthDriven
-        ? "The wealth-tax drag on investment and wages outweighs the transfer gain."
+        ? growthDespitePurchasingPowerGain
+          ? "The bottom half gains buying power, but the investment and output loss is harmful."
+          : "The wealth-tax drag on investment and wages outweighs the transfer gain."
         : "The inflation or debt cost overwhelms the transfer gain.",
       explanation: growthDriven
-        ? "Under these assumptions the tax reduces saving and investment enough to shrink the capital stock and wages, so the bottom half ends with less real buying power even without a modeled inflation or debt crisis."
+        ? growthDespitePurchasingPowerGain
+          ? "Under these assumptions, transfers or lower prices lift bottom-half buying power, but reduced saving and investment shrink output per worker past the model’s harmful threshold."
+          : "Under these assumptions the tax reduces saving and investment enough to shrink the capital stock and wages, so the bottom half ends with less real buying power even without a modeled inflation or debt crisis."
         : "Under these assumptions, the bottom half ends with less relative buying power or the financing path enters a high-risk inflation/debt regime.",
     };
   }

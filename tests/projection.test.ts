@@ -710,6 +710,29 @@ describe("ten-year projection dynamics", () => {
     expect(result.projection.verdict.explanation).toMatch(/saving and investment/);
   });
 
+  it("acknowledges a purchasing-power gain when output loss drives harm", () => {
+    const base = nationalRequest();
+    const result = runComparison({
+      ...base,
+      wealthTax: { targetMode: "exemption", exemption: 0, topShare: 0.01, rate: 0.01 },
+      ubi: {
+        ...base.ubi,
+        adultMonthlyBenefit: 0,
+        childMonthlyBenefit: 0,
+        surplusUse: "rebate",
+      },
+      behavior: { ...base.behavior, savingsResponseElasticity: 1 },
+      model: { ...base.model, monetaryPolicyOffsetShare: 1 },
+    });
+
+    expect(result.projection.summary.bottom50PurchasingPowerChange).toBeGreaterThan(0);
+    expect(result.projection.summary.gdpChange).toBeLessThan(-0.02);
+    expect(result.projection.verdict.rating).toBe("harmful");
+    expect(result.projection.verdict.headline).toMatch(/gains buying power.*output loss/i);
+    expect(result.projection.verdict.explanation).toMatch(/lift bottom-half buying power/i);
+    expect(result.projection.verdict.explanation).not.toMatch(/less real buying power/i);
+  });
+
   it("lifts output when the transfer's demand offset is on", () => {
     // With no savings response, a positive demand offset feeds the transfer's
     // fiscal impulse into investment and output, so GDP ends ABOVE the no-policy

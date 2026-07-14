@@ -270,7 +270,8 @@ export const createApp = (options: AppOptions = {}): Express => {
       response.status(503).json({ error: "Uncertainty analysis is busy; retry shortly." });
       return;
     }
-    const streaming = request.get("accept")?.includes("application/x-ndjson") ?? false;
+    const streaming =
+      request.get("accept")?.toLowerCase().includes("application/x-ndjson") ?? false;
     if (streaming) {
       response.status(200);
       response.type("application/x-ndjson");
@@ -298,7 +299,7 @@ export const createApp = (options: AppOptions = {}): Express => {
       if (error instanceof UncertaintyCancelledError || response.destroyed) return;
       if (streaming) {
         response.end(`${JSON.stringify({
-          error: error instanceof Error ? error.message : "Uncertainty analysis failed.",
+          error: "Uncertainty analysis failed.",
         })}\n`);
         return;
       }

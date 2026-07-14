@@ -211,7 +211,7 @@ describe("PortOS server", () => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Accept: "application/x-ndjson",
+        Accept: "Application/X-NDJSON",
       },
       body: JSON.stringify(body),
     });

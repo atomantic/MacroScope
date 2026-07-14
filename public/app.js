@@ -724,18 +724,25 @@ const runServerUncertainty = async (request, options, onProgress) => {
   const decoder = new TextDecoder();
   let buffer = "";
   let result = null;
-  while (true) {
-    const chunk = await reader.read();
-    buffer += decoder.decode(chunk.value, { stream: !chunk.done });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() ?? "";
-    for (const line of lines) {
-      if (!line) continue;
-      const message = JSON.parse(line);
-      if (message.progress) onProgress(message.progress);
-      if (message.result) result = message.result;
+  const handleMessage = (line) => {
+    if (!line.trim()) return;
+    const message = JSON.parse(line);
+    if (message.error) throw new Error(message.error);
+    if (message.progress) onProgress(message.progress);
+    if (message.result) result = message.result;
+  };
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      buffer += decoder.decode(chunk.value, { stream: !chunk.done });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) handleMessage(line);
+      if (chunk.done) break;
     }
-    if (chunk.done) break;
+    handleMessage(buffer);
+  } finally {
+    reader.releaseLock();
   }
   if (!result) throw new Error("Uncertainty run ended without a result.");
   return result;
@@ -2059,7 +2066,7 @@ const renderUncertainty = (analysis) => {
   byId("uncertainty-note").textContent =
     `${analysis.note} Seed ${analysis.options.seed}; ${analysis.sampledParameters.length} sampled assumptions; ` +
     `${analysis.fixedAssumptions.length} policy or judgment choices held fixed. ` +
-    "Influence scores are standardized correlations; interactions are correlations after removing linear main effects.";
+    "Influence scores are standardized regression coefficients; interaction scores partial out linear main effects from both the outcome and each parameter pair.";
   byId("uncertainty-results").hidden = false;
 };
 

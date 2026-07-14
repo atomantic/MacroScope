@@ -490,8 +490,8 @@ export interface UncertaintyAnalysis {
   readonly years: readonly UncertaintyYearBand[];
   readonly groups: readonly UncertaintyGroupBand[];
   readonly influenceTarget: "bottom50PurchasingPowerChange";
-  readonly influenceMethod: "absolute-standardized-correlation";
-  readonly interactionMethod: "pair-product-correlation-with-main-effect-residual";
+  readonly influenceMethod: "absolute-standardized-regression-coefficient";
+  readonly interactionMethod: "pair-product-partial-correlation-after-main-effects";
   readonly influences: readonly UncertaintyInfluence[];
   readonly interactions: readonly UncertaintyInteraction[];
 }
@@ -753,8 +753,8 @@ export const runUncertaintyAnalysis = (
     years: summarizeYears(records),
     groups: summarizeGroups(records),
     influenceTarget: "bottom50PurchasingPowerChange",
-    influenceMethod: "absolute-standardized-correlation",
-    interactionMethod: "pair-product-correlation-with-main-effect-residual",
+    influenceMethod: "absolute-standardized-regression-coefficient",
+    interactionMethod: "pair-product-partial-correlation-after-main-effects",
     influences: influenceResult.influences,
     interactions: influenceResult.interactions,
   };
@@ -792,6 +792,28 @@ const parameterMetadata = (
 const fixedAssumptions = (
   request: ComparisonRequestV1,
 ): readonly FixedUncertaintyAssumption[] => [
+  {
+    id: "wealth-tax-design",
+    label: "Wealth-tax schedule",
+    group: "tax-design",
+    value: request.wealthTax.brackets?.length
+      ? request.wealthTax.brackets
+        .map((bracket) => `${bracket.rate * 100}% above $${bracket.threshold.toLocaleString("en-US")}`)
+        .join("; ")
+      : `${request.wealthTax.rate * 100}% above $${request.wealthTax.exemption.toLocaleString("en-US")}`,
+    kind: "normative",
+    sampled: false,
+    reason: "Defining policy choice; compare schedules as separate scenarios rather than blending them.",
+  },
+  {
+    id: "benefit-levels",
+    label: "Monthly benefit levels",
+    group: "services",
+    value: `$${request.ubi.adultMonthlyBenefit.toLocaleString("en-US")} per adult; $${request.ubi.childMonthlyBenefit.toLocaleString("en-US")} per child`,
+    kind: "normative",
+    sampled: false,
+    reason: "Program-size choice held at the scenario value.",
+  },
   {
     id: "funding-rule",
     label: "Fiscal closure rule",
@@ -911,14 +933,10 @@ const globalInfluence = (
 ): { influences: readonly UncertaintyInfluence[]; interactions: readonly UncertaintyInteraction[] } => {
   const standardizedInputs = inputs.map(standardize);
   const standardizedOutcome = standardize(outcome);
-  const coefficients = standardizedInputs.map((input) => correlation(input, standardizedOutcome));
-  const fitted = standardizedOutcome.map((_value, row) =>
-    coefficients.reduce(
-      (sum, coefficient, column) => sum + coefficient * (standardizedInputs[column]?.[row] ?? 0),
-      0,
-    ));
-  const residual = standardizedOutcome.map((value, row) => value - (fitted[row] ?? 0));
-  const standardizedResidual = standardize(residual);
+  const gram = regressionGram(standardizedInputs);
+  const coefficients = regressionCoefficients(gram, standardizedInputs, standardizedOutcome);
+  const outcomeResidual = regressionResidual(standardizedInputs, standardizedOutcome, coefficients);
+  const standardizedOutcomeResidual = standardize(outcomeResidual);
   const influences = metadata
     .map((parameter, index): UncertaintyInfluence => {
       const coefficient = coefficients[index] ?? 0;
@@ -939,7 +957,11 @@ const globalInfluence = (
       const rightMeta = metadata[right];
       if (!leftValues || !rightValues || !leftMeta || !rightMeta) continue;
       const product = standardize(leftValues.map((value, row) => value * (rightValues[row] ?? 0)));
-      const coefficient = correlation(product, standardizedResidual);
+      const productCoefficients = regressionCoefficients(gram, standardizedInputs, product);
+      const productResidual = standardize(
+        regressionResidual(standardizedInputs, product, productCoefficients),
+      );
+      const coefficient = correlation(productResidual, standardizedOutcomeResidual);
       interactions.push({
         leftParameterId: leftMeta.id,
         leftLabel: leftMeta.label,
@@ -952,6 +974,70 @@ const globalInfluence = (
   }
   interactions.sort((left, right) => right.score - left.score);
   return { influences: influences.slice(0, 10), interactions: interactions.slice(0, 8) };
+};
+
+const regressionGram = (columns: readonly (readonly number[])[]): number[][] =>
+  columns.map((left, row) =>
+    columns.map((right, column) => correlation(left, right) + (row === column ? 1e-8 : 0)));
+
+const regressionCoefficients = (
+  gram: readonly (readonly number[])[],
+  columns: readonly (readonly number[])[],
+  target: readonly number[],
+): number[] => solveLinearSystem(
+  gram,
+  columns.map((column) => correlation(column, target)),
+);
+
+const regressionResidual = (
+  columns: readonly (readonly number[])[],
+  target: readonly number[],
+  coefficients: readonly number[],
+): number[] => target.map((value, row) =>
+  value - coefficients.reduce(
+    (sum, coefficient, column) => sum + coefficient * (columns[column]?.[row] ?? 0),
+    0,
+  ));
+
+const solveLinearSystem = (
+  matrix: readonly (readonly number[])[],
+  rightHandSide: readonly number[],
+): number[] => {
+  const size = matrix.length;
+  const rows = matrix.map((row, index) => [
+    ...Array.from({ length: size }, (_, column) => row[column] ?? 0),
+    rightHandSide[index] ?? 0,
+  ]);
+  for (let pivot = 0; pivot < size; pivot += 1) {
+    let best = pivot;
+    for (let candidate = pivot + 1; candidate < size; candidate += 1) {
+      if (Math.abs(rows[candidate]?.[pivot] ?? 0) > Math.abs(rows[best]?.[pivot] ?? 0)) {
+        best = candidate;
+      }
+    }
+    const selected = rows[best];
+    const current = rows[pivot];
+    if (!selected || !current) return Array.from({ length: size }, () => 0);
+    rows[pivot] = selected;
+    rows[best] = current;
+    const divisor = rows[pivot]?.[pivot] ?? 0;
+    if (Math.abs(divisor) <= Number.EPSILON) return Array.from({ length: size }, () => 0);
+    for (let column = pivot; column <= size; column += 1) {
+      const row = rows[pivot];
+      if (row) row[column] = (row[column] ?? 0) / divisor;
+    }
+    for (let rowIndex = 0; rowIndex < size; rowIndex += 1) {
+      if (rowIndex === pivot) continue;
+      const row = rows[rowIndex];
+      const pivotRow = rows[pivot];
+      if (!row || !pivotRow) continue;
+      const factor = row[pivot] ?? 0;
+      for (let column = pivot; column <= size; column += 1) {
+        row[column] = (row[column] ?? 0) - factor * (pivotRow[column] ?? 0);
+      }
+    }
+  }
+  return rows.map((row) => row[size] ?? 0);
 };
 
 const signedDirection = (value: number): "positive" | "negative" | "flat" =>

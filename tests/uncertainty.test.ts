@@ -42,6 +42,11 @@ describe("joint uncertainty analysis", () => {
     expect(analysis.groups).toHaveLength(6);
     expect(analysis.influences.length).toBeGreaterThan(0);
     expect(analysis.interactions.length).toBeGreaterThan(0);
+    expect(analysis.influenceMethod).toBe("absolute-standardized-regression-coefficient");
+    expect(analysis.interactionMethod)
+      .toBe("pair-product-partial-correlation-after-main-effects");
+    expect(analysis.influences.every((influence) => Number.isFinite(influence.score))).toBe(true);
+    expect(analysis.interactions.every((interaction) => interaction.score <= 1)).toBe(true);
     for (const metric of analysis.metrics) {
       expect(metric.band.p10).toBeLessThanOrEqual(metric.band.p50);
       expect(metric.band.p50).toBeLessThanOrEqual(metric.band.p90);
@@ -66,6 +71,8 @@ describe("joint uncertainty analysis", () => {
     expect(analysis.sampledParameters.some((parameter) => parameter.sourceUrl !== null)).toBe(true);
     const fixed = new Set(analysis.fixedAssumptions.map((assumption) => assumption.id));
     expect(fixed.has("funding-rule")).toBe(true);
+    expect(fixed.has("wealth-tax-design")).toBe(true);
+    expect(fixed.has("benefit-levels")).toBe(true);
     expect(fixed.has("direct-cash-share")).toBe(true);
     expect(fixed.has("administrative-share")).toBe(true);
     expect(fixed.has("verdict-threshold")).toBe(true);

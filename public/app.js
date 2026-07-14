@@ -669,6 +669,11 @@ const runLocalScenario = async (request, mode = "compare", options, onProgress) 
   // blocked worker loading) — retry the same request on the main thread.
   if (response?.workerFailed) {
     if (mode === "uncertainty") {
+      // The failure may be a transient static-asset load error. Clear the
+      // channel's failed state so the next explicit click constructs a fresh
+      // worker instead of permanently falling into the unsupported main-thread
+      // path until the page is reloaded.
+      channel.cancelAll();
       throw new Error(
         "Joint uncertainty could not start its browser worker. Check static asset access and try again.",
       );
@@ -2091,7 +2096,7 @@ const renderUncertainty = (analysis) => {
     `${analysis.note} Seed ${analysis.options.seed}; ${analysis.sampledParameters.length} sampled assumptions; ` +
     `${analysis.fixedAssumptions.length} policy or judgment choices held fixed. ` +
     populationDesign +
-    "Declared dependency groups use rank-factor loadings; borrowing and sales use triangular proposals with proportional closure at their joint boundary. " +
+    "Declared dependency groups use rank-factor loadings with sampled direction checks; borrowing and sales use triangular proposals with proportional closure at their joint boundary. " +
     "Countermonotonic borrowing and sales are ranked as one financing-mix axis. Influence scores are standardized regression coefficients; the separately reported population effect is a matched-draw categorical correlation ratio. Interaction scores partial out linear main effects from both the outcome and each parameter pair.";
   byId("uncertainty-results").hidden = false;
 };

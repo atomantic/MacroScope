@@ -46,7 +46,8 @@ describe("joint uncertainty analysis", () => {
       .toBe("absolute-standardized-regression-coefficient-with-grouped-financing-axis");
     expect(analysis.interactionMethod)
       .toBe("pair-product-partial-correlation-after-main-effects");
-    expect(analysis.correlationMethod).toBe("rank-reordered-latin-hypercube-factor");
+    expect(analysis.correlationMethod)
+      .toBe("rank-reordered-latin-hypercube-factor-with-direction-check");
     expect(analysis.correlationChecks.length).toBeGreaterThan(0);
     for (const check of analysis.correlationChecks) {
       expect(Math.abs(check.observedCorrelation)).toBeGreaterThan(0.15);
@@ -110,6 +111,19 @@ describe("joint uncertainty analysis", () => {
       expect(analysis.influences.some((influence) =>
         influence.parameterId === "borrow-share" || influence.parameterId === "sell-share"))
         .toBe(false);
+    }
+  });
+
+  it("preserves declared dependency directions at the minimum draw budget", () => {
+    const analysis = runUncertaintyAnalysis(request, {
+      ...options,
+      draws: 32,
+      seed: 30,
+    });
+    for (const check of analysis.correlationChecks) {
+      expect(Math.sign(check.observedCorrelation)).toBe(
+        check.expectedDirection === "positive" ? 1 : -1,
+      );
     }
   });
 

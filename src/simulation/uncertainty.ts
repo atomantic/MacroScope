@@ -524,7 +524,7 @@ export interface UncertaintyAnalysis {
     readonly fiscalAndLedgerAuditsPassed: true;
   };
   readonly sampledParameters: readonly UncertaintyParameterMetadata[];
-  readonly correlationMethod: "rank-reordered-latin-hypercube-factor";
+  readonly correlationMethod: "rank-reordered-latin-hypercube-factor-with-direction-check";
   readonly correlationChecks: readonly UncertaintyCorrelationCheck[];
   readonly fixedAssumptions: readonly FixedUncertaintyAssumption[];
   readonly verdictFrequencies: Readonly<
@@ -837,7 +837,7 @@ export const runUncertaintyAnalysis = (
       fiscalAndLedgerAuditsPassed: true,
     },
     sampledParameters: influenceMetadata,
-    correlationMethod: "rank-reordered-latin-hypercube-factor",
+    correlationMethod: "rank-reordered-latin-hypercube-factor-with-direction-check",
     correlationChecks: summarizeCorrelationChecks(records, metadata),
     fixedAssumptions: fixedAssumptions(baseRequest),
     verdictFrequencies: verdictFrequencies(records),
@@ -1045,9 +1045,12 @@ const summarizeCorrelationChecks = (
         leftMeta.correlationLoading === null ||
         rightMeta.correlationLoading === null
       ) continue;
-      const observedCorrelation = correlation(
-        standardize(records.map((record) => record.parameterValues[left] ?? 0)),
-        standardize(records.map((record) => record.parameterValues[right] ?? 0)),
+      // The copula is constructed by rank reordering, so report its observed
+      // Spearman correlation rather than a Pearson coefficient that can change
+      // sign after skewed monotone marginal transforms.
+      const observedCorrelation = rankCorrelation(
+        records.map((record) => record.parameterValues[left] ?? 0),
+        records.map((record) => record.parameterValues[right] ?? 0),
       );
       checks.push({
         group: leftMeta.correlationGroup,
@@ -1277,6 +1280,27 @@ const correlation = (left: readonly number[], right: readonly number[]): number 
   return sum / length;
 };
 
+const rankCorrelation = (left: readonly number[], right: readonly number[]): number =>
+  correlation(standardize(rankValues(left)), standardize(rankValues(right)));
+
+const rankValues = (values: readonly number[]): number[] => {
+  const ordered = values
+    .map((value, index) => ({ value, index }))
+    .sort((left, right) => left.value - right.value || left.index - right.index);
+  const ranks = Array.from({ length: values.length }, () => 0);
+  for (let start = 0; start < ordered.length;) {
+    let end = start + 1;
+    while (end < ordered.length && ordered[end]?.value === ordered[start]?.value) end += 1;
+    const averageRank = (start + end - 1) / 2;
+    for (let cursor = start; cursor < end; cursor += 1) {
+      const item = ordered[cursor];
+      if (item) ranks[item.index] = averageRank;
+    }
+    start = end;
+  }
+  return ranks;
+};
+
 const percentileBand = (values: readonly number[]): PercentileBand => ({
   p10: quantile(values, 0.1),
   p50: quantile(values, 0.5),
@@ -1319,19 +1343,53 @@ const correlatedLatinHypercubeColumns = (
   random: () => number,
 ): readonly (readonly number[])[] => {
   const values = specs.map(() => latinHypercubeColumn(draws, random));
-  const sharedByGroup = new Map<string, readonly number[]>();
-  return specs.map((spec, index) => {
-    const valueColumn = values[index];
-    if (!valueColumn) throw new Error("Uncertainty Latin-hypercube column missing.");
-    if (!spec.correlationGroup || spec.correlationLoading === null) return valueColumn;
-    let shared = sharedByGroup.get(spec.correlationGroup);
-    if (!shared) {
-      shared = latinHypercubeColumn(draws, random);
-      sharedByGroup.set(spec.correlationGroup, shared);
+  // Small Latin-hypercube designs can occasionally let the independent factor
+  // noise reverse a declared dependency. Reorder the same marginal strata with
+  // fresh deterministic factor draws until all requested rank directions hold.
+  // This preserves every LHS marginal and is replayable from the ensemble seed.
+  for (let attempt = 0; attempt < 64; attempt += 1) {
+    const sharedByGroup = new Map<string, readonly number[]>();
+    const columns = specs.map((spec, index) => {
+      const valueColumn = values[index];
+      if (!valueColumn) throw new Error("Uncertainty Latin-hypercube column missing.");
+      if (!spec.correlationGroup || spec.correlationLoading === null) return valueColumn;
+      let shared = sharedByGroup.get(spec.correlationGroup);
+      if (!shared) {
+        shared = latinHypercubeColumn(draws, random);
+        sharedByGroup.set(spec.correlationGroup, shared);
+      }
+      const noise = latinHypercubeColumn(draws, random);
+      return rankReorderedColumn(valueColumn, shared, noise, spec.correlationLoading);
+    });
+    if (declaredCorrelationDirectionsHold(columns, specs)) return columns;
+  }
+  throw new Error("Unable to construct uncertainty draws with the declared correlation directions.");
+};
+
+const declaredCorrelationDirectionsHold = (
+  columns: readonly (readonly number[])[],
+  specs: readonly ParameterSpec[],
+): boolean => {
+  for (let left = 0; left < specs.length; left += 1) {
+    for (let right = left + 1; right < specs.length; right += 1) {
+      const leftSpec = specs[left];
+      const rightSpec = specs[right];
+      if (
+        !leftSpec?.correlationGroup ||
+        leftSpec.correlationGroup !== rightSpec?.correlationGroup ||
+        leftSpec.correlationLoading === null ||
+        rightSpec.correlationLoading === null
+      ) continue;
+      const leftColumn = columns[left];
+      const rightColumn = columns[right];
+      if (!leftColumn || !rightColumn) return false;
+      const expectedSign = Math.sign(
+        leftSpec.correlationLoading * rightSpec.correlationLoading,
+      );
+      if (rankCorrelation(leftColumn, rightColumn) * expectedSign <= 0) return false;
     }
-    const noise = latinHypercubeColumn(draws, random);
-    return rankReorderedColumn(valueColumn, shared, noise, spec.correlationLoading);
-  });
+  }
+  return true;
 };
 
 const rankReorderedColumn = (

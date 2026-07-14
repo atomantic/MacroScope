@@ -33,7 +33,7 @@ export const REVENUE_BASIS = {
 // generic cash-transfer bundle.
 const TAX_SCHEDULE_ONLY = {
   linkage: "tax-schedule-only",
-  note: "Revenue proposal — selecting it sets the tax side only. No cash-transfer or service package is implied; pair it with a spending preset to model where the revenue goes.",
+  note: "Revenue proposal — selecting it applies the tax schedule and zeroes the generic transfer, so it is tax side only. No cash-transfer or service package is implied; pair it with a spending preset to model where the revenue goes.",
 };
 
 // The base categories the engine's wealth-tax assessment models today, so a
@@ -228,6 +228,11 @@ export const presetFormFields = (def) => {
     exemption: exemptionM,
     rate: lowestRate,
     brackets: def.brackets.map((row) => [...row]),
+    // A named tax proposal imposes no transfer of its own; zero the generic UBI
+    // package the form defaults would otherwise carry so "tax side only" is
+    // literally true and the revenue benchmark isn't a bundled spending scenario.
+    adultBenefit: 0,
+    childBenefit: 0,
   };
 };
 

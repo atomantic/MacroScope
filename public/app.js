@@ -1362,6 +1362,19 @@ function renderPresetDefinition(name) {
     section("Tax schedule", el("p", "preset-def-line", def.scheduleNote)),
   );
 
+  if (def.assetInclusions.length > 0) {
+    const list = el("ul", "preset-unmodeled");
+    for (const asset of def.assetInclusions) {
+      const li = el("li", "preset-unmodeled-item");
+      li.append(
+        el("strong", null, asset.class),
+        el("span", "preset-unmodeled-note", asset.note ? ` — ${asset.note}` : ""),
+      );
+      list.append(li);
+    }
+    nodes.push(section("Modeled tax base", list));
+  }
+
   const spending = el("div", "preset-def-section");
   spending.append(el("span", "preset-badge preset-badge-scope", "Tax side only"));
   spending.append(el("p", "preset-def-line", def.spending.note));
@@ -1449,11 +1462,26 @@ function renderPresetDefinition(name) {
     );
   }
 
+  if (def.citations.length > 0) {
+    const sources = el("div", "preset-def-section preset-def-sources");
+    sources.append(el("h5", "preset-def-heading", "Sources"));
+    def.citations.forEach((cite, index) => {
+      if (index > 0) sources.append(document.createTextNode(" · "));
+      const link = el("a", null, cite.label);
+      link.href = cite.url;
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      sources.append(link);
+    });
+    nodes.push(sources);
+  }
+
   panel.replaceChildren(...nodes);
   panel.hidden = false;
-  // A definition may already have a fresh run to score against (e.g. re-selecting
-  // a preset after a run); fill the model column immediately when we do.
-  if (latestResult) updatePresetBenchmark(latestResult);
+  // The model column intentionally stays "—" until the run for THIS preset
+  // completes (render() -> updatePresetBenchmark). Filling it from latestResult
+  // here would show the previously-selected preset's revenue against the new
+  // preset's benchmarks until the debounced rerun lands.
 }
 
 // Fills the benchmark table's model column with the just-computed revenue when a

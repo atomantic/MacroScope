@@ -21,6 +21,8 @@ const requestFromPreset = (def: (typeof POLICY_PRESETS)[keyof typeof POLICY_PRES
     exemption: number;
     rate: number;
     brackets?: readonly (readonly [number, number])[];
+    adultBenefit?: number;
+    childBenefit?: number;
   };
   const brackets = (form.brackets ?? []).map(([thresholdM, ratePct]) => ({
     threshold: thresholdM * 1_000_000,
@@ -34,6 +36,13 @@ const requestFromPreset = (def: (typeof POLICY_PRESETS)[keyof typeof POLICY_PRES
       topShare: DEFAULT_COMPARISON_REQUEST.wealthTax.topShare,
       rate: form.rate / 100,
       ...(brackets.length > 0 ? { brackets } : {}),
+    },
+    // Mirror the transfer the UI applies (tax-schedule presets zero UBI), so the
+    // harness scores the same tax-side-only scenario the browser runs.
+    ubi: {
+      ...DEFAULT_COMPARISON_REQUEST.ubi,
+      ...(form.adultBenefit !== undefined ? { adultMonthlyBenefit: form.adultBenefit } : {}),
+      ...(form.childBenefit !== undefined ? { childMonthlyBenefit: form.childBenefit } : {}),
     },
   };
 };
@@ -75,6 +84,17 @@ describe("policy preset definitions", () => {
     expect(sanders.filingNote).toMatch(/married/i);
     expect(sanders.filingNote.toLowerCase()).toMatch(/single|halved|half/);
     expect(sanders.unmodeled.some((u) => /single/i.test(u.component))).toBe(true);
+  });
+
+  it("derives a tax-side-only form that zeroes the generic transfer", () => {
+    for (const def of namedProposals) {
+      const form = presetFormFields(def) as {
+        adultBenefit?: number;
+        childBenefit?: number;
+      };
+      expect(form.adultBenefit).toBe(0);
+      expect(form.childBenefit).toBe(0);
+    }
   });
 
   it("derives form fields whose exemption equals the lowest bracket threshold", () => {

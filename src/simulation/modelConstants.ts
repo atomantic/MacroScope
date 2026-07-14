@@ -77,6 +77,12 @@ export const MODEL_CONSTANTS = {
   // Deficits below $1M are treasury rounding, not a financed gap; zero them so
   // a balanced budget does not register a spurious monetized deficit.
   deficitRoundingFloor: 1_000_000,
+  // Average nominal interest rate on debt issued by the modeled program. This
+  // is a stock-flow scoring assumption, not a Treasury term-structure model.
+  averagePublicDebtInterestRate: 0.04,
+  // Revenue window used by the smoothed funding rule, including the current
+  // year and up to two prior observations.
+  fiscalSmoothingWindowYears: 3,
 
   // --- Wealth-tax base dynamics ------------------------------------------
   // Share of policy-driven excess inflation that passes into the nominal price
@@ -119,6 +125,9 @@ export const MODEL_CONSTANTS = {
   // "beneficial" conditions, decides the headline rating.
   verdict: {
     harmfulPurchasingPowerDrop: -0.02,
+    // A material output loss is independently harmful even when deflation
+    // temporarily cushions the bottom-half cash purchasing-power measure.
+    harmfulGdpChange: -0.02,
     harmfulPeakInflation: 0.2,
     harmfulPublicBurdenPerHousehold: 50_000,
     beneficialPurchasingPowerGain: 0.02,
@@ -375,6 +384,31 @@ const FIXED_DOCS: readonly ModelConstantDoc[] = [
     value: `${pct(MODEL_CONSTANTS.strictHyperMonthlyRate)} / month`,
     rationale: "Cagan convention distinguishing high inflation from hyperinflation.",
     source: "Cagan (1956).",
+    tunable: false,
+  },
+  {
+    category: "Fiscal closure",
+    label: "Average public-debt interest rate",
+    value: pct(MODEL_CONSTANTS.averagePublicDebtInterestRate),
+    rationale: "Scores annual interest on debt issued by the modeled program.",
+    source: "Documented reduced-form Treasury financing assumption.",
+    tunable: false,
+  },
+  {
+    category: "Fiscal closure",
+    label: "Revenue smoothing window",
+    value: `${MODEL_CONSTANTS.fiscalSmoothingWindowYears} years`,
+    rationale: "Uses available current and trailing revenue to set smoothed outlays.",
+    source: "Scenario design assumption.",
+    tunable: false,
+  },
+  {
+    category: "Verdict",
+    label: "Harmful GDP change",
+    value: pct(MODEL_CONSTANTS.verdict.harmfulGdpChange),
+    rationale:
+      "Year-ten output per worker at or below this change is independently harmful.",
+    source: "Author threshold.",
     tunable: false,
   },
   {

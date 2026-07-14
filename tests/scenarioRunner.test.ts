@@ -262,13 +262,13 @@ describe("vertical-slice scenario runner", () => {
     // grid at all. Now it drains the taxed base across the decade, so the cells
     // respond — proving the grid is no longer frozen at year-one revenue.
     expect(peaks(heavy)).not.toEqual(peaks(none));
-    // In the deep-deficit corner (8× UBI, fully monetized) the eroding base
-    // widens the out-year deficit, so the peak runs strictly hotter.
+    // Under the selected revenue-constrained rule, the eroding base lowers the
+    // out-year program budget, so the deep stress cell runs strictly cooler.
     const deepCell = (test: ReturnType<typeof grid>) =>
       test.cells.find(
         (cell) => cell.ubiMultiplier === 8 && cell.monetizationShare === 1,
       )?.peakAnnualInflation ?? 0;
-    expect(deepCell(heavy)).toBeGreaterThan(deepCell(none));
+    expect(deepCell(heavy)).toBeLessThan(deepCell(none));
   });
 
   it("scopes expatriation to the top-tier sub-base under a universal tax (issue #17)", () => {

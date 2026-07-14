@@ -24,9 +24,15 @@ import { calibratePopulationToUs } from "./usBaseline.js";
 import {
   buildPolicyProjection,
   type HouseholdProjectionTaxAssessment,
+  type ProjectionDemandProfile,
 } from "./projection.js";
 import { computeStrategyAccounting } from "./ledgerAudit.js";
 import { MODEL_CONSTANTS } from "./modelConstants.js";
+import {
+  initialFiscalStateForRequest,
+  normalizedSurplusUse,
+  resolveFiscalYear,
+} from "./fiscal.js";
 
 interface HouseholdFunding {
   readonly taxAssessed: number;
@@ -47,6 +53,7 @@ interface HouseholdTaxAssessment {
 interface StrategyRunResult {
   readonly outcome: StrategyOutcome;
   readonly taxCollectedByHousehold: ReadonlyMap<string, number>;
+  readonly demandProfile: ProjectionDemandProfile;
 }
 
 interface CascadeResult {
@@ -171,6 +178,9 @@ export const runComparisonWithPopulation = (
     projection: buildPolicyProjection(request, strategies, {
       effectiveTaxRate: resolveEffectiveTaxRate(householdTaxAssessments, policy),
       householdAssessments: projectionHouseholdAssessments,
+      demandProfiles: Object.fromEntries(
+        STRATEGIES.map((strategy) => [strategy, strategyRuns[strategy].demandProfile]),
+      ) as Record<PaymentStrategy, ProjectionDemandProfile>,
     }),
     caveats: [
       "Results are conditional scenarios, not forecasts.",
@@ -180,6 +190,8 @@ export const runComparisonWithPopulation = (
       "Housing sales remain a national, closed-economy transfer channel; the ten-year owner-renter view adds reduced-form price, supply, and rent feedback rather than regional market clearing.",
       "Wealth Gini values treat negative net worth as zero for the inequality calculation.",
       `The ten-year path is a transparent reduced-form projection with ${request.ubi.benefitIndexation === "cpi" ? "CPI-indexed policy benefits (one-year recognition lag)" : "fixed nominal policy benefits"}, a wealth-tax base that compounds with asset returns and erodes with taxes paid, partial wage adjustment, and no private-loan bailout.`,
+      `Fiscal closure is explicit: the ${request.ubi.fundingRule} funding rule is paired with ${normalizedSurplusUse(request)} for revenue left after scheduled outlays and program-debt service. Program debt carries a documented average interest rate; this is a stock-flow score, not a Treasury maturity model.`,
+      "Demand pressure is recomputed from each year's household cash, uniform rebates, and public-service sector mix; equal total outlays can therefore produce different inflation paths when their composition differs.",
       "The growth/investment channel is a reduced-form Solow-style block: investment deviates from the capital-replacement rate as the wealth tax lowers the after-tax return on wealth (savings response) and the transfer adds a demand impulse (demand offset); wages and real GDP per worker track the resulting capital stock. Both response dials default to zero, which holds output on the constant-trend baseline. It captures direction and rough magnitude, not a general-equilibrium forecast.",
       "Taxpayer-response dials act on the aggregate taxed base as reduced-form revenue multipliers: avoidance and the private-business inclusion rate scale year-one collections directly, while expatriation drains the top-tier sub-base gradually over the decade. The top-tier share comes from the same synthetic household collections as the cohort burdens, so exemptions that cut through a cohort and graduated rates are reflected in the split. The ten-year inflation stress grid evolves its revenue and private-loan flows with the same base dynamics (asset returns, effective-rate erosion, and top-tier expatriation), so its cells and hyperinflation threshold reflect them alongside avoidance and inclusion.",
       "Cash purchasing-power measures do not assign a dollar welfare value to healthcare or social services delivered in kind.",
@@ -274,21 +286,31 @@ const runStrategy = (
         household.children * request.ubi.childMonthlyBenefit),
   );
   const leakageRate = MODEL_CONSTANTS.programLeakageRate;
-  const programBudget =
-    request.ubi.fundingRule === "revenue-constrained"
-      ? Math.min(taxCollected, requestedUbi)
-      : requestedUbi;
+  const fiscal = resolveFiscalYear(
+    {
+      year: 1,
+      taxRevenue: taxCollected,
+      requestedProgramOutlay: requestedUbi,
+      fundingRule: request.ubi.fundingRule,
+      surplusUse: normalizedSurplusUse(request),
+    },
+    initialFiscalStateForRequest(request),
+  ).year;
+  const programBudget = fiscal.scheduledProgramOutlay;
   const fundingRatio = programBudget / Math.max(1, requestedUbi);
   const administrativeCost =
     programBudget * request.ubi.administrativeShare;
   const postAdministrationBudget = programBudget - administrativeCost;
   const leakage = postAdministrationBudget * leakageRate;
   const deliveredBudget = postAdministrationBudget - leakage;
-  const ubiReceived = deliveredBudget * request.ubi.directCashShare;
+  const scheduledCash = deliveredBudget * request.ubi.directCashShare;
+  const ubiReceived = scheduledCash + fiscal.rebate;
   const publicServicesSpending =
-    deliveredBudget * (1 - request.ubi.directCashShare);
-  const governmentOutlays = programBudget;
-  const householdCashDeliveryRatio = ubiReceived / Math.max(1, requestedUbi);
+    deliveredBudget * (1 - request.ubi.directCashShare) + fiscal.additionalServices;
+  const governmentOutlays = fiscal.governmentOutlay;
+  const householdScheduledCashRatio = scheduledCash / Math.max(1, requestedUbi);
+  const rebatePerHousehold =
+    fiscal.rebate / Math.max(1, population.representedHouseholds);
 
   const cascade = calculateCascade(households, funding, request);
   const primaryBookSales = weightedSum(
@@ -314,6 +336,9 @@ const runStrategy = (
   let consumptionDemandChange = 0;
   const sectorBaseline = emptySectorRecord();
   const sectorChanges = emptySectorRecord();
+  const taxCashDemandBySector = emptySectorRecord();
+  const scheduledCashDemandNumerator = emptySectorRecord();
+  const rebateDemandPerDollar = emptySectorRecord();
   let householdIndex = 0;
   for (const household of households) {
     const item = requireFunding(funding, household.id);
@@ -321,7 +346,7 @@ const runStrategy = (
       12 *
       (household.adults * request.ubi.adultMonthlyBenefit +
         household.children * request.ubi.childMonthlyBenefit);
-    const receivedUbi = grossUbi * householdCashDeliveryRatio;
+    const receivedUbi = grossUbi * householdScheduledCashRatio + rebatePerHousehold;
     const forcedBookSale = cascade.forcedBookSales.get(household.id) ?? 0;
     const forcedRepayment = cascade.forcedRepayments.get(household.id) ?? 0;
     const buyerWeight = buyerWeights[householdIndex] ?? 0;
@@ -380,6 +405,21 @@ const runStrategy = (
       sectorBaseline[sector] +=
         baselineConsumption * shares[sector] * household.weight;
       sectorChanges[sector] += consumptionChange * shares[sector] * household.weight;
+      taxCashDemandBySector[sector] -=
+        item.cash *
+        household.marginalPropensityToConsume *
+        shares[sector] *
+        household.weight;
+      scheduledCashDemandNumerator[sector] +=
+        grossUbi *
+        household.marginalPropensityToConsume *
+        shares[sector] *
+        household.weight;
+      rebateDemandPerDollar[sector] +=
+        (household.marginalPropensityToConsume *
+          shares[sector] *
+          household.weight) /
+        Math.max(1, population.representedHouseholds);
     }
     distributionRecords.push({
       weight: household.weight,
@@ -414,7 +454,8 @@ const runStrategy = (
     (household) => household.liabilities.collateralizedLoan,
   );
   const depositsChange =
-    newLoans - taxCollected + governmentOutlays - cascade.totalForcedRepayments;
+    newLoans - taxCollected + governmentOutlays + fiscal.debtRepaid -
+    cascade.totalForcedRepayments;
   const equityQuantityResidual = population.aggregatePublicEquity - endingBookEquity;
   const openingBookHousing = weightedSum(
     households,
@@ -470,7 +511,8 @@ const runStrategy = (
       newLoans,
       taxCollected,
       ubiReceived,
-      otherGovernmentOutlays: governmentOutlays - ubiReceived,
+      otherGovernmentOutlays:
+        governmentOutlays - ubiReceived + fiscal.debtRepaid,
       forcedLoanRepayments: cascade.totalForcedRepayments,
     },
     perHouseholdDepositsChange,
@@ -494,6 +536,13 @@ const runStrategy = (
         publicServicesSpending,
         administrativeCost,
         leakage,
+        scheduledProgramOutlay: fiscal.scheduledProgramOutlay,
+        additionalServices: fiscal.additionalServices,
+        rebate: fiscal.rebate,
+        debtIssued: fiscal.debtIssued,
+        debtRepaid: fiscal.debtRepaid,
+        treasuryBalance: fiscal.treasuryBalance,
+        budgetIdentityResidual: fiscal.budgetIdentityResidual,
         governmentBalance: taxCollected - governmentOutlays,
         fundingRatio,
       },
@@ -544,6 +593,17 @@ const runStrategy = (
       accounting,
     },
     taxCollectedByHousehold,
+    demandProfile: {
+      baselineAnnualConsumption: population.baselineAnnualConsumption,
+      taxCashDemandBySector,
+      scheduledCashDemandPerDollar: Object.fromEntries(
+        SECTORS.map((sector) => [
+          sector,
+          scheduledCashDemandNumerator[sector] / Math.max(1, requestedUbi),
+        ]),
+      ) as Record<ConsumptionSector, number>,
+      rebateDemandPerDollar,
+    },
   };
 };
 

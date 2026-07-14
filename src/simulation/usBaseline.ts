@@ -277,6 +277,7 @@ export const US_BASELINE = {
   m2: 23_052.3 * BILLION,
   nominalGdp: 30_779 * BILLION,
   annualPce: 20_960.8 * BILLION,
+  publicDebtHeldByPublic: 31_431_182_280_136.26,
   baselineInflation: 0.026,
   calibration: DFA_INSTRUMENT_CALIBRATION,
   wealthGroups: US_WEALTH_GROUPS,
@@ -298,6 +299,12 @@ export const US_BASELINE = {
       organization: "U.S. Bureau of Economic Analysis",
       vintage: "Calendar year 2025",
       url: "https://www.bea.gov/news/2026/gdp-second-estimate-4th-quarter-and-year-2025",
+    },
+    {
+      label: "Debt Held by the Public",
+      organization: "U.S. Department of the Treasury",
+      vintage: "March 31, 2026",
+      url: "https://fiscaldata.treasury.gov/datasets/debt-to-the-penny/",
     },
     {
       label: "Modern Hyper- and High Inflations",

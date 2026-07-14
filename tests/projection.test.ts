@@ -4,6 +4,8 @@ import {
   runComparison,
   type ComparisonRequestV1,
 } from "../src/index.js";
+import { applyTreasuryMoneyFlow } from "../src/simulation/projection.js";
+import { US_BASELINE } from "../src/simulation/usBaseline.js";
 
 const nationalRequest = (): ComparisonRequestV1 => ({
   ...DEFAULT_COMPARISON_REQUEST,
@@ -11,6 +13,30 @@ const nationalRequest = (): ComparisonRequestV1 => ({
 });
 
 describe("ten-year projection dynamics", () => {
+  it("never releases more Treasury cash than previously drained from M2", () => {
+    const parked = applyTreasuryMoneyFlow({
+      m2: US_BASELINE.m2,
+      nonTreasuryMoneyChange: 0,
+      treasuryBalanceChange: US_BASELINE.m2 * 2,
+      drainedTreasuryBalance: 0,
+    });
+    expect(parked.moneyChange).toBeCloseTo(-US_BASELINE.m2 * 0.9, 2);
+    expect(parked.drainedTreasuryBalance).toBeCloseTo(US_BASELINE.m2 * 0.9, 2);
+
+    const released = applyTreasuryMoneyFlow({
+      m2: US_BASELINE.m2 + parked.moneyChange,
+      nonTreasuryMoneyChange: 0,
+      treasuryBalanceChange: -US_BASELINE.m2 * 2,
+      drainedTreasuryBalance: parked.drainedTreasuryBalance,
+    });
+    expect(released.moneyChange).toBeCloseTo(US_BASELINE.m2 * 0.9, 2);
+    expect(released.drainedTreasuryBalance).toBe(0);
+    expect(US_BASELINE.m2 + parked.moneyChange + released.moneyChange).toBeCloseTo(
+      US_BASELINE.m2,
+      2,
+    );
+  });
+
   it("erodes the tax base and revenue when the rate exceeds the asset return", () => {
     const result = runComparison({
       ...nationalRequest(),
@@ -519,6 +545,41 @@ describe("ten-year projection dynamics", () => {
         ),
       ).toBe(true);
     }
+  });
+
+  it("recomputes stress demand when surplus services become household cash", () => {
+    const base = nationalRequest();
+    const result = runComparison({
+      ...base,
+      wealthTax: {
+        targetMode: "exemption",
+        exemption: 10_000_000,
+        topShare: 0.01,
+        rate: 0.2,
+      },
+      ubi: {
+        ...base.ubi,
+        fundingRule: "fixed",
+        surplusUse: "additional-services",
+        directCashShare: 1,
+      },
+      behavior: { ...base.behavior, borrowShare: 0, sellShare: 1 },
+    });
+    const noMonetization = result.projection.stressTest.cells.filter(
+      (cell) => cell.monetizationShare === 0,
+    );
+    const halfBenefit = noMonetization.find((cell) => cell.ubiMultiplier === 0.5);
+    const doubleBenefit = noMonetization.find((cell) => cell.ubiMultiplier === 2);
+
+    expect(halfBenefit).toBeDefined();
+    expect(doubleBenefit).toBeDefined();
+    // Both rows spend roughly the same tax revenue, but the smaller scheduled
+    // benefit leaves more of it in direct public services. Services have a
+    // different sector/supply profile than household cash, so the stress result
+    // must not collapse to the same total-outlay ratio.
+    expect(halfBenefit?.peakAnnualInflation).toBeGreaterThan(
+      doubleBenefit?.peakAnnualInflation ?? Number.POSITIVE_INFINITY,
+    );
   });
 
   it("attributes rebates created by later revenue growth to bottom-half income", () => {

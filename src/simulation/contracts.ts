@@ -4,7 +4,7 @@ import {
   type TaxBracket,
   type UbiFundingRule,
 } from "../policies/schema.js";
-import { US_BASELINE } from "./usBaseline.js";
+import { US_BASELINE, type PopulationFlowDiagnostic } from "./usBaseline.js";
 import { DEFAULT_MODEL_TUNABLES } from "./modelConstants.js";
 
 /**
@@ -326,7 +326,9 @@ export interface PopulationSummary {
   readonly aggregateNetWorth: number;
   readonly aggregateDeposits: number;
   readonly aggregatePublicEquity: number;
+  readonly aggregateAnnualIncome: number;
   readonly baselineAnnualConsumption: number;
+  readonly calibration: readonly PopulationFlowDiagnostic[];
 }
 
 export interface DistributionOutcome {

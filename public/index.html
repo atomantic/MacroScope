@@ -501,8 +501,10 @@
         <summary><span>Inspect model details</span><small>Funding paths, deciles, sectors, and accounting</small></summary>
         <section class="population-strip" aria-label="Synthetic population summary">
           <div><span>Represented households</span><strong id="population-households">—</strong></div>
+          <div><span>Resident people</span><strong id="population-people">—</strong></div>
+          <div><span>Annual personal income</span><strong id="population-income">—</strong></div>
+          <div><span>Baseline annual PCE</span><strong id="population-pce">—</strong></div>
           <div><span>Aggregate net worth</span><strong id="population-wealth">—</strong></div>
-          <div><span>Public equity</span><strong id="population-equity">—</strong></div>
           <div><span>Sampled agents</span><strong id="population-sample">—</strong></div>
         </section>
         <div class="strategy-grid" id="strategy-grid"></div>
@@ -519,7 +521,7 @@
           <div class="table-scroll"><table><thead><tr><th>Sector</th><th>Cash first</th><th>Borrow first</th><th>Sell first</th></tr></thead><tbody id="sector-body"></tbody></table></div>
         </div>
         <div class="caveats" id="caveats"><h3>Model boundaries</h3><ul id="caveat-list"></ul>
-          <p class="model-constants-note" id="calibration-summary">Instrument-level DFA calibration metadata loads with the U.S. baseline.</p>
+          <p class="model-constants-note" id="calibration-summary">Balance-sheet, population, income, and consumption calibration metadata loads with the U.S. baseline.</p>
           <div class="model-constants">
             <h4>Model constants</h4>
             <p class="model-constants-note">The load-bearing numeric assumptions behind every figure, each with a one-line rationale and source. Rows marked <span class="constant-tunable-badge">Tunable</span> can be changed under Advanced simulation controls.</p>

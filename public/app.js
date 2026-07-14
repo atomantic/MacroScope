@@ -2205,9 +2205,12 @@ const renderReasons = (projection) => {
 
 const renderDetails = (result) => {
   byId("population-households").textContent = integer.format(result.population.representedHouseholds);
+  byId("population-people").textContent = integer.format(result.population.representedAdults + result.population.representedChildren);
+  byId("population-income").textContent = compactMoney.format(result.population.aggregateAnnualIncome);
+  byId("population-pce").textContent = compactMoney.format(result.population.baselineAnnualConsumption);
   byId("population-wealth").textContent = compactMoney.format(result.population.aggregateNetWorth);
-  byId("population-equity").textContent = compactMoney.format(result.population.aggregatePublicEquity);
   byId("population-sample").textContent = integer.format(result.population.sampledHouseholds);
+  renderCalibrationSummary(baseline?.calibration, result.population.calibration);
   renderStrategyCards(result.strategies);
   renderComparison(result.strategies);
   renderDistribution();
@@ -2324,11 +2327,18 @@ const renderSources = (sources) => {
   }));
 };
 
-const renderCalibrationSummary = (calibration) => {
+const renderCalibrationSummary = (calibration, diagnostics = []) => {
   const summary = byId("calibration-summary");
   if (!summary || !calibration) return;
   const residual = calibration.residualAssetClass;
-  summary.textContent = `${calibration.vintage} DFA instrument calibration · ${(calibration.tolerance * 100).toFixed(0)}% reconciliation tolerance. ${residual.label} is an explicit ${residual.modelClass} balance-sheet class, preserving source instruments that do not have a narrower model analogue.`;
+  const flows = calibration.populationAndFlows;
+  const maximumResidual = diagnostics.length
+    ? Math.max(...diagnostics.map((entry) => entry.relativeError))
+    : null;
+  const residualText = maximumResidual === null
+    ? "Scenario residuals appear after the model runs."
+    : `Maximum displayed population/flow residual: ${(maximumResidual * 100).toExponential(1)}%.`;
+  summary.textContent = `${calibration.vintage} DFA instrument calibration · ${(calibration.tolerance * 100).toFixed(0)}% reconciliation tolerance. July 2025 resident target: ${integer.format(flows.residentPopulation)} people (${integer.format(flows.adults)} adults and ${integer.format(flows.children)} children); calendar-year 2025 PCE target: ${compactMoney.format(flows.annualPce)}. Group-quarters residents are included in benefit counts and nonresidents are excluded. ${residualText} ${residual.label} remains an explicit ${residual.modelClass} balance-sheet class.`;
 };
 
 const renderValidation = (backtest) => {

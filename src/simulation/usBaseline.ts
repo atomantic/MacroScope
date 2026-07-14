@@ -42,13 +42,73 @@ export interface CalibrationDiagnostic {
   readonly relativeError: number;
 }
 
+export type PopulationFlowMetric =
+  | "households"
+  | "residentPopulation"
+  | "adults"
+  | "children"
+  | "annualPersonalIncome"
+  | "annualPce";
+
+export interface PopulationFlowDiagnostic {
+  readonly metric: PopulationFlowMetric;
+  readonly unit: "people" | "households" | "dollars";
+  readonly target: number;
+  readonly modeled: number;
+  readonly residual: number;
+  readonly relativeError: number;
+}
+
 export interface PopulationCalibration {
   readonly households: readonly SyntheticHousehold[];
   readonly diagnostics: readonly CalibrationDiagnostic[];
+  readonly populationAndFlows: readonly PopulationFlowDiagnostic[];
 }
 
 const MILLION = 1_000_000;
 const BILLION = 1_000_000_000;
+
+/**
+ * One national accounting vintage for people, household flows, and PCE.
+ *
+ * Synthetic household weights continue to represent Census households. Adult
+ * and child benefit counts represent the full resident population, including
+ * people in group quarters; those residents are distributed over the synthetic
+ * tax-household units solely for national transfer costing. Nonresidents are
+ * excluded. Income and consumption seeds keep their percentile ordering and
+ * are rescaled independently, while balance sheets remain on the DFA track.
+ */
+export const POPULATION_FLOW_CALIBRATION = {
+  populationVintage: "July 1, 2025",
+  macroVintage: "calendar year 2025",
+  residentPopulation: 341_784_857,
+  adults: 269_763_509,
+  children: 72_021_348,
+  groupQuartersResidents: 8_388_561,
+  annualPersonalIncome: 26_099.93 * BILLION,
+  annualPce: 20_960.8 * BILLION,
+  eligibilityRule:
+    "All U.S. residents, including group-quarters residents, are included in adult or child transfer counts; nonresidents are excluded.",
+  representationRule:
+    "Household weights represent Census households. Group-quarters residents are carried by synthetic tax-household agents only to reconcile national person and benefit totals.",
+  calibrationRule:
+    "Adult counts, child counts, household income, and household consumption are each proportionally rescaled to their national target, preserving within-series percentile shapes; wealth instruments are calibrated separately to the DFA.",
+  consumptionSectors: {
+    vintage: "calendar year 2025 BEA PCE; 2024 BLS Consumer Expenditure Survey",
+    method:
+      "BEA PCE fixes the national total and broad product/service mix; BLS household expenditure categories inform the eight-sector crosswalk and percentile-varying allocation. Shares are normalized to exactly one.",
+    shares: {
+      housing: 0.18,
+      food: 0.13,
+      healthcare: 0.17,
+      transportation: 0.11,
+      energy: 0.04,
+      "durable-goods": 0.1,
+      discretionary: 0.12,
+      services: 0.15,
+    },
+  },
+} as const;
 
 /**
  * Mapping from the downloadable DFA detail file to the model balance sheet.
@@ -125,6 +185,7 @@ export const DFA_INSTRUMENT_CALIBRATION = {
     rationale:
       "Preserves DFA instruments without a narrower model analogue instead of relabeling them as government bonds.",
   },
+  populationAndFlows: POPULATION_FLOW_CALIBRATION,
 } as const;
 
 export const US_WEALTH_GROUPS: readonly UsWealthGroupBaseline[] = [
@@ -277,6 +338,7 @@ export const US_BASELINE = {
   m2: 23_052.3 * BILLION,
   nominalGdp: 30_779 * BILLION,
   annualPce: 20_960.8 * BILLION,
+  annualPersonalIncome: POPULATION_FLOW_CALIBRATION.annualPersonalIncome,
   publicDebtHeldByPublic: 31_431_182_280_136.26,
   baselineInflation: 0.026,
   calibration: DFA_INSTRUMENT_CALIBRATION,
@@ -299,6 +361,30 @@ export const US_BASELINE = {
       organization: "U.S. Bureau of Economic Analysis",
       vintage: "Calendar year 2025",
       url: "https://www.bea.gov/news/2026/gdp-second-estimate-4th-quarter-and-year-2025",
+    },
+    {
+      label: "National population by age 18 and over",
+      organization: "U.S. Census Bureau",
+      vintage: "July 1, 2025 population estimates",
+      url: "https://www.census.gov/data/datasets/time-series/demo/popest/2020s-national-detail.html",
+    },
+    {
+      label: "Group quarters population",
+      organization: "U.S. Census Bureau",
+      vintage: "2024 American Community Survey 1-year estimate, table B26001",
+      url: "https://data.census.gov/table/ACSDT1Y2024.B26001",
+    },
+    {
+      label: "National income and product accounts",
+      organization: "U.S. Bureau of Economic Analysis",
+      vintage: "Calendar year 2025 personal income",
+      url: "https://www.bea.gov/itable/national-gdp-and-personal-income",
+    },
+    {
+      label: "Consumer Expenditures — 2024",
+      organization: "U.S. Bureau of Labor Statistics",
+      vintage: "Calendar year 2024",
+      url: "https://www.bls.gov/news.release/archives/cesan_12192025.pdf",
     },
     {
       label: "Debt Held by the Public",
@@ -429,10 +515,110 @@ export const calibratePopulationToUsWithDiagnostics = (
     };
   });
 
+  const populationTargets = scaledPopulationFlowTargets(economyScale);
+  const adultScalar = calibrationScalar(
+    weightedInstrumentTotal(calibrated, (household) => household.adults),
+    populationTargets.adults,
+    "resident adults",
+  );
+  const childScalar = calibrationScalar(
+    weightedInstrumentTotal(calibrated, (household) => household.children),
+    populationTargets.children,
+    "resident children",
+  );
+  const incomeScalar = calibrationScalar(
+    weightedInstrumentTotal(calibrated, (household) => household.annualIncome),
+    populationTargets.annualPersonalIncome,
+    "annual personal income",
+  );
+  const consumptionScalar = calibrationScalar(
+    weightedInstrumentTotal(calibrated, (household) => household.annualConsumption),
+    populationTargets.annualPce,
+    "annual PCE",
+  );
+  const flowCalibrated = calibrated.map((household) => ({
+    ...household,
+    adults: household.adults * adultScalar,
+    children: household.children * childScalar,
+    annualIncome: household.annualIncome * incomeScalar,
+    annualConsumption: household.annualConsumption * consumptionScalar,
+  }));
+
   return {
-    households: calibrated,
-    diagnostics: buildDiagnostics(calibrated, economyScale),
+    households: flowCalibrated,
+    diagnostics: buildDiagnostics(flowCalibrated, economyScale),
+    populationAndFlows: buildPopulationFlowDiagnostics(
+      flowCalibrated,
+      populationTargets,
+    ),
   };
+};
+
+const scaledPopulationFlowTargets = (
+  economyScale: number,
+): Readonly<Record<PopulationFlowMetric, number>> => ({
+  households: US_BASELINE.households * economyScale,
+  residentPopulation: POPULATION_FLOW_CALIBRATION.residentPopulation * economyScale,
+  adults: POPULATION_FLOW_CALIBRATION.adults * economyScale,
+  children: POPULATION_FLOW_CALIBRATION.children * economyScale,
+  annualPersonalIncome: POPULATION_FLOW_CALIBRATION.annualPersonalIncome * economyScale,
+  annualPce: POPULATION_FLOW_CALIBRATION.annualPce * economyScale,
+});
+
+export const buildPopulationFlowDiagnostics = (
+  households: readonly SyntheticHousehold[],
+  targets: Readonly<Record<PopulationFlowMetric, number>> =
+    scaledPopulationFlowTargets(
+      weightedInstrumentTotal(households, () => 1) / US_BASELINE.households,
+    ),
+): readonly PopulationFlowDiagnostic[] => {
+  const modeled: Readonly<Record<PopulationFlowMetric, number>> = {
+    households: weightedInstrumentTotal(households, () => 1),
+    adults: weightedInstrumentTotal(households, (household) => household.adults),
+    children: weightedInstrumentTotal(households, (household) => household.children),
+    residentPopulation: weightedInstrumentTotal(
+      households,
+      (household) => household.adults + household.children,
+    ),
+    annualPersonalIncome: weightedInstrumentTotal(
+      households,
+      (household) => household.annualIncome,
+    ),
+    annualPce: weightedInstrumentTotal(
+      households,
+      (household) => household.annualConsumption,
+    ),
+  };
+  const units: Readonly<Record<PopulationFlowMetric, PopulationFlowDiagnostic["unit"]>> = {
+    households: "households",
+    residentPopulation: "people",
+    adults: "people",
+    children: "people",
+    annualPersonalIncome: "dollars",
+    annualPce: "dollars",
+  };
+  const metrics: readonly PopulationFlowMetric[] = [
+    "households",
+    "residentPopulation",
+    "adults",
+    "children",
+    "annualPersonalIncome",
+    "annualPce",
+  ];
+  return metrics.map((metric) => {
+    const target = targets[metric];
+    const value = modeled[metric];
+    const residual = value - target;
+    return {
+      metric,
+      unit: units[metric],
+      target,
+      modeled: value,
+      residual,
+      relativeError:
+        target === 0 ? (value === 0 ? 0 : 1) : Math.abs(residual) / target,
+    };
+  });
 };
 
 const buildDiagnostics = (

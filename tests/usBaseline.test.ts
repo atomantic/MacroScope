@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DFA_INSTRUMENT_CALIBRATION,
+  POPULATION_FLOW_CALIBRATION,
   US_BASELINE,
   US_WEALTH_GROUPS,
   calibratePopulationToUsWithDiagnostics,
@@ -81,6 +82,48 @@ describe("DFA instrument calibration", () => {
       6,
     );
     expect(topEquity?.relativeError).toBeLessThan(1e-12);
+  });
+
+  it("reconciles resident demographics, income, and PCE to one scaled national baseline", () => {
+    const representedHouseholds = 10_000;
+    const result = calibrate(800, representedHouseholds);
+    const scale = representedHouseholds / US_BASELINE.households;
+    const diagnostic = (metric: string) =>
+      result.populationAndFlows.find((entry) => entry.metric === metric);
+
+    expect(diagnostic("households")?.modeled).toBeCloseTo(representedHouseholds, 7);
+    expect(diagnostic("residentPopulation")?.modeled).toBeCloseTo(
+      POPULATION_FLOW_CALIBRATION.residentPopulation * scale,
+      7,
+    );
+    expect(diagnostic("adults")?.modeled).toBeCloseTo(
+      POPULATION_FLOW_CALIBRATION.adults * scale,
+      7,
+    );
+    expect(diagnostic("children")?.modeled).toBeCloseTo(
+      POPULATION_FLOW_CALIBRATION.children * scale,
+      7,
+    );
+    expect(diagnostic("annualPersonalIncome")?.modeled).toBeCloseTo(
+      POPULATION_FLOW_CALIBRATION.annualPersonalIncome * scale,
+      -2,
+    );
+    expect(diagnostic("annualPce")?.modeled).toBeCloseTo(
+      US_BASELINE.annualPce * scale,
+      -2,
+    );
+    expect(
+      Math.max(...result.populationAndFlows.map((entry) => entry.relativeError)),
+    ).toBeLessThan(1e-12);
+    expect(POPULATION_FLOW_CALIBRATION.eligibilityRule).toContain(
+      "group-quarters residents",
+    );
+    expect(POPULATION_FLOW_CALIBRATION.eligibilityRule).toContain(
+      "nonresidents are excluded",
+    );
+    expect(
+      recordTotal(POPULATION_FLOW_CALIBRATION.consumptionSectors.shares),
+    ).toBeCloseTo(1, 12);
   });
 
   it("documents the otherwise-unmapped DFA instruments as a separate residual class", () => {

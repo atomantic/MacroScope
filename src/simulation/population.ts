@@ -1,4 +1,5 @@
 import type { AssetClass, LiabilityClass } from "../policies/schema.js";
+import { MODEL_CONSTANTS } from "./modelConstants.js";
 
 export interface SyntheticHousehold {
   readonly id: string;
@@ -7,6 +8,8 @@ export interface SyntheticHousehold {
   readonly adults: number;
   readonly children: number;
   readonly annualIncome: number;
+  /** Annual household PCE seed, rescaled to the BEA national total during calibration. */
+  readonly annualConsumption: number;
   readonly assets: Readonly<Record<AssetClass, number>>;
   readonly liabilities: Readonly<Record<LiabilityClass, number>>;
   readonly marginalPropensityToConsume: number;
@@ -98,17 +101,33 @@ const createHousehold = (
     collateralizedLoan,
     consumerDebt: Math.max(0, totalDebt - mortgage - collateralizedLoan),
   };
+  // Preserve the generator's established random draw order: demographics first,
+  // then income. That keeps the wealth sample unchanged when flow calibration
+  // is added, so scenario deltas isolate the intended denominator correction.
+  const adults = random() < 0.38 ? 1 : 2;
+  const children =
+    percentile < 0.85 && random() < 0.42 ? (random() < 0.7 ? 1 : 2) : 0;
+  const annualIncome = annualIncomeAtPercentile(percentile) * (0.9 + random() * 0.2);
+  const marginalPropensityToConsume = 0.86 - percentile * 0.56;
 
   return {
     id: `household:${String(index + 1).padStart(5, "0")}`,
     percentile,
     weight,
-    adults: random() < 0.38 ? 1 : 2,
-    children: percentile < 0.85 && random() < 0.42 ? (random() < 0.7 ? 1 : 2) : 0,
-    annualIncome: annualIncomeAtPercentile(percentile) * (0.9 + random() * 0.2),
+    adults,
+    children,
+    annualIncome,
+    // This is only a distributional seed. The U.S. baseline calibration applies
+    // one scalar to land its weighted sum exactly on annual BEA PCE while
+    // retaining the percentile shape and MPC ordering.
+    annualConsumption:
+      annualIncome *
+      (MODEL_CONSTANTS.baselineConsumptionIncomeShare +
+        marginalPropensityToConsume *
+          MODEL_CONSTANTS.baselineConsumptionMpcWeight),
     assets,
     liabilities,
-    marginalPropensityToConsume: 0.86 - percentile * 0.56,
+    marginalPropensityToConsume,
   };
 };
 

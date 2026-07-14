@@ -681,25 +681,24 @@ describe("ten-year projection dynamics", () => {
   });
 
   it("attributes a growth-driven harmful verdict to investment/wages, not inflation/debt", () => {
-    // A zero-UBI universal wealth tax with a strong savings response drags wages
-    // with no inflation or debt crisis — the harmful verdict must name the
-    // growth channel, not blame inflation or debt it didn't cause.
+    // A universal wealth tax with a modest transfer and strong savings response
+    // drags wages with no inflation or debt crisis — the harmful verdict must
+    // name the growth channel, not blame inflation or debt it didn't cause.
     const result = runComparison({
       ...nationalRequest(),
       wealthTax: { targetMode: "exemption", exemption: 0, topShare: 0.01, rate: 0.05 },
       ubi: {
         ...nationalRequest().ubi,
-        adultMonthlyBenefit: 0,
-        childMonthlyBenefit: 0,
+        adultMonthlyBenefit: 500,
+        childMonthlyBenefit: 250,
         surplusUse: "treasury-balance",
       },
       behavior: { ...nationalRequest().behavior, savingsResponseElasticity: 0.8 },
     });
     expect(result.projection.summary.gdpChange).toBeLessThan(-0.02);
-    // Instrument-level DFA calibration makes the large Treasury drain
-    // deflationary enough to keep this cash measure outside its harmful band.
+    // The calibrated transfer keeps the cash measure outside its harmful band.
     // The verdict must therefore recognize the independently harmful output
-    // loss instead of passing only because purchasing power also crossed -2%.
+    // loss instead of passing only because purchasing power crossed -2%.
     expect(result.projection.summary.bottom50PurchasingPowerChange).toBeGreaterThan(
       -0.02,
     );

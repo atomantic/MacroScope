@@ -14,6 +14,7 @@ The current implementation covers the model contract and a usable first policy v
 - A per-strategy accounting audit that replays each scenario's aggregate sector-level flows (loan origination, tax settlement, UBI, public-services and administration spending, forced repayments) through the double-entry ledger kernel with causal event tags, reporting trial-balance and instrument-mirror residuals plus an independent per-household deposit cross-check in the API's `accounting` block. Intra-household asset trades net out at the sector level; per-household balance sheets are tracked outside the ledger.
 - A deterministic weighted population representing 135.1 million U.S. households with explicit top-tail oversampling.
 - Balance-sheet totals calibrated to the Federal Reserve Distributional Financial Accounts for 2026:Q1.
+- Resident adult/child counts, personal income, and personal consumption calibrated to documented Census and BEA national totals, with a BEA/BLS eight-sector consumption crosswalk.
 - Parallel cash-first, borrow-first, and sell-first scenarios using common households.
 - Reduced-form equity depth, price impact, collateral calls, and iterative forced liquidation.
 - Public-equity and last-resort housing sale channels with asset-quantity reconciliation.
@@ -33,7 +34,7 @@ npm install
 npm run verify
 ```
 
-The current build intentionally has no Three.js dependency. See [docs/MODEL_CONTRACT.md](docs/MODEL_CONTRACT.md) for the accounting conventions and [docs/SUCCESS_CRITERIA.md](docs/SUCCESS_CRITERIA.md) for the vertical-slice acceptance bar.
+The current build intentionally has no Three.js dependency. See [docs/MODEL_CONTRACT.md](docs/MODEL_CONTRACT.md) for the accounting conventions, [docs/POPULATION_FLOW_CALIBRATION.md](docs/POPULATION_FLOW_CALIBRATION.md) for population/income/PCE targets and regression deltas, and [docs/SUCCESS_CRITERIA.md](docs/SUCCESS_CRITERIA.md) for the vertical-slice acceptance bar.
 
 ## PortOS and PM2
 

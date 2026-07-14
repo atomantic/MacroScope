@@ -534,10 +534,11 @@ export interface UncertaintyAnalysis {
   readonly years: readonly UncertaintyYearBand[];
   readonly groups: readonly UncertaintyGroupBand[];
   readonly influenceTarget: "bottom50PurchasingPowerChange";
-  readonly influenceMethod: "absolute-standardized-regression-coefficient";
+  readonly influenceMethod: "absolute-standardized-regression-coefficient-with-grouped-financing-axis";
   readonly populationInfluenceMethod: "matched-draw-categorical-correlation-ratio" | null;
   readonly interactionMethod: "pair-product-partial-correlation-after-main-effects";
   readonly influences: readonly UncertaintyInfluence[];
+  readonly populationInfluence: UncertaintyInfluence | null;
   readonly interactions: readonly UncertaintyInteraction[];
 }
 
@@ -586,6 +587,14 @@ export const parseUncertaintyOptions = (input: unknown): ParsedUncertaintyOption
       `combined population uncertainty requires at least ${MIN_MATCHED_PARAMETER_DRAWS} matched parameter draws per population seed; increase draws or reduce populationReplicates.`,
     );
   }
+  if (
+    populationMode === "combined" &&
+    draws % populationReplicates !== 0
+  ) {
+    errors.push(
+      "combined population uncertainty requires draws to be evenly divisible by populationReplicates so every parameter row is replayed across every population seed.",
+    );
+  }
   if (errors.length > 0) return { errors };
   return {
     errors,
@@ -614,6 +623,12 @@ interface DrawRecord {
     governmentDebtAdded: number;
   }[];
   readonly groups: ReadonlyMap<WealthGroupOutcomeId, number>;
+}
+
+interface InfluenceInput {
+  readonly id: string;
+  readonly label: string;
+  readonly values: readonly number[];
 }
 
 const METRIC_DEFINITIONS = [
@@ -657,13 +672,13 @@ export const runUncertaintyAnalysis = (
   const metadata = parameterMetadata(baseRequest);
   const random = mulberry32(options.seed);
   const populationCount = options.populationMode === "combined"
-    ? Math.min(options.populationReplicates, options.draws)
+    ? options.populationReplicates
     : 1;
   // Combined runs use a crossed design within the fixed run budget: each
   // parameter row is replayed against every population seed before the next
   // row. Seed effects therefore cannot absorb differences between disjoint LHS
   // subsets.
-  const parameterDraws = Math.ceil(options.draws / populationCount);
+  const parameterDraws = options.draws / populationCount;
   const uniforms = correlatedLatinHypercubeColumns(PARAMETER_SPECS, parameterDraws, random);
   const populationSeeds = Array.from({ length: populationCount }, (_, index) =>
     options.populationMode === "fixed"
@@ -684,7 +699,6 @@ export const runUncertaintyAnalysis = (
     const households = buildCalibratedPopulation(populationRequest);
     for (let parameterReplicate = 0; parameterReplicate < parameterDraws; parameterReplicate += 1) {
       const runIndex = parameterReplicate * populationCount + populationReplicate;
-      if (runIndex >= options.draws) continue;
       if (hooks.shouldCancel?.()) throw new UncertaintyCancelledError();
       let candidate = baseRequest;
       for (let parameterIndex = 0; parameterIndex < PARAMETER_SPECS.length; parameterIndex += 1) {
@@ -777,11 +791,10 @@ export const runUncertaintyAnalysis = (
   });
 
   const outcome = records.map((record) => record.metrics[4] ?? 0);
-  const influenceInputs = metadata.map((_parameter, index) =>
-    records.map((record) => record.parameterValues[index] ?? 0));
+  const influenceInputs = buildInfluenceInputs(records, metadata);
   const influenceMetadata: UncertaintyParameterMetadata[] = [...metadata];
-  const influenceResult = globalInfluence(influenceInputs, metadata, outcome);
-  let influences = [...influenceResult.influences];
+  const influenceResult = globalInfluence(influenceInputs, outcome);
+  let populationInfluence: UncertaintyInfluence | null = null;
   if (options.populationMode === "combined") {
     influenceMetadata.push({
       id: "population-seed",
@@ -799,9 +812,7 @@ export const runUncertaintyAnalysis = (
       source: `${populationCount} deterministic population replicates derived from the ensemble seed.`,
       sourceUrl: SOURCE_URL_BY_GROUP.population ?? null,
     });
-    influences.push(categoricalPopulationInfluence(records, outcome, populationCount));
-    influences.sort((left, right) => right.score - left.score);
-    influences = influences.slice(0, 10);
+    populationInfluence = categoricalPopulationInfluence(records, outcome, populationCount);
   }
   const analysis: UncertaintyAnalysis = {
     schemaVersion: SCENARIO_SCHEMA_VERSION,
@@ -837,12 +848,13 @@ export const runUncertaintyAnalysis = (
     years: summarizeYears(records),
     groups: summarizeGroups(records),
     influenceTarget: "bottom50PurchasingPowerChange",
-    influenceMethod: "absolute-standardized-regression-coefficient",
+    influenceMethod: "absolute-standardized-regression-coefficient-with-grouped-financing-axis",
     populationInfluenceMethod: options.populationMode === "combined"
       ? "matched-draw-categorical-correlation-ratio"
       : null,
     interactionMethod: "pair-product-partial-correlation-after-main-effects",
-    influences,
+    influences: influenceResult.influences,
+    populationInfluence,
     interactions: influenceResult.interactions,
   };
   hooks.onProgress?.({
@@ -1057,19 +1069,8 @@ const categoricalPopulationInfluence = (
   outcome: readonly number[],
   populationCount: number,
 ): UncertaintyInfluence => {
-  const countsByParameterReplicate = new Map<number, number>();
-  for (const record of records) {
-    countsByParameterReplicate.set(
-      record.parameterReplicate,
-      (countsByParameterReplicate.get(record.parameterReplicate) ?? 0) + 1,
-    );
-  }
   const observations = records
-    .map((record, index) => ({ record, value: outcome[index] ?? 0 }))
-    // A final partial row is still valid for percentile bands, but excluding it
-    // here keeps the population-effect comparison exactly matched.
-    .filter(({ record }) =>
-      countsByParameterReplicate.get(record.parameterReplicate) === populationCount);
+    .map((record, index) => ({ record, value: outcome[index] ?? 0 }));
   // Remove the mean of each matched parameter row before comparing population
   // categories. This controls the categorical effect for the sampled parameter
   // vector instead of attributing row-to-row variation to the seed label.
@@ -1110,23 +1111,55 @@ const categoricalPopulationInfluence = (
   };
 };
 
-const globalInfluence = (
-  inputs: readonly (readonly number[])[],
+const buildInfluenceInputs = (
+  records: readonly DrawRecord[],
   metadata: readonly UncertaintyParameterMetadata[],
+): readonly InfluenceInput[] => {
+  const borrowIndex = metadata.findIndex((parameter) => parameter.id === "borrow-share");
+  const sellIndex = metadata.findIndex((parameter) => parameter.id === "sell-share");
+  if (borrowIndex < 0 || sellIndex < 0) {
+    throw new Error("Financing-mix uncertainty metadata is incomplete.");
+  }
+  const inputs: InfluenceInput[] = [{
+    id: "borrow-vs-sale-mix",
+    label: "Financing mix (more borrowing, fewer sales)",
+    // The two shares are deterministic countermonotonic transforms of the same
+    // sampled factor. Their ratio is the single identified financing-mix axis;
+    // ranking both raw shares would make the regression nearly singular.
+    values: records.map((record) => {
+      const borrow = record.parameterValues[borrowIndex] ?? 0;
+      const sell = record.parameterValues[sellIndex] ?? 0;
+      return borrow / Math.max(Number.EPSILON, borrow + sell);
+    }),
+  }];
+  for (let index = 0; index < metadata.length; index += 1) {
+    const parameter = metadata[index];
+    if (!parameter || index === borrowIndex || index === sellIndex) continue;
+    inputs.push({
+      id: parameter.id,
+      label: parameter.label,
+      values: records.map((record) => record.parameterValues[index] ?? 0),
+    });
+  }
+  return inputs;
+};
+
+const globalInfluence = (
+  inputs: readonly InfluenceInput[],
   outcome: readonly number[],
 ): { influences: readonly UncertaintyInfluence[]; interactions: readonly UncertaintyInteraction[] } => {
-  const standardizedInputs = inputs.map(standardize);
+  const standardizedInputs = inputs.map((input) => standardize(input.values));
   const standardizedOutcome = standardize(outcome);
   const gram = regressionGram(standardizedInputs);
   const coefficients = regressionCoefficients(gram, standardizedInputs, standardizedOutcome);
   const outcomeResidual = regressionResidual(standardizedInputs, standardizedOutcome, coefficients);
   const standardizedOutcomeResidual = standardize(outcomeResidual);
-  const influences = metadata
-    .map((parameter, index): UncertaintyInfluence => {
+  const influences = inputs
+    .map((input, index): UncertaintyInfluence => {
       const coefficient = coefficients[index] ?? 0;
       return {
-        parameterId: parameter.id,
-        label: parameter.label,
+        parameterId: input.id,
+        label: input.label,
         score: Math.abs(coefficient),
         direction: signedDirection(coefficient),
       };
@@ -1137,9 +1170,9 @@ const globalInfluence = (
     for (let right = left + 1; right < standardizedInputs.length; right += 1) {
       const leftValues = standardizedInputs[left];
       const rightValues = standardizedInputs[right];
-      const leftMeta = metadata[left];
-      const rightMeta = metadata[right];
-      if (!leftValues || !rightValues || !leftMeta || !rightMeta) continue;
+      const leftInput = inputs[left];
+      const rightInput = inputs[right];
+      if (!leftValues || !rightValues || !leftInput || !rightInput) continue;
       const product = standardize(leftValues.map((value, row) => value * (rightValues[row] ?? 0)));
       const productCoefficients = regressionCoefficients(gram, standardizedInputs, product);
       const productResidual = standardize(
@@ -1147,10 +1180,10 @@ const globalInfluence = (
       );
       const coefficient = correlation(productResidual, standardizedOutcomeResidual);
       interactions.push({
-        leftParameterId: leftMeta.id,
-        leftLabel: leftMeta.label,
-        rightParameterId: rightMeta.id,
-        rightLabel: rightMeta.label,
+        leftParameterId: leftInput.id,
+        leftLabel: leftInput.label,
+        rightParameterId: rightInput.id,
+        rightLabel: rightInput.label,
         score: Math.abs(coefficient),
         direction: signedDirection(coefficient),
       });

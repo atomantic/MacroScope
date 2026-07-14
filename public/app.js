@@ -2056,9 +2056,7 @@ const renderUncertainty = (analysis) => {
     const item = document.createElement("li");
     const label = document.createElement("strong");
     label.textContent = influence.label;
-    const direction = influence.parameterId === "population-seed"
-      ? "varies across categorical population seeds"
-      : influence.direction === "positive"
+    const direction = influence.direction === "positive"
       ? "raises"
       : influence.direction === "negative"
         ? "lowers"
@@ -2067,6 +2065,16 @@ const renderUncertainty = (analysis) => {
     return item;
   });
   byId("uncertainty-influences").replaceChildren(...influences);
+  const populationEffect = byId("uncertainty-population-effect");
+  if (analysis.populationInfluence) {
+    populationEffect.textContent =
+      `Population replicate effect: ${analysis.populationInfluence.score.toFixed(2)} ` +
+      "matched-draw categorical correlation ratio. This bounded effect size is reported separately because it is not comparable to the regression coefficients above.";
+    populationEffect.hidden = false;
+  } else {
+    populationEffect.textContent = "";
+    populationEffect.hidden = true;
+  }
 
   const interactions = analysis.interactions.map((interaction) => {
     const item = document.createElement("li");
@@ -2084,7 +2092,7 @@ const renderUncertainty = (analysis) => {
     `${analysis.fixedAssumptions.length} policy or judgment choices held fixed. ` +
     populationDesign +
     "Declared dependency groups use rank-factor loadings; borrowing and sales use triangular proposals with proportional closure at their joint boundary. " +
-    "Influence scores are standardized regression coefficients (matched-draw categorical correlation ratio for population seeds); interaction scores partial out linear main effects from both the outcome and each parameter pair.";
+    "Countermonotonic borrowing and sales are ranked as one financing-mix axis. Influence scores are standardized regression coefficients; the separately reported population effect is a matched-draw categorical correlation ratio. Interaction scores partial out linear main effects from both the outcome and each parameter pair.";
   byId("uncertainty-results").hidden = false;
 };
 

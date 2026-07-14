@@ -42,7 +42,8 @@ describe("joint uncertainty analysis", () => {
     expect(analysis.groups).toHaveLength(6);
     expect(analysis.influences.length).toBeGreaterThan(0);
     expect(analysis.interactions.length).toBeGreaterThan(0);
-    expect(analysis.influenceMethod).toBe("absolute-standardized-regression-coefficient");
+    expect(analysis.influenceMethod)
+      .toBe("absolute-standardized-regression-coefficient-with-grouped-financing-axis");
     expect(analysis.interactionMethod)
       .toBe("pair-product-partial-correlation-after-main-effects");
     expect(analysis.correlationMethod).toBe("rank-reordered-latin-hypercube-factor");
@@ -54,6 +55,11 @@ describe("joint uncertainty analysis", () => {
       );
     }
     expect(analysis.influences.every((influence) => Number.isFinite(influence.score))).toBe(true);
+    expect(analysis.influences.some((influence) => influence.parameterId === "borrow-share"))
+      .toBe(false);
+    expect(analysis.influences.some((influence) => influence.parameterId === "sell-share"))
+      .toBe(false);
+    expect(analysis.populationInfluence).toBeNull();
     expect(analysis.interactions.every((interaction) => interaction.score <= 1)).toBe(true);
     for (const metric of analysis.metrics) {
       expect(metric.band.p10).toBeLessThanOrEqual(metric.band.p50);
@@ -91,6 +97,22 @@ describe("joint uncertainty analysis", () => {
     expect(analysis.note).toMatch(/assumption distributions, not statistical confidence intervals/i);
   });
 
+  it("ranks countermonotonic financing shares as one stable mix axis", () => {
+    const analyses = [64, 128].map((draws) => runUncertaintyAnalysis(request, {
+      ...options,
+      draws,
+      seed: 20_260_713,
+    }));
+    const financing = analyses.map((analysis) =>
+      analysis.influences.find((influence) => influence.parameterId === "borrow-vs-sale-mix"));
+    expect(financing.every((influence) => influence?.direction === "negative")).toBe(true);
+    for (const analysis of analyses) {
+      expect(analysis.influences.some((influence) =>
+        influence.parameterId === "borrow-share" || influence.parameterId === "sell-share"))
+        .toBe(false);
+    }
+  });
+
   it("enforces joint constraints in every completed draw", () => {
     const analysis = runUncertaintyAnalysis(request, options);
     expect(analysis.constraintChecks).toEqual({
@@ -126,8 +148,10 @@ describe("joint uncertainty analysis", () => {
     expect(combined.parameterDraws).toBe(32);
     expect(combined.populationInfluenceMethod)
       .toBe("matched-draw-categorical-correlation-ratio");
-    expect(combined.influences.find((influence) => influence.parameterId === "population-seed"))
+    expect(combined.populationInfluence)
       .toMatchObject({ direction: "flat" });
+    expect(combined.influences.some((influence) => influence.parameterId === "population-seed"))
+      .toBe(false);
   });
 
   it("keeps adversarial derived population seeds distinct without retaining every population", () => {
@@ -180,6 +204,18 @@ describe("joint uncertainty analysis", () => {
     }).errors).toContain(
       "combined population uncertainty requires at least 32 matched parameter draws per population seed; increase draws or reduce populationReplicates.",
     );
+    expect(parseUncertaintyOptions({
+      draws: 1_000,
+      populationMode: "combined",
+      populationReplicates: 16,
+    }).errors).toContain(
+      "combined population uncertainty requires draws to be evenly divisible by populationReplicates so every parameter row is replayed across every population seed.",
+    );
+    expect(parseUncertaintyOptions({
+      draws: 1_000,
+      populationMode: "combined",
+      populationReplicates: 8,
+    }).value).toMatchObject({ draws: 1_000, populationReplicates: 8 });
     expect(() =>
       runUncertaintyAnalysis(request, options, { shouldCancel: () => true }))
       .toThrow("Uncertainty analysis cancelled.");

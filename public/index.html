@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f2efe7" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./styles.css?v=17" />
+    <link rel="stylesheet" href="./styles.css?v=18" />
     <title>MacroScope</title>
   </head>
   <body>
@@ -112,6 +112,44 @@
             <p>The center line is the current scenario's bottom-half outcome. Every bar reaches left and right to where that outcome lands at the assumption's low and high ends, so a wide bar is a dial the verdict hinges on and a narrow one barely matters.</p>
             <p class="sensitivity-note" id="sensitivity-note">Recalculate to rank this scenario's assumptions.</p>
           </aside>
+        </div>
+        <div class="uncertainty-panel" aria-labelledby="uncertainty-heading">
+          <div class="uncertainty-intro">
+            <div>
+              <span>Joint uncertainty</span>
+              <h3 id="uncertainty-heading">What happens when assumptions move together?</h3>
+              <p>Run a seeded Latin-hypercube ensemble over growth, compliance, financing, housing, inflation, and market assumptions. The p10–p90 ranges are <strong>assumption distributions, not confidence intervals or forecasts</strong>; policy choices such as the cash/services mix stay fixed.</p>
+            </div>
+            <div class="uncertainty-controls">
+              <label for="uncertainty-draws">Model draws<select id="uncertainty-draws"><option value="512" selected>512 draws</option><option value="1000">1,000 draws</option></select></label>
+              <label for="uncertainty-population-mode">Population uncertainty<select id="uncertainty-population-mode"><option value="fixed" selected>Hold population fixed</option><option value="combined">Combine 8 population seeds</option></select></label>
+              <label for="uncertainty-seed">Ensemble seed<input id="uncertainty-seed" type="number" step="1" value="20260713" /></label>
+              <div class="uncertainty-actions">
+                <button type="button" id="uncertainty-run">Run joint uncertainty</button>
+                <button type="button" class="link-button" id="uncertainty-cancel" hidden>Cancel</button>
+              </div>
+            </div>
+          </div>
+          <div class="uncertainty-progress" aria-live="polite">
+            <progress id="uncertainty-progress" value="0" max="512"></progress>
+            <p id="uncertainty-status">Run the ensemble when you want a slower, joint-assumption check of this scenario.</p>
+          </div>
+          <div class="uncertainty-results" id="uncertainty-results" hidden>
+            <div class="verdict-frequency" id="uncertainty-verdicts"></div>
+            <div class="uncertainty-grid">
+              <div>
+                <h4>Outcome bands</h4>
+                <div class="uncertainty-table-wrap" id="uncertainty-metrics"></div>
+              </div>
+              <div>
+                <h4>Strongest global influences</h4>
+                <ol class="uncertainty-list" id="uncertainty-influences"></ol>
+                <h4>Strongest pairwise interactions</h4>
+                <ol class="uncertainty-list" id="uncertainty-interactions"></ol>
+              </div>
+            </div>
+            <p class="uncertainty-note" id="uncertainty-note"></p>
+          </div>
         </div>
       </section>
 
@@ -534,6 +572,6 @@
     </footer>
     <div class="toast-container" id="toast-container" aria-live="polite" aria-atomic="true"></div>
     <div class="visually-hidden" id="chart-readout" role="status" aria-live="polite"></div>
-    <script src="./app.js?v=17" type="module"></script>
+    <script src="./app.js?v=18" type="module"></script>
   </body>
 </html>

@@ -23,6 +23,7 @@ The current implementation covers the model contract and a usable first policy v
 - Configurable allocation of the funded budget among direct cash, public services, and administration/implementation costs.
 - Taxpayer-response dials for avoidance/evasion elasticity, decade-cumulative expatriation, and the private-business inclusion (valuation-discount) rate, with full-compliance, Scandinavian, and French ISF presets grounded in the literature.
 - A 25-cell stress test that separates elevated inflation, crisis inflation, and the Cagan 50%-per-month hyperinflation threshold.
+- An explicit 512- or 1,000-draw joint-assumption ensemble with seeded Latin-hypercube sampling, p10/p50/p90 bands, verdict frequencies, global influence, pairwise interactions, progress, cancellation, and an optional synthetic-population uncertainty layer.
 - A responsive verdict-led dashboard with editable policy, taxpayer behavior, market, and monetization assumptions.
 
 ## Development
@@ -74,6 +75,11 @@ curl http://127.0.0.1:6020/api/scenarios/default
 curl -X POST http://127.0.0.1:6020/api/scenarios/compare \
   -H 'Content-Type: application/json' \
   --data @scenario.json
+
+# Run joint uncertainty (request + ensemble options envelope)
+curl -X POST http://127.0.0.1:6020/api/scenarios/uncertainty \
+  -H 'Content-Type: application/json' \
+  --data '{"request":{},"options":{"draws":512,"seed":20260713,"populationMode":"fixed","populationReplicates":8}}'
 ```
 
-The response contains the immutable assumptions, population aggregates, all three strategy outcomes, the ten-year projection and verdict, the inflation stress test, accounting residuals, decile results, sector demand, and caveats. Replaying the same request produces the same response.
+The comparison response contains the immutable assumptions, population aggregates, all three strategy outcomes, the ten-year projection and verdict, the inflation stress test, accounting residuals, decile results, sector demand, and caveats. The uncertainty response adds declared assumption metadata, p10/p50/p90 outcome and trajectory bands, verdict frequencies, influences, and interactions. Send `Accept: application/x-ndjson` to the uncertainty endpoint for progress records before the final result. Replaying the same request and ensemble seed produces the same response.

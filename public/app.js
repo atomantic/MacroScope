@@ -595,10 +595,14 @@ const createEngineChannel = () => {
     const created = new Worker(versioned("./engine-worker.js"), { type: "module" });
     created.addEventListener("message", (event) => {
       const { id } = event.data ?? {};
-      const respond = pending.get(id);
-      if (!respond) return;
+      const entry = pending.get(id);
+      if (!entry) return;
+      if (event.data?.progress) {
+        entry.onProgress?.(event.data.progress);
+        return;
+      }
       pending.delete(id);
-      respond(event.data);
+      entry.respond(event.data);
     });
     created.addEventListener("error", () => {
       created.terminate();
@@ -609,7 +613,7 @@ const createEngineChannel = () => {
       failed = true;
       const waiting = [...pending.values()];
       pending.clear();
-      waiting.forEach((respond) => respond({ ok: false, workerFailed: true }));
+      waiting.forEach(({ respond }) => respond({ ok: false, workerFailed: true }));
     });
     worker = created;
     return created;
@@ -617,32 +621,50 @@ const createEngineChannel = () => {
   return {
     hasFailed: () => failed,
     warm: () => ensure(),
-    run: (request, mode) =>
+    run: (request, mode, options, onProgress) =>
       new Promise((resolve) => {
         requestId += 1;
-        pending.set(requestId, resolve);
-        ensure().postMessage({ id: requestId, request, mode });
+        pending.set(requestId, { respond: resolve, onProgress });
+        ensure().postMessage({ id: requestId, request, mode, options });
       }),
+    cancelAll: () => {
+      const active = worker;
+      worker = null;
+      failed = false;
+      active?.terminate();
+      const waiting = [...pending.values()];
+      pending.clear();
+      waiting.forEach(({ respond }) => respond({ ok: false, cancelled: true }));
+    },
   };
 };
 
 const comparisonChannel = createEngineChannel();
 const sensitivityChannel = createEngineChannel();
+const uncertaintyChannel = createEngineChannel();
 
-const runOnMainThread = async (request, mode = "compare") => {
+const runOnMainThread = async (request, mode = "compare", options, onProgress) => {
   const engine = await import(versioned("./engine/browser/engine.js"));
+  if (mode === "uncertainty") return engine.analyzeUncertainty(request, options, onProgress);
   return mode === "sensitivity"
     ? engine.analyzeSensitivity(request)
     : engine.compareScenarios(request);
 };
 
-const runLocalScenario = async (request, mode = "compare") => {
-  const channel = mode === "sensitivity" ? sensitivityChannel : comparisonChannel;
+const runLocalScenario = async (request, mode = "compare", options, onProgress) => {
+  const channel = mode === "sensitivity"
+    ? sensitivityChannel
+    : mode === "uncertainty"
+      ? uncertaintyChannel
+      : comparisonChannel;
   const useWorker = typeof Worker !== "undefined" && !channel.hasFailed();
-  let response = useWorker ? await channel.run(request, mode) : await runOnMainThread(request, mode);
+  let response = useWorker
+    ? await channel.run(request, mode, options, onProgress)
+    : await runOnMainThread(request, mode, options, onProgress);
   // Module workers can fail where Worker itself exists (older Firefox,
   // blocked worker loading) — retry the same request on the main thread.
-  if (response?.workerFailed) response = await runOnMainThread(request, mode);
+  if (response?.workerFailed) response = await runOnMainThread(request, mode, options, onProgress);
+  if (response?.cancelled) throw new DOMException("Uncertainty analysis cancelled.", "AbortError");
   if (!response?.ok) {
     throw new Error(response?.details?.join(" ") || response?.error || "Scenario failed.");
   }
@@ -679,6 +701,56 @@ const runSensitivity = async (request) =>
   isStaticSnapshot
     ? runLocalScenario(request, "sensitivity")
     : runServerSensitivity(request);
+
+let uncertaintyAbortController = null;
+
+const runServerUncertainty = async (request, options, onProgress) => {
+  uncertaintyAbortController = new AbortController();
+  const response = await fetch("/api/scenarios/uncertainty", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/x-ndjson",
+    },
+    body: JSON.stringify({ request, options }),
+    signal: uncertaintyAbortController.signal,
+  });
+  if (!response.ok) {
+    const payload = await response.json();
+    throw new Error(payload.details?.join(" ") || payload.error || "Uncertainty run failed.");
+  }
+  if (!response.body) throw new Error("Uncertainty progress stream unavailable.");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result = null;
+  while (true) {
+    const chunk = await reader.read();
+    buffer += decoder.decode(chunk.value, { stream: !chunk.done });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line) continue;
+      const message = JSON.parse(line);
+      if (message.progress) onProgress(message.progress);
+      if (message.result) result = message.result;
+    }
+    if (chunk.done) break;
+  }
+  if (!result) throw new Error("Uncertainty run ended without a result.");
+  return result;
+};
+
+const runUncertainty = (request, options, onProgress) =>
+  isStaticSnapshot
+    ? runLocalScenario(request, "uncertainty", options, onProgress)
+    : runServerUncertainty(request, options, onProgress);
+
+const cancelUncertainty = () => {
+  uncertaintyAbortController?.abort();
+  uncertaintyAbortController = null;
+  uncertaintyChannel.cancelAll();
+};
 
 // The tornado sweep runs many scenarios (2N endpoints plus a bounded flip
 // search), so it is computed on its own worker after the main verdict renders
@@ -743,6 +815,7 @@ const runScenario = async ({ auto = false } = {}) => {
     }
   }
   setBracketError(null);
+  invalidateUncertainty();
   const button = byId("run-button");
   if (!auto) {
     button.disabled = true;
@@ -1901,6 +1974,149 @@ const renderSensitivity = (analysis) => {
   root.append(svg);
 };
 
+const uncertaintyState = { running: false, token: 0 };
+
+const setUncertaintyBusy = (busy) => {
+  uncertaintyState.running = busy;
+  byId("uncertainty-run").disabled = busy;
+  byId("uncertainty-cancel").hidden = !busy;
+  byId("uncertainty-draws").disabled = busy;
+  byId("uncertainty-population-mode").disabled = busy;
+  byId("uncertainty-seed").disabled = busy;
+};
+
+const formatUncertaintyValue = (value, unit) => {
+  if (unit === "dollars") return compactMoney.format(value);
+  if (unit === "index") return value.toFixed(1);
+  return signedPercent(value);
+};
+
+const renderUncertainty = (analysis) => {
+  const verdictRoot = byId("uncertainty-verdicts");
+  verdictRoot.replaceChildren();
+  for (const rating of ["beneficial", "mixed", "harmful"]) {
+    const frequency = analysis.verdictFrequencies[rating];
+    const card = document.createElement("article");
+    const label = document.createElement("span");
+    label.textContent = rating;
+    const value = document.createElement("strong");
+    value.textContent = percent.format(frequency.share);
+    const count = document.createElement("small");
+    count.textContent = `${integer.format(frequency.count)} of ${integer.format(analysis.runs)} draws`;
+    card.append(label, value, count);
+    verdictRoot.append(card);
+  }
+
+  const table = document.createElement("table");
+  table.className = "uncertainty-table";
+  const header = document.createElement("tr");
+  for (const text of ["Outcome", "p10", "p50", "p90"]) {
+    const cell = document.createElement("th");
+    cell.scope = "col";
+    cell.textContent = text;
+    header.append(cell);
+  }
+  const head = document.createElement("thead");
+  head.append(header);
+  const body = document.createElement("tbody");
+  for (const metric of analysis.metrics) {
+    const row = document.createElement("tr");
+    const label = document.createElement("td");
+    label.textContent = metric.label;
+    row.append(label);
+    for (const key of ["p10", "p50", "p90"]) {
+      const cell = document.createElement("td");
+      cell.textContent = formatUncertaintyValue(metric.band[key], metric.unit);
+      row.append(cell);
+    }
+    body.append(row);
+  }
+  table.append(head, body);
+  byId("uncertainty-metrics").replaceChildren(table);
+
+  const influences = analysis.influences.map((influence) => {
+    const item = document.createElement("li");
+    const label = document.createElement("strong");
+    label.textContent = influence.label;
+    const direction = influence.direction === "positive"
+      ? "raises"
+      : influence.direction === "negative"
+        ? "lowers"
+        : "barely moves";
+    item.append(label, ` — ${direction} bottom-half buying power; influence ${influence.score.toFixed(2)}`);
+    return item;
+  });
+  byId("uncertainty-influences").replaceChildren(...influences);
+
+  const interactions = analysis.interactions.map((interaction) => {
+    const item = document.createElement("li");
+    const label = document.createElement("strong");
+    label.textContent = `${interaction.leftLabel} × ${interaction.rightLabel}`;
+    item.append(label, ` — interaction ${interaction.score.toFixed(2)}`);
+    return item;
+  });
+  byId("uncertainty-interactions").replaceChildren(...interactions);
+  byId("uncertainty-note").textContent =
+    `${analysis.note} Seed ${analysis.options.seed}; ${analysis.sampledParameters.length} sampled assumptions; ` +
+    `${analysis.fixedAssumptions.length} policy or judgment choices held fixed. ` +
+    "Influence scores are standardized correlations; interactions are correlations after removing linear main effects.";
+  byId("uncertainty-results").hidden = false;
+};
+
+const invalidateUncertainty = () => {
+  uncertaintyState.token += 1;
+  if (uncertaintyState.running) cancelUncertainty();
+  setUncertaintyBusy(false);
+  byId("uncertainty-results").hidden = true;
+  byId("uncertainty-progress").value = 0;
+  byId("uncertainty-status").textContent =
+    "Scenario changed. Run joint uncertainty again when the current scenario is settled.";
+};
+
+const startUncertainty = async () => {
+  if (uncertaintyState.running) return;
+  const draws = Number(byId("uncertainty-draws").value);
+  const options = {
+    draws,
+    seed: Number(byId("uncertainty-seed").value),
+    populationMode: byId("uncertainty-population-mode").value,
+    populationReplicates: 8,
+  };
+  const token = (uncertaintyState.token += 1);
+  const progress = byId("uncertainty-progress");
+  progress.max = draws;
+  progress.value = 0;
+  byId("uncertainty-results").hidden = true;
+  setUncertaintyBusy(true);
+  byId("uncertainty-status").textContent = `Starting ${integer.format(draws)} seeded model draws…`;
+  try {
+    const analysis = await runUncertainty(formRequest(), options, (update) => {
+      if (token !== uncertaintyState.token) return;
+      progress.value = update.completed;
+      const phase = update.phase === "summarizing" ? "Summarizing" : "Running";
+      byId("uncertainty-status").textContent =
+        `${phase} ${integer.format(update.completed)} of ${integer.format(update.total)} draws (${percent.format(update.percent)}).`;
+    });
+    if (token !== uncertaintyState.token) return;
+    renderUncertainty(analysis);
+    byId("uncertainty-status").textContent =
+      `Complete: ${integer.format(analysis.runs)} deterministic draws. Reuse seed ${analysis.options.seed} to replay exactly.`;
+  } catch (error) {
+    if (token !== uncertaintyState.token) return;
+    const cancelled = error?.name === "AbortError";
+    byId("uncertainty-status").textContent = cancelled
+      ? "Joint uncertainty run cancelled."
+      : error instanceof Error
+        ? error.message
+        : "Joint uncertainty analysis unavailable.";
+  } finally {
+    if (token === uncertaintyState.token) {
+      setUncertaintyBusy(false);
+      uncertaintyAbortController = null;
+    }
+  }
+};
+
 const renderVerdictFlip = (flip) => {
   const panel = byId("sensitivity-flip");
   const text = byId("sensitivity-flip-text");
@@ -2933,6 +3149,13 @@ const initStory = () => {
 
 document.querySelectorAll("[data-behavior-preset]").forEach((button) => {
   button.addEventListener("click", () => applyBehaviorPreset(button.dataset.behaviorPreset));
+});
+byId("uncertainty-run").addEventListener("click", () => void startUncertainty());
+byId("uncertainty-cancel").addEventListener("click", () => {
+  uncertaintyState.token += 1;
+  cancelUncertainty();
+  setUncertaintyBusy(false);
+  byId("uncertainty-status").textContent = "Joint uncertainty run cancelled.";
 });
 window.addEventListener("hashchange", () => {
   if (window.location.hash !== "#assumptions-anchor") return;

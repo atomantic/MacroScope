@@ -4,6 +4,12 @@ import {
   runSensitivityAnalysis,
   type SensitivityAnalysis,
 } from "../simulation/sensitivity.js";
+import {
+  parseUncertaintyOptions,
+  runUncertaintyAnalysis,
+  type UncertaintyAnalysis,
+  type UncertaintyProgress,
+} from "../simulation/uncertainty.js";
 import type { ComparisonResultV1 } from "../simulation/contracts.js";
 
 export type BrowserCompareResponse =
@@ -16,6 +22,14 @@ export type BrowserCompareResponse =
 
 export type BrowserSensitivityResponse =
   | { readonly ok: true; readonly result: SensitivityAnalysis }
+  | {
+      readonly ok: false;
+      readonly error: string;
+      readonly details: readonly string[];
+    };
+
+export type BrowserUncertaintyResponse =
+  | { readonly ok: true; readonly result: UncertaintyAnalysis }
   | {
       readonly ok: false;
       readonly error: string;
@@ -55,4 +69,30 @@ export const analyzeSensitivity = (input: unknown): BrowserSensitivityResponse =
     };
   }
   return { ok: true, result: runSensitivityAnalysis(parsed.value) };
+};
+
+/** Runs the explicit joint-uncertainty ensemble in the browser worker. */
+export const analyzeUncertainty = (
+  input: unknown,
+  options: unknown,
+  onProgress?: (progress: UncertaintyProgress) => void,
+): BrowserUncertaintyResponse => {
+  const parsed = parseComparisonRequest(input);
+  const parsedOptions = parseUncertaintyOptions(options);
+  const details = [...parsed.errors, ...parsedOptions.errors];
+  if (!parsed.value || !parsedOptions.value) {
+    return {
+      ok: false,
+      error: "Invalid uncertainty request.",
+      details,
+    };
+  }
+  return {
+    ok: true,
+    result: runUncertaintyAnalysis(
+      parsed.value,
+      parsedOptions.value,
+      onProgress ? { onProgress } : {},
+    ),
+  };
 };

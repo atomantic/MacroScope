@@ -17,6 +17,14 @@ import {
   runSensitivityAnalysis,
   type SensitivityAnalysis,
 } from "../simulation/sensitivity.js";
+import {
+  parseUncertaintyOptions,
+  runUncertaintyAnalysis,
+  UncertaintyCancelledError,
+  type UncertaintyAnalysis,
+  type UncertaintyOptions,
+  type UncertaintyProgress,
+} from "../simulation/uncertainty.js";
 import { parseComparisonRequest } from "./comparisonInput.js";
 
 // The sensitivity sweep runs ~80 full comparisons — ~1.7s at 4,000 agents — so
@@ -29,6 +37,10 @@ const sensitivityWorkerPath = fileURLToPath(
   new URL("./sensitivityWorker.js", import.meta.url),
 );
 const canOffloadSensitivity = existsSync(sensitivityWorkerPath);
+const uncertaintyWorkerPath = fileURLToPath(
+  new URL("./uncertaintyWorker.js", import.meta.url),
+);
+const canOffloadUncertainty = existsSync(uncertaintyWorkerPath);
 
 const analyzeSensitivity = (
   request: ComparisonRequestV1,
@@ -45,6 +57,61 @@ const analyzeSensitivity = (
       reject(error);
     });
   });
+};
+
+interface UncertaintyJob {
+  readonly result: Promise<UncertaintyAnalysis>;
+  readonly cancel: () => void;
+}
+
+const analyzeUncertainty = (
+  request: ComparisonRequestV1,
+  options: UncertaintyOptions,
+  onProgress: (progress: UncertaintyProgress) => void,
+): UncertaintyJob => {
+  if (!canOffloadUncertainty) {
+    let cancelled = false;
+    return {
+      result: Promise.resolve().then(() =>
+        runUncertaintyAnalysis(request, options, {
+          onProgress,
+          shouldCancel: () => cancelled,
+        })),
+      cancel: () => {
+        cancelled = true;
+      },
+    };
+  }
+  const worker = new Worker(uncertaintyWorkerPath, { workerData: { request, options } });
+  let settled = false;
+  let rejectJob: (reason: Error) => void = () => undefined;
+  const result = new Promise<UncertaintyAnalysis>((resolvePromise, reject) => {
+    rejectJob = reject;
+    worker.on("message", (message: {
+      readonly progress?: UncertaintyProgress;
+      readonly result?: UncertaintyAnalysis;
+    }) => {
+      if (message.progress) onProgress(message.progress);
+      if (!message.result) return;
+      settled = true;
+      void worker.terminate();
+      resolvePromise(message.result);
+    });
+    worker.once("error", (error) => {
+      settled = true;
+      void worker.terminate();
+      reject(error);
+    });
+  });
+  return {
+    result,
+    cancel: () => {
+      if (settled) return;
+      settled = true;
+      void worker.terminate();
+      rejectJob(new UncertaintyCancelledError());
+    },
+  };
 };
 
 // Each sweep is a CPU-bound worker running ~80 comparisons, so an unbounded
@@ -126,6 +193,7 @@ export const createApp = (options: AppOptions = {}): Express => {
         "inflation-and-monetization-stress-test",
         "owner-renter-asset-feedback-theory-test",
         "one-at-a-time-sensitivity-tornado",
+        "joint-uncertainty-bands-and-interactions",
         "percentile-or-dollar-wealth-tax-targeting",
         "cash-services-and-administration-allocation",
         "historical-inflation-backtest-2020-2023",
@@ -186,6 +254,60 @@ export const createApp = (options: AppOptions = {}): Express => {
     }
   });
 
+  app.post("/api/scenarios/uncertainty", async (request, response) => {
+    const body = isRecord(request.body) ? request.body : {};
+    const parsed = parseComparisonRequest(body.request);
+    const parsedOptions = parseUncertaintyOptions(body.options);
+    if (!parsed.value || !parsedOptions.value) {
+      response.status(400).json({
+        error: "Invalid uncertainty request.",
+        details: [...parsed.errors, ...parsedOptions.errors],
+      });
+      return;
+    }
+    const admitted = await acquireSensitivitySlot();
+    if (!admitted) {
+      response.status(503).json({ error: "Uncertainty analysis is busy; retry shortly." });
+      return;
+    }
+    const streaming = request.get("accept")?.includes("application/x-ndjson") ?? false;
+    if (streaming) {
+      response.status(200);
+      response.type("application/x-ndjson");
+      response.flushHeaders();
+    }
+    const job = analyzeUncertainty(parsed.value, parsedOptions.value, (progress) => {
+      if (streaming && !response.writableEnded) {
+        response.write(`${JSON.stringify({ progress })}\n`);
+      }
+    });
+    const cancelIfDisconnected = () => {
+      if (!response.writableEnded) job.cancel();
+    };
+    request.once("aborted", cancelIfDisconnected);
+    response.once("close", cancelIfDisconnected);
+    try {
+      const result = await job.result;
+      if (response.writableEnded) return;
+      if (streaming) {
+        response.end(`${JSON.stringify({ result })}\n`);
+      } else {
+        response.json(result);
+      }
+    } catch (error) {
+      if (error instanceof UncertaintyCancelledError || response.destroyed) return;
+      if (streaming) {
+        response.end(`${JSON.stringify({
+          error: error instanceof Error ? error.message : "Uncertainty analysis failed.",
+        })}\n`);
+        return;
+      }
+      throw error;
+    } finally {
+      releaseSensitivitySlot();
+    }
+  });
+
   app.use("/api", (_request, response) => {
     response.status(404).json({ error: "API endpoint not found." });
   });
@@ -203,3 +325,6 @@ export const createApp = (options: AppOptions = {}): Express => {
 
   return app;
 };
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);

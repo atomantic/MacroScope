@@ -190,6 +190,13 @@ export const buildPolicyProjection = (
   const yearOneAllocation = allocateProgramOutlay(yearOneFiscal, request);
   const { ubiReceived, publicServicesSpending, administrativeCost } =
     yearOneAllocation;
+  const yearOneScheduledCash = yearOneAllocation.ubiReceived - yearOneFiscal.rebate;
+  const yearOneRebatePerHousehold =
+    yearOneFiscal.rebate / Math.max(1, request.representedHouseholds);
+  const bottom50ScheduledCash = Math.max(
+    0,
+    bottom50AnnualUbi - yearOneRebatePerHousehold,
+  );
   const governmentDeficit = yearOneFiscal.debtIssued;
 
   // Apportion year-one collections with the exact synthetic households that
@@ -343,9 +350,11 @@ export const buildPolicyProjection = (
     const programBudgetYear = fiscalYear.programOutlay;
     const budgetScale = programBudgetYear / Math.max(1, yearOneProgramBudget);
     const governmentDeficitYear = fiscalYear.debtIssued;
+    const scheduledCashYear = allocation.ubiReceived - fiscalYear.rebate;
     const bottom50UbiYear =
-      bottom50AnnualUbi *
-      (allocation.ubiReceived / Math.max(1, yearOneAllocation.ubiReceived));
+      bottom50ScheduledCash *
+        (yearOneScheduledCash > 0 ? scheduledCashYear / yearOneScheduledCash : 0) +
+      fiscalYear.rebate / Math.max(1, request.representedHouseholds);
 
     const repayments = privateTaxDebt * request.model.loanAmortizationRate;
     privateTaxDebt = Math.max(0, privateTaxDebt + newPrivateLoansYear - repayments);
@@ -558,6 +567,8 @@ export const buildPolicyProjection = (
   });
   const stressTest = buildStressTest(
     strategies,
+    yearOneProgramBudget,
+    demandInflation,
     newPrivateLoans,
     taxCollected,
     request,
@@ -1046,6 +1057,8 @@ export const inflationFromStress = (input: InflationStressInput): {
 
 const buildStressTest = (
   strategies: Strategies,
+  baselineProgramOutlay: number,
+  baselineDemandInflation: number,
   newPrivateLoans: number,
   taxCollected: number,
   request: ComparisonRequestV1,
@@ -1067,8 +1080,8 @@ const buildStressTest = (
         fundingRule: request.ubi.fundingRule,
         surplusUse: normalizedSurplusUse(request),
         loanAmortizationRate,
-        demandInflation:
-          strategies["cash-first"].macro.estimatedInflationChange * multiplier,
+        baselineProgramOutlay,
+        baselineDemandInflation,
         baseDynamics,
       });
       cells.push({
@@ -1096,8 +1109,8 @@ const buildStressTest = (
       fundingRule: request.ubi.fundingRule,
       surplusUse: normalizedSurplusUse(request),
       loanAmortizationRate,
-      demandInflation:
-        strategies["cash-first"].macro.estimatedInflationChange * multiplier,
+      baselineProgramOutlay,
+      baselineDemandInflation,
       baseDynamics,
     });
     if (annualToMonthly(peak) >= STRICT_HYPER_MONTHLY_RATE) {
@@ -1133,7 +1146,8 @@ const stressPeak = (input: {
   fundingRule: ComparisonRequestV1["ubi"]["fundingRule"];
   surplusUse: NonNullable<ComparisonRequestV1["ubi"]["surplusUse"]>;
   loanAmortizationRate: number;
-  demandInflation: number;
+  baselineProgramOutlay: number;
+  baselineDemandInflation: number;
   baseDynamics: BaseDynamics;
 }): number => {
   let m2 = US_BASELINE.m2;
@@ -1182,8 +1196,8 @@ const stressPeak = (input: {
     const stress = inflationFromStress({
       baselineInflation: US_BASELINE.baselineInflation,
       demandInflation:
-        input.demandInflation *
-        (fiscalYear.programOutlay / Math.max(1, requestedOutlay)),
+        input.baselineDemandInflation *
+        (fiscalYear.programOutlay / Math.max(1, input.baselineProgramOutlay)),
       moneyGrowth: injection / Math.max(1, m2),
       monetizedDeficitRatio:
         (fiscalYear.debtIssued * input.monetizationShare) /

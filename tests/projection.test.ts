@@ -495,6 +495,64 @@ describe("ten-year projection dynamics", () => {
     ).toBe(true);
   });
 
+  it("normalizes stress demand against funded surplus spending when requested benefits are zero", () => {
+    const base = nationalRequest();
+    for (const surplusUse of ["additional-services", "rebate"] as const) {
+      const result = runComparison({
+        ...base,
+        ubi: {
+          ...base.ubi,
+          adultMonthlyBenefit: 0,
+          childMonthlyBenefit: 0,
+          fundingRule: "fixed",
+          surplusUse,
+        },
+      });
+
+      expect(result.projection.fiscal.years[0]?.programOutlay).toBeGreaterThan(0);
+      expect(
+        result.projection.stressTest.cells.every(
+          (cell) => Number.isFinite(cell.peakAnnualInflation) && cell.peakAnnualInflation < 1,
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it("attributes rebates created by later revenue growth to bottom-half income", () => {
+    const base = nationalRequest();
+    const calibration = runComparison(base);
+    const requested = calibration.strategies["cash-first"].fiscal.requestedUbi;
+    const scale = calibration.projection.annualFlows.taxCollected / requested;
+    const request: ComparisonRequestV1 = {
+      ...base,
+      ubi: {
+        ...base.ubi,
+        adultMonthlyBenefit: base.ubi.adultMonthlyBenefit * scale,
+        childMonthlyBenefit: base.ubi.childMonthlyBenefit * scale,
+        directCashShare: 0,
+        fundingRule: "fixed",
+      },
+      model: {
+        ...base.model,
+        monetaryPolicyOffsetShare: 1,
+      },
+    };
+    const debtReduction = runComparison({
+      ...request,
+      ubi: { ...request.ubi, surplusUse: "debt-reduction" },
+    });
+    const rebate = runComparison({
+      ...request,
+      ubi: { ...request.ubi, surplusUse: "rebate" },
+    });
+
+    expect(rebate.projection.fiscal.years[0]?.rebate).toBeLessThan(1);
+    expect(rebate.projection.fiscal.years.at(-1)?.rebate).toBeGreaterThan(0);
+    expect(rebate.projection.summary.bottom50PurchasingPowerChange).toBeGreaterThan(
+      debtReduction.projection.summary.bottom50PurchasingPowerChange,
+    );
+  });
+
   it("leaves output on the no-policy trend when both growth dials are zero", () => {
     // The growth/investment block must be inert at its defaults: the capital
     // index stays pinned at 1, so every year's GDP index is exactly 100 and the

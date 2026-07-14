@@ -21,7 +21,10 @@ import {
   type SyntheticHousehold,
 } from "./population.js";
 import { calibratePopulationToUs } from "./usBaseline.js";
-import { buildPolicyProjection } from "./projection.js";
+import {
+  buildPolicyProjection,
+  type HouseholdProjectionTaxAssessment,
+} from "./projection.js";
 import { computeStrategyAccounting } from "./ledgerAudit.js";
 import { MODEL_CONSTANTS } from "./modelConstants.js";
 
@@ -32,6 +35,18 @@ interface HouseholdFunding {
   readonly equitySold: number;
   readonly housingSold: number;
   readonly deferred: number;
+}
+
+interface HouseholdTaxAssessment {
+  readonly weight: number;
+  readonly taxableBase: number;
+  readonly fullComplianceTax: number;
+  readonly taxAssessed: number;
+}
+
+interface StrategyRunResult {
+  readonly outcome: StrategyOutcome;
+  readonly taxCollectedByHousehold: ReadonlyMap<string, number>;
 }
 
 interface CascadeResult {
@@ -98,12 +113,49 @@ export const runComparisonWithPopulation = (
   const population = summarizePopulation(households);
   const effectiveExemption = resolveEffectiveExemption(households, request);
   const policy = buildWealthTaxPolicy(request, effectiveExemption);
-  const strategies = Object.fromEntries(
+  const householdTaxAssessments = buildHouseholdTaxAssessments(
+    households,
+    policy,
+    request,
+  );
+  const strategyRuns = Object.fromEntries(
     STRATEGIES.map((strategy) => [
       strategy,
-      runStrategy(households, population, policy, request, strategy),
+      runStrategy(
+        households,
+        population,
+        householdTaxAssessments,
+        request,
+        strategy,
+      ),
     ]),
+  ) as Record<PaymentStrategy, StrategyRunResult>;
+  const strategies = Object.fromEntries(
+    STRATEGIES.map((strategy) => [strategy, strategyRuns[strategy].outcome]),
   ) as Record<PaymentStrategy, StrategyOutcome>;
+  const projectionHouseholdAssessments: HouseholdProjectionTaxAssessment[] =
+    households.map((household) => ({
+      percentile: household.percentile,
+      weight: household.weight,
+      taxAssessed: requireTaxAssessment(
+        householdTaxAssessments,
+        household.id,
+      ).taxAssessed,
+      taxCollected: {
+        "cash-first": requireCollectedTax(
+          strategyRuns["cash-first"].taxCollectedByHousehold,
+          household.id,
+        ),
+        "borrow-first": requireCollectedTax(
+          strategyRuns["borrow-first"].taxCollectedByHousehold,
+          household.id,
+        ),
+        "sell-first": requireCollectedTax(
+          strategyRuns["sell-first"].taxCollectedByHousehold,
+          household.id,
+        ),
+      },
+    }));
 
   return {
     schemaVersion: request.schemaVersion,
@@ -116,12 +168,10 @@ export const runComparisonWithPopulation = (
     },
     population,
     strategies,
-    projection: buildPolicyProjection(
-      request,
-      strategies,
-      effectiveExemption,
-      resolveEffectiveTaxRate(households, policy),
-    ),
+    projection: buildPolicyProjection(request, strategies, {
+      effectiveTaxRate: resolveEffectiveTaxRate(householdTaxAssessments, policy),
+      householdAssessments: projectionHouseholdAssessments,
+    }),
     caveats: [
       "Results are conditional scenarios, not forecasts.",
       "Wealth-group totals are calibrated to the Federal Reserve DFA for 2026:Q1; within-group joint distributions remain stylized.",
@@ -131,7 +181,7 @@ export const runComparisonWithPopulation = (
       "Wealth Gini values treat negative net worth as zero for the inequality calculation.",
       `The ten-year path is a transparent reduced-form projection with ${request.ubi.benefitIndexation === "cpi" ? "CPI-indexed policy benefits (one-year recognition lag)" : "fixed nominal policy benefits"}, a wealth-tax base that compounds with asset returns and erodes with taxes paid, partial wage adjustment, and no private-loan bailout.`,
       "The growth/investment channel is a reduced-form Solow-style block: investment deviates from the capital-replacement rate as the wealth tax lowers the after-tax return on wealth (savings response) and the transfer adds a demand impulse (demand offset); wages and real GDP per worker track the resulting capital stock. Both response dials default to zero, which holds output on the constant-trend baseline. It captures direction and rough magnitude, not a general-equilibrium forecast.",
-      "Taxpayer-response dials act on the aggregate taxed base as reduced-form revenue multipliers: avoidance and the private-business inclusion rate scale year-one collections directly, while expatriation drains the top-tier sub-base gradually over the decade — the whole taxed base whenever a positive exemption makes it top-tier, and only the top-tier share of revenue under a universal (zero-exemption) tax. The ten-year inflation stress grid evolves its revenue and private-loan flows with the same base dynamics (asset returns, statutory-rate erosion, and top-tier expatriation), so its cells and hyperinflation threshold reflect them alongside avoidance and inclusion.",
+      "Taxpayer-response dials act on the aggregate taxed base as reduced-form revenue multipliers: avoidance and the private-business inclusion rate scale year-one collections directly, while expatriation drains the top-tier sub-base gradually over the decade. The top-tier share comes from the same synthetic household collections as the cohort burdens, so exemptions that cut through a cohort and graduated rates are reflected in the split. The ten-year inflation stress grid evolves its revenue and private-loan flows with the same base dynamics (asset returns, effective-rate erosion, and top-tier expatriation), so its cells and hyperinflation threshold reflect them alongside avoidance and inclusion.",
       "Cash purchasing-power measures do not assign a dollar welfare value to healthcare or social services delivered in kind.",
       "Percentile targeting resolves an effective exemption from the synthetic weighted population, so its dollar cutoff varies with calibration and sample size.",
       "Accounting checks replay each strategy's aggregate sector-level flows through the double-entry ledger and cross-check them against independent per-household deposit sums; intra-household asset trades net out within the household sector.",
@@ -187,18 +237,16 @@ const normalizeWealthTax = (
 const runStrategy = (
   households: readonly SyntheticHousehold[],
   population: PopulationSummary,
-  policy: WealthTaxPolicyV1,
+  householdTaxAssessments: ReadonlyMap<string, HouseholdTaxAssessment>,
   request: ComparisonRequestV1,
   strategy: PaymentStrategy,
-): StrategyOutcome => {
-  const complianceFactor = avoidanceComplianceFactor(request);
+): StrategyRunResult => {
   const funding = new Map<string, HouseholdFunding>();
   for (const household of households) {
-    const tax =
-      assessWealthTax(
-        { assets: household.assets, liabilities: household.liabilities },
-        policy,
-      ).annualTax * complianceFactor;
+    const tax = requireTaxAssessment(
+      householdTaxAssessments,
+      household.id,
+    ).taxAssessed;
     funding.set(household.id, fundTax(household, tax, strategy, request));
   }
 
@@ -209,6 +257,15 @@ const runStrategy = (
     const item = requireFunding(funding, household.id);
     return item.cash + item.borrowed + item.equitySold + item.housingSold;
   });
+  const taxCollectedByHousehold = new Map<string, number>(
+    households.map((household) => {
+      const item = requireFunding(funding, household.id);
+      return [
+        household.id,
+        item.cash + item.borrowed + item.equitySold + item.housingSold,
+      ];
+    }),
+  );
   const requestedUbi = weightedSum(
     households,
     (household) =>
@@ -425,58 +482,67 @@ const runStrategy = (
   });
 
   return {
-    strategy,
-    fiscal: {
-      taxAssessed,
-      taxCollected,
-      taxDeferred,
-      requestedUbi,
-      ubiReceived,
-      publicServicesSpending,
-      administrativeCost,
-      leakage,
-      governmentBalance: taxCollected - governmentOutlays,
-      fundingRatio,
+    outcome: {
+      strategy,
+      fiscal: {
+        taxAssessed,
+        taxCollected,
+        taxDeferred,
+        requestedUbi,
+        ubiReceived,
+        publicServicesSpending,
+        administrativeCost,
+        leakage,
+        governmentBalance: taxCollected - governmentOutlays,
+        fundingRatio,
+      },
+      funding: {
+        paidFromCash,
+        newCollateralizedLoans: newLoans,
+        equitySoldForTax: primaryBookSales,
+        housingSoldForTax: primaryHousingSales,
+        householdsBorrowing,
+        householdsSelling,
+      },
+      moneyAndCredit: {
+        bankDepositsChange: depositsChange,
+        bankLoansChange: newLoans - cascade.totalForcedRepayments,
+        forcedLoanRepayments: cascade.totalForcedRepayments,
+      },
+      markets: {
+        equitySoldForTax: primaryBookSales,
+        forcedEquitySales: cascade.totalForcedBookSales,
+        totalEquitySales: totalBookSales,
+        equityPriceChange: cascade.price - 1,
+        cascadeTriggered:
+          cascade.totalForcedBookSales >
+          Math.max(1, primaryBookSales * MODEL_CONSTANTS.cascade.triggerShare),
+        cascadeIterations: cascade.iterations,
+        housingSold: primaryHousingSales,
+      },
+      macro: {
+        firstYearConsumptionDemandChange: consumptionDemandChange,
+        taxWedgeInflation: 0,
+        demandInflation,
+        supplyConstraintInflation,
+        monetaryPolicyOffset,
+        estimatedInflationChange,
+        sectors,
+      },
+      distribution: {
+        wealthGiniBefore: weightedGini(
+          distributionRecords,
+          (record) => record.netWorthBefore,
+        ),
+        wealthGiniAfter: weightedGini(
+          distributionRecords,
+          (record) => record.netWorthAfter,
+        ),
+        deciles: buildDeciles(distributionRecords),
+      },
+      accounting,
     },
-    funding: {
-      paidFromCash,
-      newCollateralizedLoans: newLoans,
-      equitySoldForTax: primaryBookSales,
-      housingSoldForTax: primaryHousingSales,
-      householdsBorrowing,
-      householdsSelling,
-    },
-    moneyAndCredit: {
-      bankDepositsChange: depositsChange,
-      bankLoansChange: newLoans - cascade.totalForcedRepayments,
-      forcedLoanRepayments: cascade.totalForcedRepayments,
-    },
-    markets: {
-      equitySoldForTax: primaryBookSales,
-      forcedEquitySales: cascade.totalForcedBookSales,
-      totalEquitySales: totalBookSales,
-      equityPriceChange: cascade.price - 1,
-      cascadeTriggered:
-        cascade.totalForcedBookSales >
-        Math.max(1, primaryBookSales * MODEL_CONSTANTS.cascade.triggerShare),
-      cascadeIterations: cascade.iterations,
-      housingSold: primaryHousingSales,
-    },
-    macro: {
-      firstYearConsumptionDemandChange: consumptionDemandChange,
-      taxWedgeInflation: 0,
-      demandInflation,
-      supplyConstraintInflation,
-      monetaryPolicyOffset,
-      estimatedInflationChange,
-      sectors,
-    },
-    distribution: {
-      wealthGiniBefore: weightedGini(distributionRecords, (record) => record.netWorthBefore),
-      wealthGiniAfter: weightedGini(distributionRecords, (record) => record.netWorthAfter),
-      deciles: buildDeciles(distributionRecords),
-    },
-    accounting,
+    taxCollectedByHousehold,
   };
 };
 
@@ -692,23 +758,48 @@ const resolveBrackets = (
   }));
 };
 
-// Weighted average rate paid out of the taxable base (assessed tax ÷ base). For
-// a flat policy this collapses to the single rate; for a graduated schedule it
-// is the blended effective rate the projection needs to erode the out-year base
-// consistently with year-one collections.
-const resolveEffectiveTaxRate = (
+// Assess each synthetic household once, then reuse that result for all payment
+// strategies, projection attribution, and the effective-rate calculation. The
+// strategy-specific collected amount may differ because a household can defer
+// tax it cannot fund, but its statutory assessment is common to every strategy.
+const buildHouseholdTaxAssessments = (
   households: readonly SyntheticHousehold[],
+  policy: WealthTaxPolicyV1,
+  request: ComparisonRequestV1,
+): ReadonlyMap<string, HouseholdTaxAssessment> => {
+  const complianceFactor = avoidanceComplianceFactor(request);
+  return new Map(
+    households.map((household) => {
+      const assessment = assessWealthTax(
+        { assets: household.assets, liabilities: household.liabilities },
+        policy,
+      );
+      return [
+        household.id,
+        {
+          weight: household.weight,
+          taxableBase: assessment.taxableBase,
+          fullComplianceTax: assessment.annualTax,
+          taxAssessed: assessment.annualTax * complianceFactor,
+        },
+      ];
+    }),
+  );
+};
+
+// Weighted average rate paid out of the taxable base (full-compliance assessed
+// tax ÷ base). For a flat policy this collapses to the single rate; for a
+// graduated schedule it is the blended effective rate the projection needs to
+// erode the out-year base consistently with year-one collections.
+const resolveEffectiveTaxRate = (
+  assessments: ReadonlyMap<string, HouseholdTaxAssessment>,
   policy: WealthTaxPolicyV1,
 ): number => {
   let weightedTax = 0;
   let weightedBase = 0;
-  for (const household of households) {
-    const assessment = assessWealthTax(
-      { assets: household.assets, liabilities: household.liabilities },
-      policy,
-    );
-    weightedTax += household.weight * assessment.annualTax;
-    weightedBase += household.weight * assessment.taxableBase;
+  for (const household of assessments.values()) {
+    weightedTax += household.fullComplianceTax * household.weight;
+    weightedBase += household.taxableBase * household.weight;
   }
   return weightedBase > 0 ? weightedTax / weightedBase : policy.brackets[0]?.rate ?? 0;
 };
@@ -792,6 +883,26 @@ const requireFunding = (
   const item = funding.get(householdId);
   if (!item) throw new Error(`Missing tax funding result for ${householdId}.`);
   return item;
+};
+
+const requireTaxAssessment = (
+  assessments: ReadonlyMap<string, HouseholdTaxAssessment>,
+  householdId: string,
+): HouseholdTaxAssessment => {
+  const assessment = assessments.get(householdId);
+  if (!assessment) throw new Error(`Missing tax assessment for ${householdId}.`);
+  return assessment;
+};
+
+const requireCollectedTax = (
+  collectedTax: ReadonlyMap<string, number>,
+  householdId: string,
+): number => {
+  const collected = collectedTax.get(householdId);
+  if (collected === undefined) {
+    throw new Error(`Missing collected tax for ${householdId}.`);
+  }
+  return collected;
 };
 
 const weightedSum = (

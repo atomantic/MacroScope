@@ -195,6 +195,7 @@ export const createApp = (options: AppOptions = {}): Express => {
       engine: "stock-flow-consistent",
       deterministic: true,
       schemaVersion: SCENARIO_SCHEMA_VERSION,
+      calibration: US_BASELINE.calibration,
       implemented: [
         "double-entry-ledger",
         "wealth-tax-assessment",
@@ -208,6 +209,7 @@ export const createApp = (options: AppOptions = {}): Express => {
         "reduced-form-equity-cascade",
         "distributional-deciles",
         "federal-reserve-dfa-calibration",
+        "instrument-level-federal-reserve-dfa-calibration",
         "ten-year-purchasing-power-projection",
         "inflation-and-monetization-stress-test",
         "owner-renter-asset-feedback-theory-test",

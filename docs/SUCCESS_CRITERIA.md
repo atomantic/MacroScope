@@ -12,7 +12,7 @@ MacroScope's first useful release is successful when a non-specialist can see wh
 ## Model and accounting
 
 - [x] The default deterministic weighted population represents 135.1 million U.S. households.
-- [x] Aggregate assets, liabilities, net worth, deposits, public equity, and real estate are calibrated by wealth group to the Federal Reserve DFA for 2026:Q1.
+- [x] Every modeled asset and liability instrument, plus aggregate assets, liabilities, and net worth, is calibrated by wealth group to the Federal Reserve DFA for 2026:Q1.
 - [x] The top 1%, 0.1%, and 0.01% are explicitly oversampled.
 - [x] Progressive wealth-tax assessment supports asset inclusion, valuation, liability deductibility, exemptions, and installments.
 - [x] Scenarios can target a dollar exemption or a modeled top wealth percentile and expose common policy presets.
@@ -51,4 +51,4 @@ MacroScope's first useful release is successful when a non-specialist can see wh
 
 ## Deliberately outside this acceptance bar
 
-Within-group joint distributions remain stylized even though group totals are DFA-calibrated. A later empirical phase should fit microdata distributions, add regional housing and endogenous labor/production feedback, model a central-bank reaction function and fiscal interest expense, introduce default/bailout paths and the foreign sector, and attach uncertainty bands to the reduced-form ten-year projection.
+Within-group joint distributions remain stylized even though group-by-instrument totals are DFA-calibrated. A later empirical phase should fit microdata distributions, add regional housing and endogenous labor/production feedback, model a central-bank reaction function and fiscal interest expense, introduce default/bailout paths and the foreign sector, and attach uncertainty bands to the reduced-form ten-year projection.

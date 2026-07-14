@@ -1,14 +1,26 @@
 import type {
   AssetClass,
+  AssetTaxRule,
   LiabilityClass,
   TaxBracket,
   WealthTaxPolicyV1,
 } from "./schema.js";
 
 export interface HouseholdTaxPosition {
-  readonly assets: Readonly<Record<AssetClass, number>>;
+  readonly assets: Readonly<
+    Record<Exclude<AssetClass, "otherAssets">, number> &
+      Partial<Record<"otherAssets", number>>
+  >;
   readonly liabilities: Readonly<Record<LiabilityClass, number>>;
 }
+
+// Old schema-v1 positions and policies did not have a residual asset class.
+// Treat an omitted rule as excluded, exactly matching that older contract;
+// newly built policies opt in explicitly with their intended inclusion rule.
+const LEGACY_OTHER_ASSET_RULE: AssetTaxRule = {
+  inclusionRate: 0,
+  valuationFactor: 1,
+};
 
 export interface WealthTaxAssessment {
   readonly includedAssets: number;
@@ -45,7 +57,11 @@ export const assessWealthTax = (
   position: HouseholdTaxPosition,
   policy: WealthTaxPolicyV1,
 ): WealthTaxAssessment => {
-  const includedAssets = sumRules(position.assets, policy.assets, (value, rule) =>
+  const assetRules: Readonly<Record<AssetClass, AssetTaxRule>> = {
+    otherAssets: LEGACY_OTHER_ASSET_RULE,
+    ...policy.assets,
+  };
+  const includedAssets = sumRules(position.assets, assetRules, (value, rule) =>
     value * rule.inclusionRate * rule.valuationFactor,
   );
   const deductibleLiabilities = sumRules(
@@ -69,13 +85,13 @@ export const assessWealthTax = (
 };
 
 const sumRules = <Key extends string, Rule>(
-  values: Readonly<Record<Key, number>>,
+  values: Readonly<Partial<Record<Key, number>>>,
   rules: Readonly<Record<Key, Rule>>,
   apply: (value: number, rule: Rule) => number,
 ): number =>
   (Object.keys(values) as Key[]).reduce((total, key) => {
     const value = values[key];
-    if (!Number.isFinite(value) || value < 0) {
+    if (value === undefined || !Number.isFinite(value) || value < 0) {
       throw new Error(`Tax position value for ${key} must be finite and nonnegative.`);
     }
     return total + apply(value, rules[key]);

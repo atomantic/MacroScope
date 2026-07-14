@@ -14,6 +14,7 @@ export const SCENARIO_FIELD_SPECS = [
   { id: "adult-benefit", param: "ab" },
   { id: "child-benefit", param: "cb" },
   { id: "funding-rule", param: "fr" },
+  { id: "surplus-use", param: "su" },
   { id: "benefit-indexation", param: "bi" },
   { id: "direct-cash-share", param: "dc" },
   { id: "administrative-share", param: "as" },

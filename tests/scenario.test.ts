@@ -15,6 +15,7 @@ const assets = Object.fromEntries(
     "housing",
     "privateBusiness",
     "retirementAssets",
+    "otherAssets",
   ].map((key) => [key, { inclusionRate: 1, valuationFactor: 1 }]),
 ) as ScenarioV1["policies"]["wealthTax"]["assets"] & Record<AssetClass, unknown>;
 
@@ -60,6 +61,20 @@ const scenario = (): ScenarioV1 => ({
 describe("scenario schema", () => {
   it("accepts a valid versioned scenario", () => {
     expect(validateScenario(scenario())).toEqual([]);
+  });
+
+  it("accepts schema-v1 asset rules created before otherAssets existed", () => {
+    const current = scenario();
+    const { otherAssets: _otherAssets, ...legacyAssets } = current.policies.wealthTax.assets;
+    const legacy: ScenarioV1 = {
+      ...current,
+      policies: {
+        ...current.policies,
+        wealthTax: { ...current.policies.wealthTax, assets: legacyAssets },
+      },
+    };
+
+    expect(validateScenario(legacy)).toEqual([]);
   });
 
   it("rejects decreasing progressive rates", () => {

@@ -705,10 +705,12 @@ const groupRealWealthChange = (
 ): number => {
   const netWorth = Math.max(1, group.netWorth);
   const excessInflation = inputs.policyPriceLevel / inputs.baselinePriceLevel - 1;
-  const housingGain = (inputs.housingPremium - 1) * (group.realEstate / netWorth);
-  const equityGain = (inputs.equityPremium - 1) * (group.publicEquity / netWorth);
+  const housingGain =
+    (inputs.housingPremium - 1) * (group.assetClasses.housing / netWorth);
+  const equityGain =
+    (inputs.equityPremium - 1) * (group.assetClasses.publicEquity / netWorth);
   const debtErosion = excessInflation * (group.liabilities / netWorth);
-  const cashErosion = -excessInflation * (group.deposits / netWorth);
+  const cashErosion = -excessInflation * (group.assetClasses.deposits / netWorth);
   // cumulativeTax is a flow scaled to the represented population; the group's
   // net worth is a national baseline. Normalize the tax to national scale so the
   // burden ratio is correct for any representedHouseholds.
@@ -1210,15 +1212,21 @@ const topOnePercentWealth = (): number =>
     .reduce((sum, group) => sum + group.netWorth, 0);
 
 const totalHousingWealth = (): number =>
-  US_BASELINE.wealthGroups.reduce((sum, group) => sum + group.realEstate, 0);
+  US_BASELINE.wealthGroups.reduce(
+    (sum, group) => sum + group.assetClasses.housing,
+    0,
+  );
 
 const totalPublicEquityWealth = (): number =>
-  US_BASELINE.wealthGroups.reduce((sum, group) => sum + group.publicEquity, 0);
+  US_BASELINE.wealthGroups.reduce(
+    (sum, group) => sum + group.assetClasses.publicEquity,
+    0,
+  );
 
 const middleFortyHousingToNetWorth = (): number => {
   const group = US_BASELINE.wealthGroups.find(
     (candidate) => candidate.id === "next-40",
   );
   if (!group) throw new Error("Missing middle-forty wealth baseline.");
-  return group.realEstate / Math.max(1, group.netWorth);
+  return group.assetClasses.housing / Math.max(1, group.netWorth);
 };

@@ -174,7 +174,7 @@ export const runComparisonWithPopulation = (
     }),
     caveats: [
       "Results are conditional scenarios, not forecasts.",
-      "Wealth-group totals are calibrated to the Federal Reserve DFA for 2026:Q1; within-group joint distributions remain stylized.",
+      "Every modeled asset and liability class is calibrated by wealth group to the Federal Reserve DFA for 2026:Q1; within-group joint distributions remain stylized.",
       "Equity price impact and inflation are reduced-form assumptions exposed for sensitivity testing.",
       "The current closed economy assumes domestic buyers absorb all equity and housing sales.",
       "Housing sales remain a national, closed-economy transfer channel; the ten-year owner-renter view adds reduced-form price, supply, and rent feedback rather than regional market clearing.",
@@ -365,7 +365,8 @@ const runStrategy = (
       equityBookAfter * cascade.price +
       housingBookAfter +
       household.assets.privateBusiness +
-      household.assets.retirementAssets -
+      household.assets.retirementAssets +
+      household.assets.otherAssets -
       household.liabilities.mortgage -
       collateralizedLoanAfter -
       household.liabilities.consumerDebt;
@@ -730,6 +731,7 @@ const buildWealthTaxPolicy = (
       valuationFactor: 1,
     },
     retirementAssets: { inclusionRate: 0, valuationFactor: 1 },
+    otherAssets: { inclusionRate: 1, valuationFactor: 1 },
   },
   liabilities: {
     mortgage: { deductibleRate: 1 },

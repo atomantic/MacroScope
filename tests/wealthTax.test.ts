@@ -15,6 +15,7 @@ const assets = Object.fromEntries(
     "housing",
     "privateBusiness",
     "retirementAssets",
+    "otherAssets",
   ].map((assetClass) => [assetClass, { inclusionRate: 1, valuationFactor: 1 }]),
 ) as Record<AssetClass, { inclusionRate: number; valuationFactor: number }>;
 
@@ -57,6 +58,7 @@ describe("wealth-tax policy", () => {
           housing: 1_000_000,
           privateBusiness: 0,
           retirementAssets: 0,
+          otherAssets: 0,
         },
         liabilities: {
           mortgage: 500_000,
@@ -72,5 +74,32 @@ describe("wealth-tax policy", () => {
     expect(assessment.taxableBase).toBe(6_000_000);
     expect(assessment.annualTax).toBe(60_000);
     expect(assessment.installmentAmount).toBe(15_000);
+  });
+
+  it("keeps schema-v1 policies without otherAssets backward compatible", () => {
+    const { otherAssets: _otherAssets, ...legacyAssets } = policy.assets;
+    const legacyPolicy: WealthTaxPolicyV1 = { ...policy, assets: legacyAssets };
+    const assessment = assessWealthTax(
+      {
+        assets: {
+          deposits: 2_000_000,
+          governmentBonds: 0,
+          publicEquity: 0,
+          housing: 0,
+          privateBusiness: 0,
+          retirementAssets: 0,
+          otherAssets: 5_000_000,
+        },
+        liabilities: {
+          mortgage: 0,
+          collateralizedLoan: 0,
+          consumerDebt: 0,
+        },
+      },
+      legacyPolicy,
+    );
+
+    expect(assessment.includedAssets).toBe(2_000_000);
+    expect(assessment.annualTax).toBe(0);
   });
 });

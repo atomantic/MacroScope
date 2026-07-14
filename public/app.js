@@ -41,6 +41,17 @@ let defaultFieldValues = {};
 // Non-null while the form still matches a named preset exactly, so the URL can
 // stay the shareable `?preset=name` form. Cleared on any manual edit.
 let activePreset = null;
+const syncPresetButtons = () => {
+  document.querySelectorAll("[data-preset]").forEach((button) => {
+    const selected = button.dataset.preset === activePreset;
+    button.setAttribute("aria-pressed", String(selected));
+    button.classList.toggle("is-active", selected);
+  });
+};
+const setActivePreset = (name) => {
+  activePreset = name;
+  syncPresetButtons();
+};
 // A/B "Scenario A": a frozen run whose lines ghost onto every chart and whose
 // outcomes anchor the comparison table. pinnedResult holds the computed run;
 // the *FieldValues/*Brackets/*Strategy re-serialize a runtime pin; pinnedFromUrl
@@ -298,7 +309,7 @@ const makeBracketRow = (thresholdMillions = "", ratePercent = "") => {
   remove.addEventListener("click", () => {
     row.remove();
     // A structural bracket change no longer matches a named preset.
-    activePreset = null;
+    setActivePreset(null);
     syncBracketMode();
     updateScenarioUrl();
   });
@@ -499,7 +510,7 @@ const hydrateFormFromUrl = () => {
   const appliedPreset = Boolean(decoded.preset && PRESETS[decoded.preset]);
   if (appliedPreset) {
     setPresetFields(decoded.preset);
-    activePreset = decoded.preset;
+    setActivePreset(decoded.preset);
   }
   const fieldIds = Object.keys(decoded.fields);
   for (const id of fieldIds) byId(id).value = decoded.fields[id];
@@ -510,13 +521,14 @@ const hydrateFormFromUrl = () => {
   if (appliedBrackets) renderBrackets(bracketRows);
   // Explicit field or bracket overrides make the state no longer a pristine preset.
   const scenarioFieldIds = new Set(SCENARIO_FIELD_SPECS.map((spec) => spec.id));
-  if (fieldIds.some((id) => scenarioFieldIds.has(id)) || appliedBrackets) activePreset = null;
+  if (fieldIds.some((id) => scenarioFieldIds.has(id)) || appliedBrackets) setActivePreset(null);
   // A stale/unknown strategy would blank the <select> and later crash
   // renderDistribution (strategies[""]); ignore anything not in STRATEGIES.
   const appliedStrategy = Boolean(decoded.strategy && STRATEGIES.includes(decoded.strategy));
   if (appliedStrategy) byId("distribution-strategy").value = decoded.strategy;
   syncTargetControls();
   syncAllSliders();
+  syncPresetButtons();
   // An unknown preset name or strategy applies nothing, so it must not force a recompute.
   return appliedPreset || fieldIds.length > 0 || appliedBrackets || appliedStrategy;
 };
@@ -1932,7 +1944,7 @@ const applyDialValue = (formId, formValue, snap = "nearest") => {
   // applied value never exceeds the feasible ceiling.
   if (snapped > max) snapped = Math.floor(max / step) * step;
   field.value = clamp(snapped, min, max).toFixed(decimals);
-  activePreset = null;
+  setActivePreset(null);
   syncSlider(formId);
   updateScenarioUrl();
   openScenarioDrawer({ focusId: formId });
@@ -2540,7 +2552,7 @@ const setPresetFields = (name) => {
 const applyPreset = (name) => {
   if (!PRESETS[name]) return;
   setPresetFields(name);
-  activePreset = name;
+  setActivePreset(name);
   void dashboardRerun();
 };
 
@@ -2560,7 +2572,7 @@ const applyBehaviorPreset = (name) => {
   byId("expatriation-share").value = preset.expatriation;
   byId("private-business-inclusion").value = preset.inclusion;
   syncAllSliders();
-  activePreset = null;
+  setActivePreset(null);
   void dashboardRerun();
 };
 
@@ -2592,7 +2604,7 @@ const bracketRowsComplete = () =>
   );
 byId("scenario-form").addEventListener("input", (event) => {
   const target = event.target;
-  activePreset = null;
+  setActivePreset(null);
   // Direct typing into a number field mirrors onto its slider (the slider's own
   // handler covers the reverse); also enforce the joint borrow/sell clamp.
   if (target instanceof HTMLInputElement && target.type === "number") {
@@ -2608,7 +2620,7 @@ byId("scenario-form").addEventListener("input", (event) => {
 // Selects fire change (not reliably input across browsers); auto-run on those too.
 byId("scenario-form").addEventListener("change", (event) => {
   if (event.target instanceof HTMLSelectElement) {
-    activePreset = null;
+    setActivePreset(null);
     if (bracketRowsComplete()) scheduleAutoRun();
     else clearTimeout(autoRunTimer);
   }
@@ -2662,13 +2674,13 @@ byId("distribution-strategy").addEventListener("change", () => {
 byId("target-mode").addEventListener("change", syncTargetControls);
 byId("add-bracket").addEventListener("click", () => {
   byId("bracket-rows").append(makeBracketRow());
-  activePreset = null;
+  setActivePreset(null);
   syncBracketMode();
   updateScenarioUrl();
 });
 byId("clear-brackets").addEventListener("click", () => {
   renderBrackets([]);
-  activePreset = null;
+  setActivePreset(null);
   updateScenarioUrl();
 });
 document.querySelectorAll("[data-preset]").forEach((button) => {
@@ -2958,7 +2970,7 @@ const renderStory = () => {
       button.type = "button";
       button.addEventListener("click", async () => {
         setPresetFields(preset);
-        activePreset = preset;
+        setActivePreset(preset);
         await storyRerun();
       });
       presetWrap.append(button);

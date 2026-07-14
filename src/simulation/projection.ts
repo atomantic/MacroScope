@@ -1,5 +1,6 @@
 import type {
   ComparisonRequestV1,
+  FiscalProjectionYear,
   InflationRegime,
   PaymentStrategy,
   PolicyProjection,
@@ -9,6 +10,12 @@ import type {
 } from "./contracts.js";
 import { US_BASELINE, type UsWealthGroupBaseline } from "./usBaseline.js";
 import { MODEL_CONSTANTS } from "./modelConstants.js";
+import {
+  EMPTY_FISCAL_STATE,
+  normalizedSurplusUse,
+  resolveFiscalYear,
+  type FiscalState,
+} from "./fiscal.js";
 
 // Load-bearing model assumptions are documented in ./modelConstants.ts; these
 // aliases keep the projection math readable. Rationale and sources live there.
@@ -41,6 +48,28 @@ const CAPITAL_SHARE = 0.33; // capital's share of income; wage/output ∝ (K/L)^
 const CAPITAL_INDEX_FLOOR = 0.05;
 
 type Strategies = Readonly<Record<PaymentStrategy, StrategyOutcome>>;
+
+const allocateProgramOutlay = (
+  fiscal: FiscalProjectionYear,
+  request: ComparisonRequestV1,
+): {
+  readonly ubiReceived: number;
+  readonly publicServicesSpending: number;
+  readonly administrativeCost: number;
+} => {
+  const administrativeCost =
+    fiscal.scheduledProgramOutlay * request.ubi.administrativeShare;
+  const postAdministration =
+    fiscal.scheduledProgramOutlay - administrativeCost;
+  const delivered =
+    postAdministration * (1 - MODEL_CONSTANTS.programLeakageRate);
+  return {
+    ubiReceived: delivered * request.ubi.directCashShare + fiscal.rebate,
+    publicServicesSpending:
+      delivered * (1 - request.ubi.directCashShare) + fiscal.additionalServices,
+    administrativeCost,
+  };
+};
 
 // Household-level tax records are the attribution backbone for the projection.
 // They carry the same assessed and actually collected amounts used by the
@@ -135,25 +164,12 @@ export const buildPolicyProjection = (
   };
 
   const taxCollected = blended((outcome) => outcome.fiscal.taxCollected);
-  const ubiReceived = blended((outcome) => outcome.fiscal.ubiReceived);
-  const publicServicesSpending = blended(
-    (outcome) => outcome.fiscal.publicServicesSpending,
-  );
-  const administrativeCost = blended(
-    (outcome) => outcome.fiscal.administrativeCost,
-  );
   const newPrivateLoans = blended(
     (outcome) => outcome.funding.newCollateralizedLoans,
   );
   const assetSales = blended(
     (outcome) => outcome.markets.totalEquitySales + outcome.markets.housingSold,
   );
-  const rawGovernmentDeficit = Math.max(
-    0,
-    -blended((outcome) => outcome.fiscal.governmentBalance),
-  );
-  const governmentDeficit =
-    rawGovernmentDeficit < MODEL_CONSTANTS.deficitRoundingFloor ? 0 : rawGovernmentDeficit;
   const demandInflation = blended(
     (outcome) => outcome.macro.estimatedInflationChange,
   );
@@ -163,6 +179,18 @@ export const buildPolicyProjection = (
     (decile) => decile.averageUbiReceived,
   );
   const requestedUbi = blended((outcome) => outcome.fiscal.requestedUbi);
+  const surplusUse = normalizedSurplusUse(request);
+  const yearOneFiscal = resolveFiscalYear({
+    year: 1,
+    taxRevenue: taxCollected,
+    requestedProgramOutlay: requestedUbi,
+    fundingRule: request.ubi.fundingRule,
+    surplusUse,
+  }).year;
+  const yearOneAllocation = allocateProgramOutlay(yearOneFiscal, request);
+  const { ubiReceived, publicServicesSpending, administrativeCost } =
+    yearOneAllocation;
+  const governmentDeficit = yearOneFiscal.debtIssued;
 
   // Apportion year-one collections with the exact synthetic households that
   // produced them. This captures exemptions that cut through a DFA cohort and
@@ -205,15 +233,11 @@ export const buildPolicyProjection = (
   const nationalScale = populationScale(request);
   let capitalIndex = 1;
   let capitalPerWorker = 1; // capitalIndex ** CAPITAL_SHARE; wage/output deviation
-  const yearOneProgramBudget =
-    request.ubi.fundingRule === "revenue-constrained"
-      ? Math.min(requestedUbi, taxCollected)
-      : requestedUbi;
-  const yearOneSurplus = Math.max(0, taxCollected - yearOneProgramBudget);
+  const yearOneProgramBudget = yearOneFiscal.programOutlay;
   const yearOneM2Injection = Math.max(
     newPrivateLoans +
       governmentDeficit * request.behavior.deficitMonetizationShare -
-      yearOneSurplus,
+      yearOneFiscal.treasuryBalance,
     M2_FLOOR - US_BASELINE.m2,
   );
   let finalYearFlows = {
@@ -231,6 +255,8 @@ export const buildPolicyProjection = (
   let baselinePriceLevel = 1;
   let privateTaxDebt = 0;
   let publicDebt = 0;
+  let fiscalState: FiscalState = EMPTY_FISCAL_STATE;
+  const fiscalYears: FiscalProjectionYear[] = [];
   let confidence = 1;
   let bottomWageBase =
     (US_BASELINE.annualPce * MODEL_CONSTANTS.bottomHalfConsumptionShare) /
@@ -299,26 +325,37 @@ export const buildPolicyProjection = (
     }
     const newPrivateLoansYear = newPrivateLoans * taxBaseMultiplier;
     const requestedUbiYear = requestedUbi * indexation;
-    const programBudgetYear =
-      request.ubi.fundingRule === "revenue-constrained"
-        ? Math.min(requestedUbiYear, taxCollectedYear)
-        : requestedUbiYear;
+    const openingTreasuryBalance = fiscalState.treasuryBalance;
+    const fiscalTransition = resolveFiscalYear(
+      {
+        year,
+        taxRevenue: taxCollectedYear,
+        requestedProgramOutlay: requestedUbiYear,
+        fundingRule: request.ubi.fundingRule,
+        surplusUse,
+      },
+      fiscalState,
+    );
+    const fiscalYear = fiscalTransition.year;
+    fiscalState = fiscalTransition.state;
+    fiscalYears.push(fiscalYear);
+    const allocation = allocateProgramOutlay(fiscalYear, request);
+    const programBudgetYear = fiscalYear.programOutlay;
     const budgetScale = programBudgetYear / Math.max(1, yearOneProgramBudget);
-    const rawDeficitYear = Math.max(0, programBudgetYear - taxCollectedYear);
-    const governmentDeficitYear =
-      rawDeficitYear < MODEL_CONSTANTS.deficitRoundingFloor ? 0 : rawDeficitYear;
-    // Revenue collected beyond the program budget stays at Treasury, removing
-    // deposits from M2 until spent — a drain symmetric to the monetized deficit.
-    const surplusYear = Math.max(0, taxCollectedYear - programBudgetYear);
-    const bottom50UbiYear = bottom50AnnualUbi * budgetScale;
+    const governmentDeficitYear = fiscalYear.debtIssued;
+    const bottom50UbiYear =
+      bottom50AnnualUbi *
+      (allocation.ubiReceived / Math.max(1, yearOneAllocation.ubiReceived));
 
     const repayments = privateTaxDebt * request.model.loanAmortizationRate;
     privateTaxDebt = Math.max(0, privateTaxDebt + newPrivateLoansYear - repayments);
-    publicDebt += governmentDeficitYear;
+    publicDebt = fiscalYear.netPublicDebtChange;
+    const treasuryBalanceChange =
+      fiscalYear.treasuryBalance - openingTreasuryBalance;
     const moneyInjection = Math.max(
       newPrivateLoansYear - repayments +
         governmentDeficitYear * request.behavior.deficitMonetizationShare -
-        surplusYear,
+        treasuryBalanceChange,
       M2_FLOOR - m2,
     );
     const moneyGrowth = moneyInjection / Math.max(1, m2);
@@ -484,9 +521,9 @@ export const buildPolicyProjection = (
 
     finalYearFlows = {
       taxCollected: taxCollectedYear,
-      ubiReceived: ubiReceived * budgetScale,
-      publicServicesSpending: publicServicesSpending * budgetScale,
-      administrativeCost: administrativeCost * budgetScale,
+      ubiReceived: allocation.ubiReceived,
+      publicServicesSpending: allocation.publicServicesSpending,
+      administrativeCost: allocation.administrativeCost,
       newPrivateLoans: newPrivateLoansYear,
       governmentDeficit: governmentDeficitYear,
       m2Injection: moneyInjection,
@@ -523,7 +560,7 @@ export const buildPolicyProjection = (
     strategies,
     newPrivateLoans,
     taxCollected,
-    request.ubi.benefitIndexation ?? "none",
+    request,
     request.model.loanAmortizationRate,
     {
       annualAssetReturn: request.behavior.annualAssetReturn,
@@ -569,6 +606,17 @@ export const buildPolicyProjection = (
       m2Injection: yearOneM2Injection,
       finalYear: finalYearFlows,
     },
+    fiscal: {
+      fundingRule: request.ubi.fundingRule,
+      surplusUse,
+      averageInterestRate: MODEL_CONSTANTS.averagePublicDebtInterestRate,
+      cumulativeDebtIssued: fiscalState.cumulativeDebtIssued,
+      cumulativeDebtRepaid: fiscalState.cumulativeDebtRepaid,
+      netPublicDebtChange: publicDebt,
+      endingProgramDebt: fiscalState.programDebt,
+      endingTreasuryBalance: fiscalState.treasuryBalance,
+      years: fiscalYears,
+    },
     summary: {
       peakAnnualInflation,
       cumulativeM2Change: finalYear.m2Index / 100 - 1,
@@ -587,6 +635,7 @@ export const buildPolicyProjection = (
     theoryTest,
     interpretation: [
       "A tax-funded UBI moves existing deposits between households; it does not by itself create money.",
+      `The ${request.ubi.fundingRule} rule determines scheduled outlays, while ${surplusUse} explicitly closes surpluses. Only a growing Treasury balance is modeled as a deposit drain; debt retirement, rebates, and additional services recycle the collected cash.`,
       "Bank borrowing creates deposits while the tax loans remain outstanding, so borrowing can expand M2 and add inflation pressure even when the federal budget balances.",
       "Private loans remain liabilities of the wealthy borrowers. They become a burden on other households only if losses are later socialized through bailouts, guarantees, or inflationary deficit finance; this model assumes no such bailout.",
       "Purchasing-power results compare the bottom half with a no-policy baseline after prices; they include partial wage adjustment and an annual UBI flow.",
@@ -999,7 +1048,7 @@ const buildStressTest = (
   strategies: Strategies,
   newPrivateLoans: number,
   taxCollected: number,
-  benefitIndexation: "none" | "cpi",
+  request: ComparisonRequestV1,
   loanAmortizationRate: number,
   baseDynamics: BaseDynamics,
 ): PolicyProjection["stressTest"] => {
@@ -1014,7 +1063,9 @@ const buildStressTest = (
         taxCollected,
         newPrivateLoans,
         monetizationShare,
-        benefitIndexation,
+        benefitIndexation: request.ubi.benefitIndexation ?? "none",
+        fundingRule: request.ubi.fundingRule,
+        surplusUse: normalizedSurplusUse(request),
         loanAmortizationRate,
         demandInflation:
           strategies["cash-first"].macro.estimatedInflationChange * multiplier,
@@ -1041,7 +1092,9 @@ const buildStressTest = (
       taxCollected,
       newPrivateLoans,
       monetizationShare: 1,
-      benefitIndexation,
+      benefitIndexation: request.ubi.benefitIndexation ?? "none",
+      fundingRule: request.ubi.fundingRule,
+      surplusUse: normalizedSurplusUse(request),
       loanAmortizationRate,
       demandInflation:
         strategies["cash-first"].macro.estimatedInflationChange * multiplier,
@@ -1054,6 +1107,8 @@ const buildStressTest = (
   }
 
   return {
+    fundingRule: request.ubi.fundingRule,
+    surplusUse: normalizedSurplusUse(request),
     ubiMultipliers,
     monetizationShares,
     cells,
@@ -1063,8 +1118,8 @@ const buildStressTest = (
       annualInflationEquivalent: STRICT_HYPER_ANNUAL_RATE,
       explanation:
         firstUbiMultiplierAtFullMonetization === null
-          ? `No strict hyperinflation breach occurs even at ${MODEL_CONSTANTS.stress.maxSearchMultiplier.toLocaleString("en-US")}× the selected UBI under this reduced-form stress test.`
-          : `The first tested strict breach occurs around ${firstUbiMultiplierAtFullMonetization}× the selected UBI only when its unfunded portion is fully monetized and confidence is allowed to erode.`,
+          ? `No strict hyperinflation breach occurs even at ${MODEL_CONSTANTS.stress.maxSearchMultiplier.toLocaleString("en-US")}× the selected benefit under the ${request.ubi.fundingRule} funding rule.`
+          : `The first tested strict breach occurs around ${firstUbiMultiplierAtFullMonetization}× the selected benefit under the ${request.ubi.fundingRule} rule when issued debt is fully monetized and confidence is allowed to erode.`,
     },
   };
 };
@@ -1075,6 +1130,8 @@ const stressPeak = (input: {
   newPrivateLoans: number;
   monetizationShare: number;
   benefitIndexation: "none" | "cpi";
+  fundingRule: ComparisonRequestV1["ubi"]["fundingRule"];
+  surplusUse: NonNullable<ComparisonRequestV1["ubi"]["surplusUse"]>;
   loanAmortizationRate: number;
   demandInflation: number;
   baseDynamics: BaseDynamics;
@@ -1084,6 +1141,7 @@ const stressPeak = (input: {
   let privateDebt = 0;
   let priceLevel = 1;
   let peak: number = US_BASELINE.baselineInflation;
+  let fiscalState: FiscalState = EMPTY_FISCAL_STATE;
   // Same base-dynamics evolution as the main projection loop (issue #17), so the
   // stressed revenue and private-loan flows respond to asset returns, statutory-
   // rate erosion, and top-tier expatriation across the horizon instead of being
@@ -1096,24 +1154,40 @@ const stressPeak = (input: {
     // CPI-indexed benefits grow the stressed outlay with the prior year's
     // price level (same one-year recognition lag as the main projection).
     const indexation = input.benefitIndexation === "cpi" ? priceLevel : 1;
-    const outlay = input.requestedUbi * indexation * (1 + MODEL_CONSTANTS.stress.outlayGrowth);
-    const deficit = Math.max(0, outlay - taxCollectedYear);
-    // Same Treasury-surplus drain and M2 floor as the main projection loop.
-    const surplus = Math.max(0, taxCollectedYear - outlay);
+    const requestedOutlay =
+      input.requestedUbi * indexation * (1 + MODEL_CONSTANTS.stress.outlayGrowth);
+    const openingTreasuryBalance = fiscalState.treasuryBalance;
+    const fiscalTransition = resolveFiscalYear(
+      {
+        year,
+        taxRevenue: taxCollectedYear,
+        requestedProgramOutlay: requestedOutlay,
+        fundingRule: input.fundingRule,
+        surplusUse: input.surplusUse,
+      },
+      fiscalState,
+    );
+    fiscalState = fiscalTransition.state;
+    const fiscalYear = fiscalTransition.year;
+    const treasuryBalanceChange =
+      fiscalYear.treasuryBalance - openingTreasuryBalance;
     const repayments = privateDebt * input.loanAmortizationRate;
     privateDebt = Math.max(0, privateDebt + newPrivateLoansYear - repayments);
     const injection = Math.max(
       newPrivateLoansYear - repayments +
-        deficit * input.monetizationShare -
-        surplus,
+        fiscalYear.debtIssued * input.monetizationShare -
+        treasuryBalanceChange,
       M2_FLOOR - m2,
     );
     const stress = inflationFromStress({
       baselineInflation: US_BASELINE.baselineInflation,
-      demandInflation: input.demandInflation,
+      demandInflation:
+        input.demandInflation *
+        (fiscalYear.programOutlay / Math.max(1, requestedOutlay)),
       moneyGrowth: injection / Math.max(1, m2),
       monetizedDeficitRatio:
-        (deficit * input.monetizationShare) / US_BASELINE.nominalGdp,
+        (fiscalYear.debtIssued * input.monetizationShare) /
+        US_BASELINE.nominalGdp,
       priorConfidence: confidence,
     });
     confidence = stress.confidence;

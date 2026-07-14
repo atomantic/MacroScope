@@ -373,7 +373,7 @@ describe("ten-year projection dynamics", () => {
     expect(byId["middle-40"].annualTaxPaid).toBe(0);
   });
 
-  it("keeps M2 positive when a large tax surplus drains deposits", () => {
+  it("keeps M2 positive under a large tax surplus", () => {
     const result = runComparison({
       ...nationalRequest(),
       wealthTax: { targetMode: "exemption", exemption: 0, topShare: 0.01, rate: 0.2 },
@@ -387,6 +387,112 @@ describe("ten-year projection dynamics", () => {
       expect(year.m2).toBeGreaterThan(0);
       expect(year.m2Index).toBeGreaterThan(0);
     }
+  });
+
+  it("exposes reconciled fiscal stocks and does not destroy M2 when surplus retires debt", () => {
+    const base = nationalRequest();
+    const result = runComparison({
+      ...base,
+      wealthTax: {
+        targetMode: "exemption",
+        exemption: 0,
+        topShare: 0.01,
+        rate: 0.2,
+      },
+      ubi: {
+        ...base.ubi,
+        adultMonthlyBenefit: 0,
+        childMonthlyBenefit: 0,
+        fundingRule: "fixed",
+        surplusUse: "debt-reduction",
+      },
+      behavior: { ...base.behavior, borrowShare: 0, sellShare: 0 },
+    });
+
+    expect(result.projection.fiscal.cumulativeDebtRepaid).toBeGreaterThan(0);
+    expect(result.projection.fiscal.endingTreasuryBalance).toBe(0);
+    const parked = runComparison({
+      ...base,
+      wealthTax: {
+        targetMode: "exemption",
+        exemption: 0,
+        topShare: 0.01,
+        rate: 0.2,
+      },
+      ubi: {
+        ...base.ubi,
+        adultMonthlyBenefit: 0,
+        childMonthlyBenefit: 0,
+        fundingRule: "fixed",
+        surplusUse: "treasury-balance",
+      },
+      behavior: { ...base.behavior, borrowShare: 0, sellShare: 0 },
+    });
+    expect(result.projection.summary.cumulativeM2Change).toBeGreaterThan(
+      parked.projection.summary.cumulativeM2Change,
+    );
+    for (const year of result.projection.fiscal.years) {
+      expect(Math.abs(year.budgetIdentityResidual)).toBeLessThan(0.1);
+    }
+  });
+
+  it("parks surplus only when Treasury balance is selected", () => {
+    const base = nationalRequest();
+    const result = runComparison({
+      ...base,
+      wealthTax: {
+        targetMode: "exemption",
+        exemption: 0,
+        topShare: 0.01,
+        rate: 0.2,
+      },
+      ubi: {
+        ...base.ubi,
+        adultMonthlyBenefit: 0,
+        childMonthlyBenefit: 0,
+        fundingRule: "fixed",
+        surplusUse: "treasury-balance",
+      },
+      behavior: { ...base.behavior, borrowShare: 0, sellShare: 0 },
+    });
+
+    expect(result.projection.fiscal.endingTreasuryBalance).toBeGreaterThan(0);
+    expect(result.projection.summary.cumulativeM2Change).toBeLessThan(0);
+  });
+
+  it("routes surplus into services or household rebates when selected", () => {
+    const base = nationalRequest();
+    const request: ComparisonRequestV1 = {
+      ...base,
+      wealthTax: {
+        targetMode: "exemption",
+        exemption: 0,
+        topShare: 0.01,
+        rate: 0.05,
+      },
+      ubi: {
+        ...base.ubi,
+        adultMonthlyBenefit: 0,
+        childMonthlyBenefit: 0,
+        fundingRule: "fixed",
+      },
+    };
+    const services = runComparison({
+      ...request,
+      ubi: { ...request.ubi, surplusUse: "additional-services" },
+    });
+    const rebate = runComparison({
+      ...request,
+      ubi: { ...request.ubi, surplusUse: "rebate" },
+    });
+
+    expect(services.projection.annualFlows.publicServicesSpending).toBeGreaterThan(0);
+    expect(services.projection.annualFlows.ubiReceived).toBe(0);
+    expect(rebate.projection.annualFlows.ubiReceived).toBeGreaterThan(0);
+    expect(rebate.projection.annualFlows.publicServicesSpending).toBe(0);
+    expect(
+      Object.values(rebate.strategies).every((outcome) => outcome.accounting.passed),
+    ).toBe(true);
   });
 
   it("leaves output on the no-policy trend when both growth dials are zero", () => {
@@ -459,7 +565,12 @@ describe("ten-year projection dynamics", () => {
     const result = runComparison({
       ...nationalRequest(),
       wealthTax: { targetMode: "exemption", exemption: 0, topShare: 0.01, rate: 0.05 },
-      ubi: { ...nationalRequest().ubi, adultMonthlyBenefit: 0, childMonthlyBenefit: 0 },
+      ubi: {
+        ...nationalRequest().ubi,
+        adultMonthlyBenefit: 0,
+        childMonthlyBenefit: 0,
+        surplusUse: "treasury-balance",
+      },
       behavior: { ...nationalRequest().behavior, savingsResponseElasticity: 0.8 },
     });
     expect(result.projection.summary.gdpChange).toBeLessThan(-0.02);

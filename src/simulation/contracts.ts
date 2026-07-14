@@ -1,5 +1,6 @@
 import {
   SCENARIO_SCHEMA_VERSION,
+  type SurplusUse,
   type TaxBracket,
   type UbiFundingRule,
 } from "../policies/schema.js";
@@ -66,6 +67,9 @@ export interface ComparisonRequestV1 {
     readonly adultMonthlyBenefit: number;
     readonly childMonthlyBenefit: number;
     readonly fundingRule: UbiFundingRule;
+    // Optional on the wire for schema-v1 compatibility. The parser and runner
+    // normalize omission to debt reduction rather than silently hoarding cash.
+    readonly surplusUse?: SurplusUse;
     // Optional on the wire for schema-v1 compatibility; normalizeComparisonRequest
     // defaults an omitted value to "none" (fixed nominal benefits).
     readonly benefitIndexation?: BenefitIndexation;
@@ -137,6 +141,25 @@ export interface ProjectionYear {
   // dominates. Exactly 100 every year when both growth dials are 0.
   readonly gdpIndex: number;
   readonly regime: InflationRegime;
+}
+
+export interface FiscalProjectionYear {
+  readonly year: number;
+  readonly taxRevenue: number;
+  readonly requestedProgramOutlay: number;
+  readonly scheduledProgramOutlay: number;
+  readonly additionalServices: number;
+  readonly rebate: number;
+  readonly programOutlay: number;
+  readonly interestExpense: number;
+  readonly governmentOutlay: number;
+  readonly debtIssued: number;
+  readonly debtRepaid: number;
+  readonly interestSavings: number;
+  readonly programDebt: number;
+  readonly treasuryBalance: number;
+  readonly netPublicDebtChange: number;
+  readonly budgetIdentityResidual: number;
 }
 
 export interface TheoryTestYear {
@@ -225,6 +248,17 @@ export interface PolicyProjection {
       readonly m2Injection: number;
     };
   };
+  readonly fiscal: {
+    readonly fundingRule: UbiFundingRule;
+    readonly surplusUse: SurplusUse;
+    readonly averageInterestRate: number;
+    readonly cumulativeDebtIssued: number;
+    readonly cumulativeDebtRepaid: number;
+    readonly netPublicDebtChange: number;
+    readonly endingProgramDebt: number;
+    readonly endingTreasuryBalance: number;
+    readonly years: readonly FiscalProjectionYear[];
+  };
   readonly summary: {
     readonly peakAnnualInflation: number;
     readonly cumulativeM2Change: number;
@@ -240,6 +274,8 @@ export interface PolicyProjection {
   readonly years: readonly ProjectionYear[];
   readonly groupOutcomes: readonly WealthGroupOutcome[];
   readonly stressTest: {
+    readonly fundingRule: UbiFundingRule;
+    readonly surplusUse: SurplusUse;
     readonly ubiMultipliers: readonly number[];
     readonly monetizationShares: readonly number[];
     readonly cells: readonly StressCell[];
@@ -311,6 +347,13 @@ export interface StrategyOutcome {
     readonly publicServicesSpending: number;
     readonly administrativeCost: number;
     readonly leakage: number;
+    readonly scheduledProgramOutlay: number;
+    readonly additionalServices: number;
+    readonly rebate: number;
+    readonly debtIssued: number;
+    readonly debtRepaid: number;
+    readonly treasuryBalance: number;
+    readonly budgetIdentityResidual: number;
     readonly governmentBalance: number;
     readonly fundingRatio: number;
   };
@@ -394,6 +437,7 @@ export const DEFAULT_COMPARISON_REQUEST: ComparisonRequestV1 = {
     adultMonthlyBenefit: 1_000,
     childMonthlyBenefit: 500,
     fundingRule: "revenue-constrained",
+    surplusUse: "debt-reduction",
     benefitIndexation: "none",
     directCashShare: 1,
     administrativeShare: 0.05,

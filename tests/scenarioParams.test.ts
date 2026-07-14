@@ -75,6 +75,15 @@ describe("scenario URL parameters", () => {
     expect(decoded.fields["demand-offset"]).toBe("1.2");
   });
 
+  it("round-trips the explicit surplus closure", () => {
+    const values = { ...defaults, "surplus-use": "additional-services" };
+    const query = encodeScenarioParams({ values, defaults });
+    expect(new URLSearchParams(query).get("su")).toBe("additional-services");
+    expect(decodeScenarioParams(query).fields["surplus-use"]).toBe(
+      "additional-services",
+    );
+  });
+
   it("encodes a pristine preset as ?preset=name without field params", () => {
     const values = { ...defaults, "tax-rate": "10" };
     const query = encodeScenarioParams({ values, defaults, preset: "billionaire" });

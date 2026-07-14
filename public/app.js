@@ -167,6 +167,7 @@ const populateForm = (request) => {
   byId("adult-benefit").value = request.ubi.adultMonthlyBenefit;
   byId("child-benefit").value = request.ubi.childMonthlyBenefit;
   byId("funding-rule").value = request.ubi.fundingRule;
+  byId("surplus-use").value = request.ubi.surplusUse ?? "debt-reduction";
   byId("benefit-indexation").value = request.ubi.benefitIndexation ?? "none";
   byId("direct-cash-share").value = request.ubi.directCashShare * 100;
   byId("administrative-share").value = request.ubi.administrativeShare * 100;
@@ -219,6 +220,7 @@ const formRequest = () => {
       adultMonthlyBenefit: Number(byId("adult-benefit").value),
       childMonthlyBenefit: Number(byId("child-benefit").value),
       fundingRule: byId("funding-rule").value,
+      surplusUse: byId("surplus-use").value,
       benefitIndexation: byId("benefit-indexation").value,
       directCashShare: Number(byId("direct-cash-share").value) / 100,
       administrativeShare: Number(byId("administrative-share").value) / 100,
@@ -1702,8 +1704,9 @@ const renderLineChart = (id, options) => {
 };
 
 const renderFlow = (projection) => {
-  const { behaviorMix, annualFlows, summary } = projection;
+  const { behaviorMix, annualFlows, summary, fiscal } = projection;
   const finalYear = annualFlows.finalYear;
+  const firstFiscal = fiscal?.years?.[0];
   byId("flow-tax").textContent = compactMoney.format(annualFlows.taxCollected);
   const baseTrend = finalYear && finalYear.taxCollected < annualFlows.taxCollected
     ? "erodes"
@@ -1716,12 +1719,19 @@ const renderFlow = (projection) => {
   byId("flow-mix").textContent = `${percent.format(behaviorMix.borrowShare)} borrow · ${percent.format(behaviorMix.sellShare)} sell`;
   byId("flow-loans").textContent = `${compactMoney.format(annualFlows.newPrivateLoans)} in new bank loans in year one${finalYear ? ` · ${compactMoney.format(finalYear.newPrivateLoans)} by year ten` : ""}`;
   byId("flow-ubi").textContent = `${compactMoney.format(annualFlows.ubiReceived)} cash · ${compactMoney.format(annualFlows.publicServicesSpending)} services`;
-  byId("flow-balance").textContent = `${compactMoney.format(annualFlows.administrativeCost)} administration${annualFlows.governmentDeficit > 1 ? ` · ${compactMoney.format(annualFlows.governmentDeficit)} deficit` : " · no modeled deficit"}`;
+  const fiscalAction = firstFiscal?.debtIssued > 1
+    ? `${compactMoney.format(firstFiscal.debtIssued)} debt issued`
+    : firstFiscal?.debtRepaid > 1
+      ? `${compactMoney.format(firstFiscal.debtRepaid)} debt repaid`
+      : firstFiscal?.treasuryBalance > 1
+        ? `${compactMoney.format(firstFiscal.treasuryBalance)} Treasury balance`
+        : "no modeled deficit";
+  byId("flow-balance").textContent = `${compactMoney.format(annualFlows.administrativeCost)} administration · ${fiscalAction}`;
   byId("flow-result").textContent = `${signedPercent(summary.bottom50PurchasingPowerChange)} buying power`;
-  byId("flow-debt").textContent = `${compactMoney.format(summary.privateTaxDebt)} in private tax debt`;
+  byId("flow-debt").textContent = `${compactMoney.format(summary.privateTaxDebt)} private tax debt · ${compactMoney.format(fiscal?.endingProgramDebt ?? 0)} program debt`;
   const m2Sentence = annualFlows.m2Injection >= 0
     ? `The selected borrowing behavior adds ${compactMoney.format(annualFlows.m2Injection)} to M2 in year one`
-    : `Unspent tax revenue parked at Treasury drains ${compactMoney.format(Math.abs(annualFlows.m2Injection))} from M2 in year one, outweighing loan-created deposits`;
+    : `The selected Treasury-balance closure parks enough revenue to drain ${compactMoney.format(Math.abs(annualFlows.m2Injection))} from M2 in year one, outweighing loan-created deposits`;
   byId("money-answer").innerHTML = `<strong>What this means:</strong><span>The tax-and-spending cycle itself reshuffles deposits. ${m2Sentence}; selling assets does not create deposits economy-wide.</span>`;
 };
 
@@ -1759,8 +1769,14 @@ const theoryChartOptions = (theory) => {
 };
 
 const renderStress = (stress) => {
+  const ruleLabel = stress.fundingRule === "fixed"
+    ? "fixed benefits"
+    : stress.fundingRule === "smoothed"
+      ? "trailing-three-year smoothed revenue"
+      : "current revenue";
+  byId("stress-description").textContent = `Each cell holds peak annual inflation in a ten-year run. Rows scale the requested benefit; the ${ruleLabel} rule determines actual outlays, and columns monetize the debt that rule issues. Surpluses use ${stress.surplusUse.replaceAll("-", " ")}.`;
   const headRow = document.createElement("tr");
-  headRow.append(element("th", "UBI scale"));
+  headRow.append(element("th", "Benefit scale"));
   stress.monetizationShares.forEach((share) => headRow.append(element("th", `${percent.format(share)} monetized`)));
   byId("stress-head").replaceChildren(headRow);
   byId("stress-body").replaceChildren(...stress.ubiMultipliers.map((multiplier) => {
@@ -1770,14 +1786,14 @@ const renderStress = (stress) => {
       const cellData = stress.cells.find((cell) => cell.ubiMultiplier === multiplier && cell.monetizationShare === share);
       const cell = element("td", stressInflationLabel(cellData.peakAnnualInflation));
       cell.className = cellData.regime;
-      cell.setAttribute("aria-label", `${multiplier} times UBI, ${percent.format(share)} deficit monetized: peak annual inflation ${formatRate(cellData.peakAnnualInflation)}, ${cellData.regime}`);
+      cell.setAttribute("aria-label", `${multiplier} times requested benefit, ${percent.format(share)} issued debt monetized: peak annual inflation ${formatRate(cellData.peakAnnualInflation)}, ${cellData.regime}`);
       row.append(cell);
     });
     return row;
   }));
   byId("hyper-threshold").textContent = stress.threshold.firstUbiMultiplierAtFullMonetization === null
     ? stress.threshold.explanation
-    : `First modeled breach: about ${integer.format(stress.threshold.firstUbiMultiplierAtFullMonetization)}× this UBI with the unfunded portion fully monetized. This is an extreme boundary, not a forecast.`;
+    : `First modeled breach: about ${integer.format(stress.threshold.firstUbiMultiplierAtFullMonetization)}× this benefit with issued debt fully monetized. This is an extreme boundary, not a forecast.`;
 };
 
 // Load a swept assumption's value into its form field and recompute. The write
@@ -1998,7 +2014,7 @@ const renderComparison = (strategies) => {
     ["UBI received", (outcome) => compactMoney.format(outcome.fiscal.ubiReceived)],
     ["Public services", (outcome) => compactMoney.format(outcome.fiscal.publicServicesSpending)],
     ["Administration", (outcome) => compactMoney.format(outcome.fiscal.administrativeCost)],
-    ["Government balance", (outcome) => compactMoney.format(outcome.fiscal.governmentBalance)],
+    ["Program operating balance", (outcome) => compactMoney.format(outcome.fiscal.governmentBalance)],
     ["Bank deposits Δ", (outcome) => compactMoney.format(outcome.moneyAndCredit.bankDepositsChange)],
     ["Bank loans Δ", (outcome) => compactMoney.format(outcome.moneyAndCredit.bankLoansChange)],
     ["Equity price Δ", (outcome) => signedPercent(outcome.markets.equityPriceChange)],

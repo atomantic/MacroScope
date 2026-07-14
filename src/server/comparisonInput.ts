@@ -107,6 +107,7 @@ export const parseComparisonRequest = (input: unknown): ParsedComparisonRequest 
     errors,
   );
   const fundingRule = readFundingRule(ubi.fundingRule, errors);
+  const surplusUse = readSurplusUse(ubi.surplusUse, errors);
   const benefitIndexation = readBenefitIndexation(ubi.benefitIndexation, errors);
   const directCashShare = readNumber(
     ubi,
@@ -285,6 +286,7 @@ export const parseComparisonRequest = (input: unknown): ParsedComparisonRequest 
         adultMonthlyBenefit,
         childMonthlyBenefit,
         fundingRule,
+        surplusUse,
         benefitIndexation,
         directCashShare,
         administrativeShare,
@@ -430,6 +432,27 @@ const readBenefitIndexation = (
   if (raw === "none" || raw === "cpi") return raw;
   errors.push("benefitIndexation must be none or cpi.");
   return DEFAULT_COMPARISON_REQUEST.ubi.benefitIndexation ?? "none";
+};
+
+const readSurplusUse = (
+  raw: unknown,
+  errors: string[],
+): NonNullable<ComparisonRequestV1["ubi"]["surplusUse"]> => {
+  if (raw === undefined) {
+    return DEFAULT_COMPARISON_REQUEST.ubi.surplusUse ?? "debt-reduction";
+  }
+  if (
+    raw === "debt-reduction" ||
+    raw === "additional-services" ||
+    raw === "rebate" ||
+    raw === "treasury-balance"
+  ) {
+    return raw;
+  }
+  errors.push(
+    "surplusUse must be debt-reduction, additional-services, rebate, or treasury-balance.",
+  );
+  return DEFAULT_COMPARISON_REQUEST.ubi.surplusUse ?? "debt-reduction";
 };
 
 const readTargetMode = (

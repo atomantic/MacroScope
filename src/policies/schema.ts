@@ -35,11 +35,17 @@ export interface WealthTaxPolicyV1 {
 }
 
 export type UbiFundingRule = "fixed" | "revenue-constrained" | "smoothed";
+export type SurplusUse =
+  | "debt-reduction"
+  | "additional-services"
+  | "rebate"
+  | "treasury-balance";
 
 export interface UbiPolicyV1 {
   readonly adultMonthlyBenefit: number;
   readonly childMonthlyBenefit: number;
   readonly fundingRule: UbiFundingRule;
+  readonly surplusUse?: SurplusUse;
   readonly taxable: boolean;
   readonly administrativeCostRate: number;
   readonly leakageRate: number;
@@ -112,6 +118,17 @@ export const validateScenario = (scenario: ScenarioV1): readonly string[] => {
   }
   validateUnitRate(ubi.administrativeCostRate, "UBI administrative cost rate", errors);
   validateUnitRate(ubi.leakageRate, "UBI leakage rate", errors);
+  if (
+    ubi.surplusUse !== undefined &&
+    ubi.surplusUse !== "debt-reduction" &&
+    ubi.surplusUse !== "additional-services" &&
+    ubi.surplusUse !== "rebate" &&
+    ubi.surplusUse !== "treasury-balance"
+  ) {
+    errors.push(
+      "UBI surplus use must be debt-reduction, additional-services, rebate, or treasury-balance.",
+    );
+  }
   return errors;
 };
 

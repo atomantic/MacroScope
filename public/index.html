@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f2efe7" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./styles.css?v=16" />
+    <link rel="stylesheet" href="./styles.css?v=17" />
     <title>MacroScope</title>
   </head>
   <body>
@@ -299,8 +299,14 @@
         aria-expanded="false"
       >
         <span class="scenario-drawer-trigger-label">Edit scenario</span>
-        <span class="scenario-drawer-trigger-status" id="scenario-drawer-trigger-status" hidden>Recalculating…</span>
+        <span
+          class="scenario-drawer-trigger-status"
+          id="scenario-drawer-trigger-status"
+          aria-hidden="true"
+          hidden
+        >Recalculating…</span>
       </button>
+      <span class="visually-hidden" id="scenario-recalc-status" role="status" aria-live="polite" aria-atomic="true"></span>
 
       <dialog class="scenario-drawer" id="scenario-drawer" aria-labelledby="scenario-drawer-title">
         <form id="scenario-form">
@@ -309,6 +315,7 @@
               <p class="kicker">Scenario controls</p>
               <h2 id="scenario-drawer-title">Edit the policy</h2>
               <p id="scenario-drawer-summary">2% above $10M · $1,000/mo adult equivalent</p>
+              <p class="drawer-action-feedback" id="drawer-action-feedback" role="status" aria-live="polite" aria-atomic="true" hidden></p>
             </div>
             <div class="scenario-drawer-header-actions">
               <button class="preset-share-button" id="copy-link-button" type="button">Copy link</button>
@@ -527,6 +534,6 @@
     </footer>
     <div class="toast-container" id="toast-container" aria-live="polite" aria-atomic="true"></div>
     <div class="visually-hidden" id="chart-readout" role="status" aria-live="polite"></div>
-    <script src="./app.js?v=16" type="module"></script>
+    <script src="./app.js?v=17" type="module"></script>
   </body>
 </html>

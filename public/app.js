@@ -547,13 +547,32 @@ const copyScenarioLink = async () => {
 
 let toastTimer = null;
 const showToast = (message, isError = false) => {
+  clearTimeout(toastTimer);
+  const drawer = byId("scenario-drawer");
+  const drawerFeedback = byId("drawer-action-feedback");
   const container = byId("toast-container");
+  container?.replaceChildren();
+  if (drawerFeedback) {
+    drawerFeedback.hidden = true;
+    drawerFeedback.textContent = "";
+    drawerFeedback.classList.remove("error");
+  }
+  if (drawer?.open && drawerFeedback) {
+    drawerFeedback.textContent = message;
+    drawerFeedback.classList.toggle("error", isError);
+    drawerFeedback.hidden = false;
+    toastTimer = setTimeout(() => {
+      drawerFeedback.hidden = true;
+      drawerFeedback.textContent = "";
+      drawerFeedback.classList.remove("error");
+    }, 3600);
+    return;
+  }
   if (!container) return;
   const toast = element("div", message);
   toast.className = `toast${isError ? " error" : ""}`;
   container.replaceChildren(toast);
   requestAnimationFrame(() => toast.classList.add("visible"));
-  clearTimeout(toastTimer);
   toastTimer = setTimeout(() => {
     toast.classList.remove("visible");
     setTimeout(() => toast.remove(), 300);
@@ -762,11 +781,17 @@ const setRecalculating = (on) => {
   byId("scenario-form")?.classList.toggle("is-recalculating", on);
   const trigger = byId("scenario-drawer-trigger");
   const triggerStatus = byId("scenario-drawer-trigger-status");
+  const liveStatus = byId("scenario-recalc-status");
   if (trigger) {
     trigger.classList.toggle("is-recalculating", on);
     trigger.setAttribute("aria-busy", String(on));
   }
   if (triggerStatus) triggerStatus.hidden = !on;
+  if (liveStatus) {
+    liveStatus.textContent = on
+      ? "Scenario results are recalculating."
+      : "Scenario results updated.";
+  }
 };
 
 const dashboardRerun = () => {
@@ -830,10 +855,18 @@ const unlockDashboardScroll = () => {
 const finishDrawerClose = () => {
   const trigger = byId("scenario-drawer-trigger");
   const returnFocus = drawerState.returnFocus;
+  const drawerFeedback = byId("drawer-action-feedback");
   trigger?.setAttribute("aria-expanded", "false");
   unlockDashboardScroll();
-  if (drawerState.restoreFocus && returnFocus?.isConnected) {
-    requestAnimationFrame(() => returnFocus.focus({ preventScroll: true }));
+  if (drawerFeedback) {
+    clearTimeout(toastTimer);
+    drawerFeedback.hidden = true;
+    drawerFeedback.textContent = "";
+    drawerFeedback.classList.remove("error");
+  }
+  if (drawerState.restoreFocus) {
+    const focusTarget = returnFocus?.isConnected ? returnFocus : trigger;
+    requestAnimationFrame(() => focusTarget?.focus({ preventScroll: true }));
   }
   drawerState.returnFocus = null;
   drawerState.restoreFocus = true;

@@ -89,8 +89,14 @@ describe("PortOS server", () => {
     );
     expect(shellMarkup).toContain('aria-controls="scenario-drawer"');
     expect(shellMarkup).toContain('aria-expanded="false"');
+    expect(shellMarkup).toMatch(
+      /id="scenario-recalc-status"[\s\S]*?role="status"[\s\S]*?aria-live="polite"/,
+    );
     expect(shellMarkup).toContain('id="scenario-drawer-close"');
     expect(shellMarkup).toContain('aria-label="Close scenario editor"');
+    expect(shellMarkup).toMatch(
+      /id="drawer-action-feedback"[\s\S]*?role="status"[\s\S]*?aria-live="polite"/,
+    );
     expect(shellMarkup).toContain('id="scenario-drawer-done"');
     expect(shellMarkup.match(/id="scenario-form"/g)).toHaveLength(1);
     const shellIds = [...shellMarkup.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]);

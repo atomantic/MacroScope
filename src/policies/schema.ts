@@ -6,7 +6,8 @@ export type AssetClass =
   | "publicEquity"
   | "housing"
   | "privateBusiness"
-  | "retirementAssets";
+  | "retirementAssets"
+  | "otherAssets";
 
 export type LiabilityClass = "mortgage" | "collateralizedLoan" | "consumerDebt";
 

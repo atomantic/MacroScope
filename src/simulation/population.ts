@@ -81,10 +81,16 @@ const createHousehold = (
     housing: grossAssets * shares.housing,
     privateBusiness: grossAssets * shares.privateBusiness,
     retirementAssets: grossAssets * shares.retirementAssets,
+    otherAssets: grossAssets * shares.otherAssets,
   };
-  const mortgage = Math.min(totalDebt * 0.7, assets.housing * 0.82);
+  // Keep structural support for every liability instrument in each percentile
+  // group so instrument-level calibration can scale a positive seed to the DFA
+  // target instead of manufacturing holdings after sampling.
+  const consumerDebtReserve = totalDebt * (0.03 + (1 - percentile) * 0.17);
+  const financeableDebt = Math.max(0, totalDebt - consumerDebtReserve);
+  const mortgage = Math.min(financeableDebt * 0.7, assets.housing * 0.82);
   const collateralizedLoan = Math.min(
-    totalDebt - mortgage,
+    financeableDebt - mortgage,
     assets.publicEquity * (percentile > 0.9 ? 0.24 : 0.08),
   );
   const liabilities: Record<LiabilityClass, number> = {
@@ -123,6 +129,7 @@ const portfolioShares = (percentile: number): Record<AssetClass, number> => {
     housing: percentile < 0.8 ? 0.56 : percentile < 0.99 ? 0.36 : 0.15,
     privateBusiness: percentile > 0.95 ? 0.19 : 0.01 + percentile * 0.02,
     retirementAssets: percentile < 0.2 ? 0.08 : 0.17,
+    otherAssets: 0.08,
   };
   const total = sumRecord(raw);
   return Object.fromEntries(

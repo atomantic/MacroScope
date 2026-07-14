@@ -17,9 +17,8 @@ export interface UsWealthGroupBaseline {
   readonly assets: number;
   readonly liabilities: number;
   readonly netWorth: number;
-  readonly deposits: number;
-  readonly publicEquity: number;
-  readonly realEstate: number;
+  readonly assetClasses: Readonly<Record<AssetClass, number>>;
+  readonly liabilityClasses: Readonly<Record<LiabilityClass, number>>;
 }
 
 export interface DataSource {
@@ -29,8 +28,100 @@ export interface DataSource {
   readonly url: string;
 }
 
+export interface CalibrationDiagnostic {
+  readonly wealthGroup: UsWealthGroupId;
+  readonly balanceSheet: "asset" | "liability";
+  readonly instrument: AssetClass | LiabilityClass;
+  readonly target: number;
+  readonly modeled: number;
+  readonly residual: number;
+  readonly relativeError: number;
+}
+
+export interface PopulationCalibration {
+  readonly households: readonly SyntheticHousehold[];
+  readonly diagnostics: readonly CalibrationDiagnostic[];
+}
+
 const MILLION = 1_000_000;
 const BILLION = 1_000_000_000;
+
+/**
+ * Mapping from the downloadable DFA detail file to the model balance sheet.
+ * The residual asset bucket is deliberate: those instruments do not behave like
+ * government bonds, so preserving them separately prevents a misleading mapping.
+ */
+export const DFA_INSTRUMENT_CALIBRATION = {
+  vintage: "2026:Q1",
+  releaseDate: "2026-06-18",
+  tolerance: 0.01,
+  sourceFile: "dfa-networth-levels-detail.csv",
+  assets: {
+    deposits: {
+      method: "direct",
+      sourceInstruments: ["Deposits"],
+    },
+    governmentBonds: {
+      method: "direct",
+      sourceInstruments: ["Debt securities"],
+    },
+    publicEquity: {
+      method: "direct",
+      sourceInstruments: ["Corporate equities and mutual fund shares"],
+    },
+    housing: {
+      method: "direct",
+      sourceInstruments: ["Real estate"],
+    },
+    privateBusiness: {
+      method: "direct",
+      sourceInstruments: ["Miscellaneous other equity (unincorporated businesses)"],
+    },
+    retirementAssets: {
+      method: "aggregate",
+      sourceInstruments: [
+        "Annuities",
+        "Defined contribution pension entitlements",
+        "Defined benefit pension entitlements",
+      ],
+    },
+    otherAssets: {
+      method: "explicit-residual",
+      sourceInstruments: [
+        "Consumer durables",
+        "Money market fund shares",
+        "Loans (assets)",
+        "Life insurance reserves",
+        "Miscellaneous assets",
+      ],
+    },
+  },
+  liabilities: {
+    mortgage: {
+      method: "direct",
+      sourceInstruments: ["Home mortgages"],
+    },
+    consumerDebt: {
+      method: "direct",
+      sourceInstruments: ["Consumer credit"],
+    },
+    collateralizedLoan: {
+      method: "aggregate-residual",
+      sourceInstruments: [
+        "Depository institutions loans n.e.c.",
+        "Other loans and advances (liabilities)",
+        "Deferred and unpaid life insurance premiums",
+      ],
+    },
+  },
+  residualAssetClass: {
+    modelClass: "otherAssets",
+    label: "Other assets",
+    includedInModel: true,
+    rationale:
+      "Preserves DFA instruments without a narrower model analogue instead of relabeling them as government bonds.",
+  },
+} as const;
 
 export const US_WEALTH_GROUPS: readonly UsWealthGroupBaseline[] = [
   {
@@ -42,9 +133,20 @@ export const US_WEALTH_GROUPS: readonly UsWealthGroupBaseline[] = [
     assets: 10_348_948 * MILLION,
     liabilities: 6_082_588 * MILLION,
     netWorth: 4_266_359 * MILLION,
-    deposits: 793_232 * MILLION,
-    publicEquity: 587_223 * MILLION,
-    realEstate: 4_826_745 * MILLION,
+    assetClasses: {
+      deposits: 793_232 * MILLION,
+      governmentBonds: 28_583 * MILLION,
+      publicEquity: 587_223 * MILLION,
+      housing: 4_826_745 * MILLION,
+      privateBusiness: 166_766 * MILLION,
+      retirementAssets: 1_233_972 * MILLION,
+      otherAssets: 2_712_427 * MILLION,
+    },
+    liabilityClasses: {
+      mortgage: 3_112_114 * MILLION,
+      collateralizedLoan: 343_883 * MILLION,
+      consumerDebt: 2_626_591 * MILLION,
+    },
   },
   {
     id: "next-40",
@@ -55,9 +157,20 @@ export const US_WEALTH_GROUPS: readonly UsWealthGroupBaseline[] = [
     assets: 60_280_257 * MILLION,
     liabilities: 8_795_392 * MILLION,
     netWorth: 51_484_864 * MILLION,
-    deposits: 5_185_020 * MILLION,
-    publicEquity: 6_400_950 * MILLION,
-    realEstate: 22_650_205 * MILLION,
+    assetClasses: {
+      deposits: 5_185_020 * MILLION,
+      governmentBonds: 1_193_186 * MILLION,
+      publicEquity: 6_400_950 * MILLION,
+      housing: 22_650_205 * MILLION,
+      privateBusiness: 2_376_896 * MILLION,
+      retirementAssets: 15_880_624 * MILLION,
+      otherAssets: 6_593_376 * MILLION,
+    },
+    liabilityClasses: {
+      mortgage: 6_773_937 * MILLION,
+      collateralizedLoan: 252_115 * MILLION,
+      consumerDebt: 1_769_340 * MILLION,
+    },
   },
   {
     id: "next-9",
@@ -68,9 +181,20 @@ export const US_WEALTH_GROUPS: readonly UsWealthGroupBaseline[] = [
     assets: 67_334_132 * MILLION,
     liabilities: 4_108_736 * MILLION,
     netWorth: 63_225_396 * MILLION,
-    deposits: 5_054_244 * MILLION,
-    publicEquity: 20_514_327 * MILLION,
-    realEstate: 14_762_255 * MILLION,
+    assetClasses: {
+      deposits: 5_054_244 * MILLION,
+      governmentBonds: 2_386_708 * MILLION,
+      publicEquity: 20_514_327 * MILLION,
+      housing: 14_762_255 * MILLION,
+      privateBusiness: 5_252_870 * MILLION,
+      retirementAssets: 14_082_097 * MILLION,
+      otherAssets: 5_281_631 * MILLION,
+    },
+    liabilityClasses: {
+      mortgage: 3_377_823 * MILLION,
+      collateralizedLoan: 216_485 * MILLION,
+      consumerDebt: 514_428 * MILLION,
+    },
   },
   {
     id: "remaining-top-1",
@@ -81,9 +205,20 @@ export const US_WEALTH_GROUPS: readonly UsWealthGroupBaseline[] = [
     assets: 30_730_484 * MILLION,
     liabilities: 769_766 * MILLION,
     netWorth: 29_960_718 * MILLION,
-    deposits: 1_946_235 * MILLION,
-    publicEquity: 14_312_130 * MILLION,
-    realEstate: 4_546_853 * MILLION,
+    assetClasses: {
+      deposits: 1_946_235 * MILLION,
+      governmentBonds: 1_150_715 * MILLION,
+      publicEquity: 14_312_130 * MILLION,
+      housing: 4_546_853 * MILLION,
+      privateBusiness: 4_083_440 * MILLION,
+      retirementAssets: 2_519_463 * MILLION,
+      otherAssets: 2_171_648 * MILLION,
+    },
+    liabilityClasses: {
+      mortgage: 439_570 * MILLION,
+      collateralizedLoan: 221_110 * MILLION,
+      consumerDebt: 109_086 * MILLION,
+    },
   },
   {
     id: "top-0.1",
@@ -94,9 +229,20 @@ export const US_WEALTH_GROUPS: readonly UsWealthGroupBaseline[] = [
     assets: 25_311_992 * MILLION,
     liabilities: 239_711 * MILLION,
     netWorth: 25_072_282 * MILLION,
-    deposits: 1_473_775 * MILLION,
-    publicEquity: 13_331_518 * MILLION,
-    realEstate: 1_937_284 * MILLION,
+    assetClasses: {
+      deposits: 1_473_775 * MILLION,
+      governmentBonds: 1_104_402 * MILLION,
+      publicEquity: 13_331_518 * MILLION,
+      housing: 1_937_284 * MILLION,
+      privateBusiness: 4_679_452 * MILLION,
+      retirementAssets: 524_629 * MILLION,
+      otherAssets: 2_260_932 * MILLION,
+    },
+    liabilityClasses: {
+      mortgage: 117_541 * MILLION,
+      collateralizedLoan: 68_584 * MILLION,
+      consumerDebt: 53_586 * MILLION,
+    },
   },
 ];
 
@@ -113,6 +259,7 @@ export const US_BASELINE = {
   nominalGdp: 30_779 * BILLION,
   annualPce: 20_960.8 * BILLION,
   baselineInflation: 0.026,
+  calibration: DFA_INSTRUMENT_CALIBRATION,
   wealthGroups: US_WEALTH_GROUPS,
   sources: [
     {
@@ -187,34 +334,118 @@ export const US_BASELINE = {
 export const calibratePopulationToUs = (
   households: readonly SyntheticHousehold[],
   representedHouseholds: number,
-): readonly SyntheticHousehold[] => {
+): readonly SyntheticHousehold[] =>
+  calibratePopulationToUsWithDiagnostics(households, representedHouseholds).households;
+
+export const calibratePopulationToUsWithDiagnostics = (
+  households: readonly SyntheticHousehold[],
+  representedHouseholds: number,
+): PopulationCalibration => {
   const economyScale = representedHouseholds / US_BASELINE.households;
-  const scalars = new Map<UsWealthGroupId, { assets: number; liabilities: number }>();
+  const scalars = new Map<
+    UsWealthGroupId,
+    {
+      assets: Record<AssetClass, number>;
+      liabilities: Record<LiabilityClass, number>;
+    }
+  >();
 
   for (const group of US_WEALTH_GROUPS) {
     const members = households.filter((household) => inGroup(household.percentile, group));
-    const currentAssets = weightedRecordTotal(members, (household) => household.assets);
-    const currentLiabilities = weightedRecordTotal(
-      members,
-      (household) => household.liabilities,
+    const assetScalars = mapTargets(group.assetClasses, (assetClass, target) =>
+      calibrationScalar(
+        weightedInstrumentTotal(members, (household) => household.assets[assetClass]),
+        target * economyScale,
+        `${group.id} asset ${assetClass}`,
+      ),
     );
-    scalars.set(group.id, {
-      assets: (group.assets * economyScale) / Math.max(1, currentAssets),
-      liabilities:
-        (group.liabilities * economyScale) / Math.max(1, currentLiabilities),
-    });
+    const liabilityScalars = mapTargets(
+      group.liabilityClasses,
+      (liabilityClass, target) =>
+        calibrationScalar(
+          weightedInstrumentTotal(
+            members,
+            (household) => household.liabilities[liabilityClass],
+          ),
+          target * economyScale,
+          `${group.id} liability ${liabilityClass}`,
+        ),
+    );
+    scalars.set(group.id, { assets: assetScalars, liabilities: liabilityScalars });
   }
 
-  return households.map((household) => {
+  const calibrated = households.map((household) => {
     const group = groupForPercentile(household.percentile);
-    const scalar = scalars.get(group.id);
-    if (!scalar) throw new Error(`Missing U.S. calibration scalar for ${group.id}.`);
+    const groupScalars = scalars.get(group.id);
+    if (!groupScalars) throw new Error(`Missing U.S. calibration scalars for ${group.id}.`);
     return {
       ...household,
-      assets: scaleRecord<AssetClass>(household.assets, scalar.assets),
-      liabilities: scaleRecord<LiabilityClass>(household.liabilities, scalar.liabilities),
+      assets: scaleRecord(household.assets, groupScalars.assets),
+      liabilities: scaleRecord(household.liabilities, groupScalars.liabilities),
     };
   });
+
+  return {
+    households: calibrated,
+    diagnostics: buildDiagnostics(calibrated, economyScale),
+  };
+};
+
+const buildDiagnostics = (
+  households: readonly SyntheticHousehold[],
+  economyScale: number,
+): readonly CalibrationDiagnostic[] =>
+  US_WEALTH_GROUPS.flatMap((group) => {
+    const members = households.filter((household) => inGroup(household.percentile, group));
+    const assets = entriesOf(group.assetClasses).map(([instrument, value]) =>
+      diagnostic(
+        group.id,
+        "asset",
+        instrument,
+        value * economyScale,
+        weightedInstrumentTotal(members, (household) => household.assets[instrument]),
+      ),
+    );
+    const liabilities = entriesOf(group.liabilityClasses).map(([instrument, value]) =>
+      diagnostic(
+        group.id,
+        "liability",
+        instrument,
+        value * economyScale,
+        weightedInstrumentTotal(
+          members,
+          (household) => household.liabilities[instrument],
+        ),
+      ),
+    );
+    return [...assets, ...liabilities];
+  });
+
+const diagnostic = (
+  wealthGroup: UsWealthGroupId,
+  balanceSheet: "asset" | "liability",
+  instrument: AssetClass | LiabilityClass,
+  target: number,
+  modeled: number,
+): CalibrationDiagnostic => {
+  const residual = modeled - target;
+  return {
+    wealthGroup,
+    balanceSheet,
+    instrument,
+    target,
+    modeled,
+    residual,
+    relativeError: target === 0 ? (modeled === 0 ? 0 : 1) : Math.abs(residual) / target,
+  };
+};
+
+const calibrationScalar = (current: number, target: number, label: string): number => {
+  if (target === 0) return 0;
+  if (!Number.isFinite(current) || current <= 0) {
+    throw new Error(`Cannot calibrate ${label}: positive target has no modeled holdings.`);
+  }
+  return target / current;
 };
 
 const groupForPercentile = (percentile: number): UsWealthGroupBaseline => {
@@ -230,22 +461,30 @@ const inGroup = (
   percentile >= group.percentileMinimum &&
   (percentile < group.percentileMaximum || group.percentileMaximum === 1);
 
-const weightedRecordTotal = <Key extends string>(
+const weightedInstrumentTotal = (
   households: readonly SyntheticHousehold[],
-  select: (household: SyntheticHousehold) => Readonly<Record<Key, number>>,
+  select: (household: SyntheticHousehold) => number,
 ): number =>
   households.reduce(
-    (total, household) =>
-      total +
-      Object.values<number>(select(household)).reduce((sum, value) => sum + value, 0) *
-        household.weight,
+    (total, household) => total + select(household) * household.weight,
     0,
   );
 
+const mapTargets = <Key extends string>(
+  targets: Readonly<Record<Key, number>>,
+  map: (key: Key, value: number) => number,
+): Record<Key, number> =>
+  Object.fromEntries(entriesOf(targets).map(([key, value]) => [key, map(key, value)])) as Record<
+    Key,
+    number
+  >;
+
+const entriesOf = <Key extends string>(
+  record: Readonly<Record<Key, number>>,
+): readonly (readonly [Key, number])[] => Object.entries(record) as [Key, number][];
+
 const scaleRecord = <Key extends string>(
   record: Readonly<Record<Key, number>>,
-  scalar: number,
+  scalars: Readonly<Record<Key, number>>,
 ): Record<Key, number> =>
-  Object.fromEntries(
-    Object.entries<number>(record).map(([key, value]) => [key, value * scalar]),
-  ) as Record<Key, number>;
+  mapTargets(record, (key, value) => value * scalars[key]);

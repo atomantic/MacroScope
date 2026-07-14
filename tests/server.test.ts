@@ -50,7 +50,13 @@ describe("PortOS server", () => {
 
     expect(health.status).toBe(200);
     expect(await health.json()).toMatchObject({ status: "healthy", service: "macroscope" });
-    expect(await status.json()).toMatchObject({ deterministic: true });
+    expect(await status.json()).toMatchObject({
+      deterministic: true,
+      calibration: {
+        vintage: "2026:Q1",
+        residualAssetClass: { modelClass: "otherAssets", includedInModel: true },
+      },
+    });
     expect(backtest.status).toBe(200);
     expect(await backtest.json()).toMatchObject({
       modeledPeak: { year: 2021 },
@@ -62,6 +68,10 @@ describe("PortOS server", () => {
     expect(await baseline.json()).toMatchObject({
       id: "us-2026-q1",
       households: 135_134_121,
+      calibration: {
+        vintage: "2026:Q1",
+        tolerance: 0.01,
+      },
     });
     expect(constants.status).toBe(200);
     const constantsPayload = await constants.json();
@@ -84,6 +94,7 @@ describe("PortOS server", () => {
     expect(shellMarkup).toContain('id="wage-pass-through"');
     expect(shellMarkup).toContain('id="monetary-offset"');
     expect(shellMarkup).toContain('id="model-constants-body"');
+    expect(shellMarkup).toContain('id="calibration-summary"');
     expect(shellMarkup).toContain(
       '<dialog class="scenario-drawer" id="scenario-drawer" aria-labelledby="scenario-drawer-title">',
     );

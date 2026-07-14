@@ -15,6 +15,7 @@ const assets = Object.fromEntries(
     "housing",
     "privateBusiness",
     "retirementAssets",
+    "otherAssets",
   ].map((key) => [key, { inclusionRate: 1, valuationFactor: 1 }]),
 ) as ScenarioV1["policies"]["wealthTax"]["assets"] & Record<AssetClass, unknown>;
 

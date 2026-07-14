@@ -15,6 +15,7 @@ const assets = Object.fromEntries(
     "housing",
     "privateBusiness",
     "retirementAssets",
+    "otherAssets",
   ].map((assetClass) => [assetClass, { inclusionRate: 1, valuationFactor: 1 }]),
 ) as Record<AssetClass, { inclusionRate: number; valuationFactor: number }>;
 
@@ -57,6 +58,7 @@ describe("wealth-tax policy", () => {
           housing: 1_000_000,
           privateBusiness: 0,
           retirementAssets: 0,
+          otherAssets: 0,
         },
         liabilities: {
           mortgage: 500_000,

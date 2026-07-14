@@ -2045,7 +2045,9 @@ const renderUncertainty = (analysis) => {
     const item = document.createElement("li");
     const label = document.createElement("strong");
     label.textContent = influence.label;
-    const direction = influence.direction === "positive"
+    const direction = influence.parameterId === "population-seed"
+      ? "varies across categorical population seeds"
+      : influence.direction === "positive"
       ? "raises"
       : influence.direction === "negative"
         ? "lowers"
@@ -2066,7 +2068,8 @@ const renderUncertainty = (analysis) => {
   byId("uncertainty-note").textContent =
     `${analysis.note} Seed ${analysis.options.seed}; ${analysis.sampledParameters.length} sampled assumptions; ` +
     `${analysis.fixedAssumptions.length} policy or judgment choices held fixed. ` +
-    "Influence scores are standardized regression coefficients; interaction scores partial out linear main effects from both the outcome and each parameter pair.";
+    "Declared dependency groups use rank-factor loadings while preserving each Latin-hypercube marginal. " +
+    "Influence scores are standardized regression coefficients (categorical correlation ratio for population seeds); interaction scores partial out linear main effects from both the outcome and each parameter pair.";
   byId("uncertainty-results").hidden = false;
 };
 

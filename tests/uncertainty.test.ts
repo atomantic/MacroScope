@@ -45,6 +45,14 @@ describe("joint uncertainty analysis", () => {
     expect(analysis.influenceMethod).toBe("absolute-standardized-regression-coefficient");
     expect(analysis.interactionMethod)
       .toBe("pair-product-partial-correlation-after-main-effects");
+    expect(analysis.correlationMethod).toBe("rank-reordered-latin-hypercube-factor");
+    expect(analysis.correlationChecks.length).toBeGreaterThan(0);
+    for (const check of analysis.correlationChecks) {
+      expect(Math.abs(check.observedCorrelation)).toBeGreaterThan(0.15);
+      expect(Math.sign(check.observedCorrelation)).toBe(
+        check.expectedDirection === "positive" ? 1 : -1,
+      );
+    }
     expect(analysis.influences.every((influence) => Number.isFinite(influence.score))).toBe(true);
     expect(analysis.interactions.every((interaction) => interaction.score <= 1)).toBe(true);
     for (const metric of analysis.metrics) {
@@ -97,6 +105,22 @@ describe("joint uncertainty analysis", () => {
     expect(combined.sampledParameters.some((parameter) => parameter.id === "population-seed"))
       .toBe(true);
     expect(combined.options.populationMode).toBe("combined");
+    expect(combined.populationInfluenceMethod).toBe("categorical-correlation-ratio");
+    expect(combined.influences.find((influence) => influence.parameterId === "population-seed"))
+      .toMatchObject({ direction: "flat" });
+  });
+
+  it("keeps adversarial derived population seeds distinct without retaining every population", () => {
+    const combined = runUncertaintyAnalysis(request, {
+      ...options,
+      draws: 32,
+      seed: -1_640_531_527,
+      populationMode: "combined",
+      populationReplicates: 32,
+    });
+    expect(combined.populationSeeds).toHaveLength(32);
+    expect(new Set(combined.populationSeeds).size).toBe(32);
+    expect(combined.runs).toBe(32);
   });
 
   it("reports progress and validates the run budget", () => {

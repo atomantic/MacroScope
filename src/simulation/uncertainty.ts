@@ -63,6 +63,7 @@ export interface UncertaintyParameterMetadata {
   readonly high: number;
   readonly distribution: UncertaintyDistribution;
   readonly correlationGroup: string | null;
+  readonly correlationLoading: number | null;
   readonly kind: UncertaintyKind;
   readonly sampled: true;
   readonly source: string;
@@ -87,6 +88,7 @@ interface ParameterSpec {
   readonly low: number;
   readonly high: number;
   readonly correlationGroup: string | null;
+  readonly correlationLoading: number | null;
   readonly kind: Exclude<UncertaintyKind, "normative">;
   readonly source: string;
   readonly read: (request: ComparisonRequestV1) => number;
@@ -131,6 +133,7 @@ const PARAMETER_SPECS: readonly ParameterSpec[] = [
     low: 0.1,
     high: 0.9,
     correlationGroup: "payment-strategy",
+    correlationLoading: 0.75,
     kind: "structural",
     source: "Scenario financing range; constrained jointly with asset sales.",
     read: (request) => request.behavior.borrowShare,
@@ -144,6 +147,7 @@ const PARAMETER_SPECS: readonly ParameterSpec[] = [
     low: 0.05,
     high: 0.6,
     correlationGroup: "payment-strategy",
+    correlationLoading: -0.75,
     kind: "structural",
     source: "Scenario financing range; constrained jointly with borrowing.",
     read: (request) => request.behavior.sellShare,
@@ -156,7 +160,8 @@ const PARAMETER_SPECS: readonly ParameterSpec[] = [
     unit: "rate",
     low: 0.02,
     high: 0.1,
-    correlationGroup: "asset-market",
+    correlationGroup: null,
+    correlationLoading: null,
     kind: "empirical",
     source: "Broad long-run nominal return range around the scenario baseline.",
     read: (request) => request.behavior.annualAssetReturn,
@@ -170,6 +175,7 @@ const PARAMETER_SPECS: readonly ParameterSpec[] = [
     low: 0.025,
     high: 0.09,
     correlationGroup: "credit-conditions",
+    correlationLoading: -0.7,
     kind: "empirical",
     source: "Secured-credit rate range around the modeled collateralized loan.",
     read: (request) => request.behavior.loanInterestRate,
@@ -182,7 +188,8 @@ const PARAMETER_SPECS: readonly ParameterSpec[] = [
     unit: "share",
     low: 0,
     high: 0.5,
-    correlationGroup: "fiscal-monetary",
+    correlationGroup: null,
+    correlationLoading: null,
     kind: "structural",
     source: "Reduced-form monetary financing range.",
     read: (request) => request.behavior.deficitMonetizationShare,
@@ -195,7 +202,8 @@ const PARAMETER_SPECS: readonly ParameterSpec[] = [
     unit: "share",
     low: 0.1,
     high: 0.7,
-    correlationGroup: "asset-market",
+    correlationGroup: "asset-flow",
+    correlationLoading: 0.7,
     kind: "structural",
     source: "Portfolio-allocation scenario range.",
     read: (request) => request.behavior.assetHedgeShare,
@@ -209,6 +217,7 @@ const PARAMETER_SPECS: readonly ParameterSpec[] = [
     low: 0.2,
     high: 0.9,
     correlationGroup: "housing-demand",
+    correlationLoading: 0.7,
     kind: "structural",
     source: "Portfolio-allocation scenario range.",
     read: (request) => request.behavior.housingHedgeShare,
@@ -222,6 +231,7 @@ const PARAMETER_SPECS: readonly ParameterSpec[] = [
     low: 0.1,
     high: 0.7,
     correlationGroup: "housing-demand",
+    correlationLoading: 0.7,
     kind: "empirical",
     source: "Reduced-form owner-to-renter price pass-through range.",
     read: (request) => request.behavior.rentPassThrough,
@@ -235,6 +245,7 @@ const PARAMETER_SPECS: readonly ParameterSpec[] = [
     low: 0,
     high: 0.25,
     correlationGroup: "compliance",
+    correlationLoading: 0.7,
     kind: "empirical",
     source: "Behavioral-response range exposed by the scenario model.",
     read: (request) => request.behavior.avoidanceElasticity,
@@ -248,6 +259,7 @@ const PARAMETER_SPECS: readonly ParameterSpec[] = [
     low: 0,
     high: 0.3,
     correlationGroup: "compliance",
+    correlationLoading: 0.7,
     kind: "empirical",
     source: "Behavioral-response range exposed by the scenario model.",
     read: (request) => request.behavior.expatriationShare,
@@ -260,7 +272,8 @@ const PARAMETER_SPECS: readonly ParameterSpec[] = [
     unit: "share",
     low: 0.5,
     high: 1,
-    correlationGroup: "valuation",
+    correlationGroup: null,
+    correlationLoading: null,
     kind: "structural",
     source: "Valuation-discount range for illiquid private businesses.",
     read: (request) => request.behavior.privateBusinessInclusionRate,
@@ -273,7 +286,8 @@ const PARAMETER_SPECS: readonly ParameterSpec[] = [
     unit: "elasticity",
     low: 0,
     high: 1.5,
-    correlationGroup: "growth-response",
+    correlationGroup: null,
+    correlationLoading: null,
     kind: "structural",
     source: "Dynamic-scoring range documented in the scenario control.",
     read: (request) => request.behavior.savingsResponseElasticity,
@@ -286,7 +300,8 @@ const PARAMETER_SPECS: readonly ParameterSpec[] = [
     unit: "elasticity",
     low: 0,
     high: 1.5,
-    correlationGroup: "growth-response",
+    correlationGroup: null,
+    correlationLoading: null,
     kind: "structural",
     source: "Reduced-form transfer-to-investment response range.",
     read: (request) => request.behavior.demandGrowthOffset,
@@ -300,6 +315,7 @@ const PARAMETER_SPECS: readonly ParameterSpec[] = [
     low: 0.03,
     high: 0.2,
     correlationGroup: "asset-market-liquidity",
+    correlationLoading: 0.75,
     kind: "empirical",
     source: "Market-depth scenario range.",
     read: (request) => request.market.buyerDepthRatio,
@@ -313,6 +329,7 @@ const PARAMETER_SPECS: readonly ParameterSpec[] = [
     low: 0.05,
     high: 0.35,
     correlationGroup: "asset-market-liquidity",
+    correlationLoading: -0.75,
     kind: "structural",
     source: "Reduced-form market-impact range.",
     read: (request) => request.market.priceImpactCoefficient,
@@ -326,6 +343,7 @@ const PARAMETER_SPECS: readonly ParameterSpec[] = [
     low: 0.3,
     high: 0.7,
     correlationGroup: "credit-conditions",
+    correlationLoading: 0.7,
     kind: "empirical",
     source: "Secured-credit underwriting range.",
     read: (request) => request.market.maximumCollateralLtv,
@@ -338,7 +356,8 @@ const PARAMETER_SPECS: readonly ParameterSpec[] = [
     unit: "elasticity",
     low: 0.1,
     high: 1.2,
-    correlationGroup: "housing-demand",
+    correlationGroup: null,
+    correlationLoading: null,
     kind: "empirical",
     source: "Housing supply-elasticity scenario range.",
     read: (request) => request.market.housingSupplyElasticity,
@@ -351,7 +370,8 @@ const PARAMETER_SPECS: readonly ParameterSpec[] = [
     unit: "share",
     low: 0.2,
     high: 0.8,
-    correlationGroup: "inflation-response",
+    correlationGroup: null,
+    correlationLoading: null,
     kind: "structural",
     source: "Promoted reduced-form model constant.",
     read: (request) => request.model.wagePassThrough,
@@ -364,7 +384,8 @@ const PARAMETER_SPECS: readonly ParameterSpec[] = [
     unit: "rate",
     low: 0.05,
     high: 0.2,
-    correlationGroup: "credit-conditions",
+    correlationGroup: null,
+    correlationLoading: null,
     kind: "structural",
     source: "Promoted reduced-form model constant.",
     read: (request) => request.model.loanAmortizationRate,
@@ -377,7 +398,8 @@ const PARAMETER_SPECS: readonly ParameterSpec[] = [
     unit: "share",
     low: 0.7,
     high: 1,
-    correlationGroup: "incidence",
+    correlationGroup: null,
+    correlationLoading: null,
     kind: "structural",
     source: "Promoted distributional-incidence constant.",
     read: (request) => request.model.topTaxIncidenceShare,
@@ -390,7 +412,8 @@ const PARAMETER_SPECS: readonly ParameterSpec[] = [
     unit: "share",
     low: 0.2,
     high: 0.7,
-    correlationGroup: "inflation-response",
+    correlationGroup: null,
+    correlationLoading: null,
     kind: "structural",
     source: "Promoted reduced-form monetary-reaction constant.",
     read: (request) => request.model.monetaryPolicyOffsetShare,
@@ -403,7 +426,8 @@ const PARAMETER_SPECS: readonly ParameterSpec[] = [
     unit: "share",
     low: 0.25,
     high: 0.85,
-    correlationGroup: "asset-market",
+    correlationGroup: "asset-flow",
+    correlationLoading: 0.7,
     kind: "structural",
     source: "Promoted reduced-form asset-price constant.",
     read: (request) => request.model.assetPriceInflationPassThrough,
@@ -470,18 +494,29 @@ export interface UncertaintyInteraction {
   readonly direction: "positive" | "negative" | "flat";
 }
 
+export interface UncertaintyCorrelationCheck {
+  readonly group: string;
+  readonly leftParameterId: string;
+  readonly rightParameterId: string;
+  readonly expectedDirection: "positive" | "negative";
+  readonly observedCorrelation: number;
+}
+
 export interface UncertaintyAnalysis {
   readonly schemaVersion: typeof SCENARIO_SCHEMA_VERSION;
   readonly modelVersion: typeof UNCERTAINTY_MODEL_VERSION;
   readonly options: UncertaintyOptions;
   readonly note: string;
   readonly runs: number;
+  readonly populationSeeds: readonly number[];
   readonly constraintChecks: {
     readonly borrowPlusSellAtMostOne: true;
     readonly allocationSharesValid: true;
     readonly fiscalAndLedgerRunsCompleted: number;
   };
   readonly sampledParameters: readonly UncertaintyParameterMetadata[];
+  readonly correlationMethod: "rank-reordered-latin-hypercube-factor";
+  readonly correlationChecks: readonly UncertaintyCorrelationCheck[];
   readonly fixedAssumptions: readonly FixedUncertaintyAssumption[];
   readonly verdictFrequencies: Readonly<
     Record<"beneficial" | "mixed" | "harmful", { readonly count: number; readonly share: number }>
@@ -491,6 +526,7 @@ export interface UncertaintyAnalysis {
   readonly groups: readonly UncertaintyGroupBand[];
   readonly influenceTarget: "bottom50PurchasingPowerChange";
   readonly influenceMethod: "absolute-standardized-regression-coefficient";
+  readonly populationInfluenceMethod: "categorical-correlation-ratio" | null;
   readonly interactionMethod: "pair-product-partial-correlation-after-main-effects";
   readonly influences: readonly UncertaintyInfluence[];
   readonly interactions: readonly UncertaintyInteraction[];
@@ -602,102 +638,100 @@ export const runUncertaintyAnalysis = (
   const baseRequest = normalizeComparisonRequest(request);
   const metadata = parameterMetadata(baseRequest);
   const random = mulberry32(options.seed);
-  const uniforms = PARAMETER_SPECS.map(() => latinHypercubeColumn(options.draws, random));
+  const uniforms = correlatedLatinHypercubeColumns(PARAMETER_SPECS, options.draws, random);
   const populationCount = options.populationMode === "combined"
     ? Math.min(options.populationReplicates, options.draws)
     : 1;
-  const populations = Array.from({ length: populationCount }, (_, index) => {
-    const populationRequest = {
-      ...baseRequest,
-      seed: options.populationMode === "fixed"
-        ? baseRequest.seed
-        : derivePopulationSeed(options.seed, index),
-    };
-    return {
-      seed: populationRequest.seed,
-      households: buildCalibratedPopulation(populationRequest),
-    };
-  });
+  const populationSeeds = Array.from({ length: populationCount }, (_, index) =>
+    options.populationMode === "fixed"
+      ? baseRequest.seed
+      : derivePopulationSeed(options.seed, index));
 
   const records: DrawRecord[] = [];
   const progressEvery = Math.max(1, Math.ceil(options.draws / 50));
+  let completed = 0;
   hooks.onProgress?.({ completed: 0, total: options.draws, percent: 0, phase: "sampling" });
-  for (let draw = 0; draw < options.draws; draw += 1) {
+  // Build one population at a time and run only its assigned draws before
+  // releasing it. This bounds memory at O(sampleSize), not O(sampleSize × seeds).
+  for (let populationReplicate = 0; populationReplicate < populationCount; populationReplicate += 1) {
     if (hooks.shouldCancel?.()) throw new UncertaintyCancelledError();
-    let candidate = baseRequest;
-    for (let parameterIndex = 0; parameterIndex < PARAMETER_SPECS.length; parameterIndex += 1) {
-      const spec = PARAMETER_SPECS[parameterIndex];
-      const column = uniforms[parameterIndex];
-      const meta = metadata[parameterIndex];
-      if (!spec || !column || !meta) throw new Error("Uncertainty sampler metadata mismatch.");
-      const uniform = column[draw];
-      if (uniform === undefined) throw new Error("Uncertainty sampler draw missing.");
-      candidate = spec.apply(candidate, triangularQuantile(uniform, meta.low, meta.base, meta.high));
-    }
-    candidate = enforceJointConstraints(candidate);
-    if (candidate.behavior.borrowShare + candidate.behavior.sellShare > 1 + 1e-12) {
-      throw new Error("Uncertainty draw violated the borrow-plus-sell constraint.");
-    }
-    if (
-      candidate.ubi.directCashShare < 0 ||
-      candidate.ubi.directCashShare > 1 ||
-      candidate.ubi.administrativeShare < 0 ||
-      candidate.ubi.administrativeShare > 0.5
-    ) {
-      throw new Error("Uncertainty draw violated a program-allocation constraint.");
-    }
-    const populationReplicate = draw % populationCount;
-    const population = populations[populationReplicate];
-    if (!population) throw new Error("Uncertainty population replicate missing.");
-    candidate = { ...candidate, seed: population.seed };
-    const projection = runComparisonWithPopulation(candidate, population.households).projection;
-    const parameterValues = PARAMETER_SPECS.map((spec) => spec.read(candidate));
-    const groups = new Map<WealthGroupOutcomeId, number>();
-    for (const group of projection.groupOutcomes) {
-      const value = group.primaryMetric === "purchasing-power"
-        ? group.purchasingPowerChange
-        : group.realWealthChange;
-      groups.set(group.id, value ?? 0);
-    }
-    records.push({
-      parameterValues,
-      populationReplicate,
-      verdict: projection.verdict.rating,
-      metrics: [
-        projection.annualFlows.taxCollected,
-        projection.annualFlows.ubiReceived,
-        projection.annualFlows.publicServicesSpending,
-        projection.summary.peakAnnualInflation,
-        projection.summary.bottom50PurchasingPowerChange,
-        projection.summary.top1RealWealthChange,
-        projection.summary.gdpChange,
-        projection.summary.privateTaxDebt,
-        projection.summary.publicBurdenPerHousehold,
-        projection.annualFlows.finalYear.taxCollected,
-        projection.annualFlows.finalYear.ubiReceived,
-        projection.annualFlows.finalYear.publicServicesSpending,
-        projection.annualFlows.finalYear.governmentDeficit,
-        projection.summary.cumulativeM2Change,
-      ],
-      years: projection.years.map((year) => ({
-        year: year.year,
-        annualInflation: year.annualInflation,
-        bottom50PurchasingPowerIndex: year.bottom50PurchasingPowerIndex,
-        top1RealWealthIndex: year.top1RealWealthIndex,
-        gdpIndex: year.gdpIndex,
-        privateTaxDebt: year.privateTaxDebt,
-        governmentDebtAdded: year.governmentDebtAdded,
-      })),
-      groups,
-    });
-    const completed = draw + 1;
-    if (completed % progressEvery === 0 || completed === options.draws) {
-      hooks.onProgress?.({
-        completed,
-        total: options.draws,
-        percent: completed / options.draws,
-        phase: "sampling",
+    const populationSeed = populationSeeds[populationReplicate];
+    if (populationSeed === undefined) throw new Error("Uncertainty population seed missing.");
+    const populationRequest = { ...baseRequest, seed: populationSeed };
+    const households = buildCalibratedPopulation(populationRequest);
+    for (let draw = populationReplicate; draw < options.draws; draw += populationCount) {
+      if (hooks.shouldCancel?.()) throw new UncertaintyCancelledError();
+      let candidate = baseRequest;
+      for (let parameterIndex = 0; parameterIndex < PARAMETER_SPECS.length; parameterIndex += 1) {
+        const spec = PARAMETER_SPECS[parameterIndex];
+        const column = uniforms[parameterIndex];
+        const meta = metadata[parameterIndex];
+        if (!spec || !column || !meta) throw new Error("Uncertainty sampler metadata mismatch.");
+        const uniform = column[draw];
+        if (uniform === undefined) throw new Error("Uncertainty sampler draw missing.");
+        candidate = spec.apply(candidate, triangularQuantile(uniform, meta.low, meta.base, meta.high));
+      }
+      candidate = enforceJointConstraints({ ...candidate, seed: populationSeed });
+      if (candidate.behavior.borrowShare + candidate.behavior.sellShare > 1 + 1e-12) {
+        throw new Error("Uncertainty draw violated the borrow-plus-sell constraint.");
+      }
+      if (
+        candidate.ubi.directCashShare < 0 ||
+        candidate.ubi.directCashShare > 1 ||
+        candidate.ubi.administrativeShare < 0 ||
+        candidate.ubi.administrativeShare > 0.5
+      ) {
+        throw new Error("Uncertainty draw violated a program-allocation constraint.");
+      }
+      const projection = runComparisonWithPopulation(candidate, households).projection;
+      const parameterValues = PARAMETER_SPECS.map((spec) => spec.read(candidate));
+      const groups = new Map<WealthGroupOutcomeId, number>();
+      for (const group of projection.groupOutcomes) {
+        const value = group.primaryMetric === "purchasing-power"
+          ? group.purchasingPowerChange
+          : group.realWealthChange;
+        groups.set(group.id, value ?? 0);
+      }
+      records.push({
+        parameterValues,
+        populationReplicate,
+        verdict: projection.verdict.rating,
+        metrics: [
+          projection.annualFlows.taxCollected,
+          projection.annualFlows.ubiReceived,
+          projection.annualFlows.publicServicesSpending,
+          projection.summary.peakAnnualInflation,
+          projection.summary.bottom50PurchasingPowerChange,
+          projection.summary.top1RealWealthChange,
+          projection.summary.gdpChange,
+          projection.summary.privateTaxDebt,
+          projection.summary.publicBurdenPerHousehold,
+          projection.annualFlows.finalYear.taxCollected,
+          projection.annualFlows.finalYear.ubiReceived,
+          projection.annualFlows.finalYear.publicServicesSpending,
+          projection.annualFlows.finalYear.governmentDeficit,
+          projection.summary.cumulativeM2Change,
+        ],
+        years: projection.years.map((year) => ({
+          year: year.year,
+          annualInflation: year.annualInflation,
+          bottom50PurchasingPowerIndex: year.bottom50PurchasingPowerIndex,
+          top1RealWealthIndex: year.top1RealWealthIndex,
+          gdpIndex: year.gdpIndex,
+          privateTaxDebt: year.privateTaxDebt,
+          governmentDebtAdded: year.governmentDebtAdded,
+        })),
+        groups,
       });
+      completed += 1;
+      if (completed % progressEvery === 0 || completed === options.draws) {
+        hooks.onProgress?.({
+          completed,
+          total: options.draws,
+          percent: completed / options.draws,
+          phase: "sampling",
+        });
+      }
     }
   }
   hooks.onProgress?.({
@@ -711,8 +745,9 @@ export const runUncertaintyAnalysis = (
   const influenceInputs = metadata.map((_parameter, index) =>
     records.map((record) => record.parameterValues[index] ?? 0));
   const influenceMetadata: UncertaintyParameterMetadata[] = [...metadata];
+  const influenceResult = globalInfluence(influenceInputs, metadata, outcome);
+  let influences = [...influenceResult.influences];
   if (options.populationMode === "combined") {
-    influenceInputs.push(records.map((record) => record.populationReplicate));
     influenceMetadata.push({
       id: "population-seed",
       label: "Synthetic-population seed",
@@ -723,27 +758,34 @@ export const runUncertaintyAnalysis = (
       high: populationCount - 1,
       distribution: "seed-replicates",
       correlationGroup: null,
+      correlationLoading: null,
       kind: "empirical",
       sampled: true,
       source: `${populationCount} deterministic population replicates derived from the ensemble seed.`,
       sourceUrl: SOURCE_URL_BY_GROUP.population ?? null,
     });
+    influences.push(categoricalPopulationInfluence(records, outcome, populationCount));
+    influences.sort((left, right) => right.score - left.score);
+    influences = influences.slice(0, 10);
   }
-  const influenceResult = globalInfluence(influenceInputs, influenceMetadata, outcome);
   const analysis: UncertaintyAnalysis = {
     schemaVersion: SCENARIO_SCHEMA_VERSION,
     modelVersion: UNCERTAINTY_MODEL_VERSION,
     options,
     note:
       "These are assumption distributions, not statistical confidence intervals or a forecast. " +
-      "Public-service value currently uses dollars spent as a transparent proxy.",
+      "Declared structural dependencies use rank-factor loadings, and public-service value " +
+      "currently uses dollars spent as a transparent proxy.",
     runs: records.length,
+    populationSeeds,
     constraintChecks: {
       borrowPlusSellAtMostOne: true,
       allocationSharesValid: true,
       fiscalAndLedgerRunsCompleted: records.length,
     },
     sampledParameters: influenceMetadata,
+    correlationMethod: "rank-reordered-latin-hypercube-factor",
+    correlationChecks: summarizeCorrelationChecks(records, metadata),
     fixedAssumptions: fixedAssumptions(baseRequest),
     verdictFrequencies: verdictFrequencies(records),
     metrics: METRIC_DEFINITIONS.map((metric, index) => ({
@@ -754,8 +796,11 @@ export const runUncertaintyAnalysis = (
     groups: summarizeGroups(records),
     influenceTarget: "bottom50PurchasingPowerChange",
     influenceMethod: "absolute-standardized-regression-coefficient",
+    populationInfluenceMethod: options.populationMode === "combined"
+      ? "categorical-correlation-ratio"
+      : null,
     interactionMethod: "pair-product-partial-correlation-after-main-effects",
-    influences: influenceResult.influences,
+    influences,
     interactions: influenceResult.interactions,
   };
   hooks.onProgress?.({
@@ -782,6 +827,7 @@ const parameterMetadata = (
       high: Math.max(spec.high, base),
       distribution: "triangular",
       correlationGroup: spec.correlationGroup,
+      correlationLoading: spec.correlationLoading,
       kind: spec.kind,
       sampled: true,
       source: spec.source,
@@ -923,6 +969,68 @@ const verdictFrequencies = (
     beneficial: { count: count.beneficial, share: count.beneficial / total },
     mixed: { count: count.mixed, share: count.mixed / total },
     harmful: { count: count.harmful, share: count.harmful / total },
+  };
+};
+
+const summarizeCorrelationChecks = (
+  records: readonly DrawRecord[],
+  metadata: readonly UncertaintyParameterMetadata[],
+): readonly UncertaintyCorrelationCheck[] => {
+  const checks: UncertaintyCorrelationCheck[] = [];
+  for (let left = 0; left < metadata.length; left += 1) {
+    for (let right = left + 1; right < metadata.length; right += 1) {
+      const leftMeta = metadata[left];
+      const rightMeta = metadata[right];
+      if (
+        !leftMeta?.correlationGroup ||
+        leftMeta.correlationGroup !== rightMeta?.correlationGroup ||
+        leftMeta.correlationLoading === null ||
+        rightMeta.correlationLoading === null
+      ) continue;
+      const observedCorrelation = correlation(
+        standardize(records.map((record) => record.parameterValues[left] ?? 0)),
+        standardize(records.map((record) => record.parameterValues[right] ?? 0)),
+      );
+      checks.push({
+        group: leftMeta.correlationGroup,
+        leftParameterId: leftMeta.id,
+        rightParameterId: rightMeta.id,
+        expectedDirection:
+          leftMeta.correlationLoading * rightMeta.correlationLoading >= 0
+            ? "positive"
+            : "negative",
+        observedCorrelation,
+      });
+    }
+  }
+  return checks;
+};
+
+const categoricalPopulationInfluence = (
+  records: readonly DrawRecord[],
+  outcome: readonly number[],
+  populationCount: number,
+): UncertaintyInfluence => {
+  const overallMean = outcome.reduce((sum, value) => sum + value, 0) /
+    Math.max(1, outcome.length);
+  let between = 0;
+  let total = 0;
+  for (let replicate = 0; replicate < populationCount; replicate += 1) {
+    const values = records
+      .map((record, index) => ({ record, value: outcome[index] ?? 0 }))
+      .filter(({ record }) => record.populationReplicate === replicate)
+      .map(({ value }) => value);
+    if (values.length === 0) continue;
+    const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+    between += values.length * (mean - overallMean) ** 2;
+  }
+  for (const value of outcome) total += (value - overallMean) ** 2;
+  return {
+    parameterId: "population-seed",
+    label: "Synthetic-population seed",
+    score: total <= Number.EPSILON ? 0 : Math.sqrt(Math.min(1, between / total)),
+    // A categorical seed has no meaningful positive/negative ordering.
+    direction: "flat",
   };
 };
 
@@ -1096,8 +1204,62 @@ const latinHypercubeColumn = (draws: number, random: () => number): readonly num
   return strata.map((stratum) => (stratum + random()) / draws);
 };
 
-const derivePopulationSeed = (seed: number, replicate: number): number =>
-  (Math.imul(seed ^ 0x9e3779b9, replicate + 1) >>> 0) - 0x80000000;
+const correlatedLatinHypercubeColumns = (
+  specs: readonly ParameterSpec[],
+  draws: number,
+  random: () => number,
+): readonly (readonly number[])[] => {
+  const values = specs.map(() => latinHypercubeColumn(draws, random));
+  const sharedByGroup = new Map<string, readonly number[]>();
+  return specs.map((spec, index) => {
+    const valueColumn = values[index];
+    if (!valueColumn) throw new Error("Uncertainty Latin-hypercube column missing.");
+    if (!spec.correlationGroup || spec.correlationLoading === null) return valueColumn;
+    let shared = sharedByGroup.get(spec.correlationGroup);
+    if (!shared) {
+      shared = latinHypercubeColumn(draws, random);
+      sharedByGroup.set(spec.correlationGroup, shared);
+    }
+    const noise = latinHypercubeColumn(draws, random);
+    return rankReorderedColumn(valueColumn, shared, noise, spec.correlationLoading);
+  });
+};
+
+const rankReorderedColumn = (
+  values: readonly number[],
+  shared: readonly number[],
+  noise: readonly number[],
+  loading: number,
+): readonly number[] => {
+  const residualLoading = Math.sqrt(Math.max(0, 1 - loading ** 2));
+  const orderedDraws = values.map((_value, draw) => ({
+    draw,
+    score:
+      loading * logitScore(shared[draw] ?? 0.5) +
+      residualLoading * logitScore(noise[draw] ?? 0.5),
+  })).sort((left, right) => left.score - right.score || left.draw - right.draw);
+  const orderedValues = [...values].sort((left, right) => left - right);
+  const result = Array.from({ length: values.length }, () => 0);
+  orderedDraws.forEach(({ draw }, rank) => {
+    result[draw] = orderedValues[rank] ?? 0;
+  });
+  return result;
+};
+
+const logitScore = (value: number): number => {
+  const clamped = Math.min(1 - 1e-12, Math.max(1e-12, value));
+  return Math.log(clamped) - Math.log1p(-clamped);
+};
+
+const derivePopulationSeed = (seed: number, replicate: number): number => {
+  // The odd multipliers and xor-shifts form a 32-bit permutation, so distinct
+  // replicate indices cannot collapse to one seed even at adversarial inputs.
+  let value = (seed ^ Math.imul(replicate + 1, 0x9e3779b9)) >>> 0;
+  value = Math.imul(value ^ (value >>> 16), 0x21f0aaad);
+  value = Math.imul(value ^ (value >>> 15), 0x735a2d97);
+  value ^= value >>> 15;
+  return (value >>> 0) - 0x80000000;
+};
 
 const mulberry32 = (seed: number): (() => number) => {
   let state = seed >>> 0;

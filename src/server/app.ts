@@ -122,25 +122,44 @@ const analyzeUncertainty = (
 const MAX_SENSITIVITY_WORKERS = 2;
 const MAX_SENSITIVITY_QUEUE = 16;
 let activeSensitivity = 0;
-const sensitivityWaiters: Array<() => void> = [];
+interface SensitivityWaiter {
+  readonly admit: () => void;
+  readonly cancel: () => void;
+}
+const sensitivityWaiters: SensitivityWaiter[] = [];
 
-const acquireSensitivitySlot = (): Promise<boolean> => {
+const acquireSensitivitySlot = (signal?: AbortSignal): Promise<boolean> => {
+  if (signal?.aborted) return Promise.resolve(false);
   if (activeSensitivity < MAX_SENSITIVITY_WORKERS) {
     activeSensitivity += 1;
     return Promise.resolve(true);
   }
   if (sensitivityWaiters.length >= MAX_SENSITIVITY_QUEUE) return Promise.resolve(false);
-  return new Promise<boolean>((admit) => {
-    sensitivityWaiters.push(() => {
-      activeSensitivity += 1;
-      admit(true);
-    });
+  return new Promise<boolean>((resolveAdmission) => {
+    const waiter: SensitivityWaiter = {
+      admit: () => {
+        signal?.removeEventListener("abort", waiter.cancel);
+        activeSensitivity += 1;
+        resolveAdmission(true);
+      },
+      cancel: () => {
+        const index = sensitivityWaiters.indexOf(waiter);
+        if (index >= 0) sensitivityWaiters.splice(index, 1);
+        resolveAdmission(false);
+      },
+    };
+    signal?.addEventListener("abort", waiter.cancel, { once: true });
+    if (signal?.aborted) {
+      waiter.cancel();
+    } else {
+      sensitivityWaiters.push(waiter);
+    }
   });
 };
 
 const releaseSensitivitySlot = (): void => {
   activeSensitivity -= 1;
-  sensitivityWaiters.shift()?.();
+  sensitivityWaiters.shift()?.admit();
 };
 import { US_BASELINE } from "../simulation/usBaseline.js";
 import { HISTORICAL_BACKTEST } from "../simulation/historicalValidation.js";
@@ -242,9 +261,21 @@ export const createApp = (options: AppOptions = {}): Express => {
       });
       return;
     }
-    const admitted = await acquireSensitivitySlot();
+    const queuedDisconnect = new AbortController();
+    const cancelQueued = () => queuedDisconnect.abort();
+    request.once("aborted", cancelQueued);
+    response.once("close", cancelQueued);
+    const admitted = await acquireSensitivitySlot(queuedDisconnect.signal);
+    request.off("aborted", cancelQueued);
+    response.off("close", cancelQueued);
     if (!admitted) {
-      response.status(503).json({ error: "Sensitivity analysis is busy; retry shortly." });
+      if (!queuedDisconnect.signal.aborted) {
+        response.status(503).json({ error: "Sensitivity analysis is busy; retry shortly." });
+      }
+      return;
+    }
+    if (queuedDisconnect.signal.aborted) {
+      releaseSensitivitySlot();
       return;
     }
     try {
@@ -265,9 +296,28 @@ export const createApp = (options: AppOptions = {}): Express => {
       });
       return;
     }
-    const admitted = await acquireSensitivitySlot();
+    const disconnect = new AbortController();
+    let job: UncertaintyJob | undefined;
+    const cancelIfDisconnected = () => {
+      if (response.writableEnded) return;
+      disconnect.abort();
+      job?.cancel();
+    };
+    request.once("aborted", cancelIfDisconnected);
+    response.once("close", cancelIfDisconnected);
+    const admitted = await acquireSensitivitySlot(disconnect.signal);
     if (!admitted) {
-      response.status(503).json({ error: "Uncertainty analysis is busy; retry shortly." });
+      request.off("aborted", cancelIfDisconnected);
+      response.off("close", cancelIfDisconnected);
+      if (!disconnect.signal.aborted) {
+        response.status(503).json({ error: "Uncertainty analysis is busy; retry shortly." });
+      }
+      return;
+    }
+    if (disconnect.signal.aborted) {
+      request.off("aborted", cancelIfDisconnected);
+      response.off("close", cancelIfDisconnected);
+      releaseSensitivitySlot();
       return;
     }
     const streaming =
@@ -277,16 +327,12 @@ export const createApp = (options: AppOptions = {}): Express => {
       response.type("application/x-ndjson");
       response.flushHeaders();
     }
-    const job = analyzeUncertainty(parsed.value, parsedOptions.value, (progress) => {
+    job = analyzeUncertainty(parsed.value, parsedOptions.value, (progress) => {
       if (streaming && !response.writableEnded) {
         response.write(`${JSON.stringify({ progress })}\n`);
       }
     });
-    const cancelIfDisconnected = () => {
-      if (!response.writableEnded) job.cancel();
-    };
-    request.once("aborted", cancelIfDisconnected);
-    response.once("close", cancelIfDisconnected);
+    if (disconnect.signal.aborted) job.cancel();
     try {
       const result = await job.result;
       if (response.writableEnded) return;
@@ -305,6 +351,8 @@ export const createApp = (options: AppOptions = {}): Express => {
       }
       throw error;
     } finally {
+      request.off("aborted", cancelIfDisconnected);
+      response.off("close", cancelIfDisconnected);
       releaseSensitivitySlot();
     }
   });

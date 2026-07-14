@@ -391,6 +391,30 @@ input.scenario-focus-target, select.scenario-focus-target { border-color: var(--
 .preset-reference-link { margin-left: auto; color: var(--orange); font-size: 0.7rem; font-weight: 750; text-decoration: none; }
 .preset-reference-link:hover { color: var(--green); }
 
+/* Audited definition of a named real-world proposal (issue #40): filing unit,
+   schedule, spending linkage, unmodeled gaps, and model-vs-benchmark revenue. */
+.preset-definition { padding: 16px 0 4px; border-bottom: 1px solid var(--line); font-size: 0.78rem; }
+.preset-def-title { margin: 0 0 10px; font-family: var(--display); font-weight: 500; font-size: 1rem; }
+.preset-def-section { margin: 0 0 12px; }
+.preset-def-heading { margin: 0 0 4px; color: var(--muted); font-size: 0.64rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }
+.preset-def-line { margin: 0 0 4px; line-height: 1.45; }
+.preset-def-muted { color: var(--muted); font-size: 0.72rem; }
+.preset-badge { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 0.64rem; font-weight: 800; letter-spacing: 0.02em; border: 1px solid currentColor; }
+.preset-badge-scope { color: var(--blue); margin-bottom: 6px; }
+.preset-badge-low { color: var(--orange); }
+.preset-badge-high { color: var(--red); }
+.preset-badge-amb { color: var(--gold); }
+.preset-unmodeled { margin: 6px 0 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.preset-unmodeled-item { line-height: 1.4; }
+.preset-unmodeled-note { color: var(--muted); }
+.preset-benchmarks { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 0.72rem; }
+.preset-benchmarks th { text-align: left; padding: 4px 6px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 0.62rem; letter-spacing: 0.04em; text-transform: uppercase; font-weight: 800; }
+.preset-benchmarks td { padding: 5px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.preset-benchmarks a { color: var(--orange); text-decoration: none; font-weight: 700; }
+.preset-benchmarks a:hover { color: var(--green); }
+.preset-benchmark-meta { display: block; color: var(--muted); font-size: 0.62rem; }
+.preset-benchmark-published, .preset-benchmark-model, .preset-benchmark-deviation { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
 .bracket-editor { margin-top: 14px; padding: 12px; border: 1px solid var(--line); background: var(--panel); }
 .bracket-editor-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; }
 .bracket-editor-head span { color: var(--orange); font-size: 0.68rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; }

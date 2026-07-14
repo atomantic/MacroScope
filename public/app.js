@@ -26,6 +26,14 @@ const {
 } = await import(
   versioned("./persona-calculation.js")
 );
+const {
+  POLICY_PRESETS,
+  BIAS_DIRECTION,
+  REVENUE_BASIS,
+  presetFormFields,
+  modelTenYearRevenue,
+  benchmarkDeviation,
+} = await import(versioned("./policy-presets.js"));
 
 const STRATEGIES = ["cash-first", "borrow-first", "sell-first"];
 const LABELS = {
@@ -55,6 +63,7 @@ const syncPresetButtons = () => {
 const setActivePreset = (name) => {
   activePreset = name;
   syncPresetButtons();
+  renderPresetDefinition(name);
 };
 // A/B "Scenario A": a frozen run whose lines ghost onto every chart and whose
 // outcomes anchor the comparison table. pinnedResult holds the computed run;
@@ -1310,7 +1319,192 @@ const render = (result) => {
   renderDetails(result);
   renderPersona(result);
   renderPinComparison();
+  updatePresetBenchmark(result);
 };
+
+// Renders the audited definition of a named real-world proposal into the drawer:
+// filing unit, tax schedule, spending linkage, enforcement, the plan components
+// the model does not yet capture (with the direction each biases revenue), and a
+// table of published revenue benchmarks. Hidden for generic scenarios and the
+// baseline, which carry no proposal metadata. Function declaration (not a const)
+// so it is safe to call from setActivePreset regardless of evaluation order.
+function renderPresetDefinition(name) {
+  const panel = byId("preset-definition");
+  if (!panel) return;
+  const def = POLICY_PRESETS?.[name];
+  if (!def || def.kind === "baseline") {
+    panel.hidden = true;
+    panel.replaceChildren();
+    return;
+  }
+  const el = (tag, className, text) => {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  };
+  const section = (heading, ...children) => {
+    const wrap = el("div", "preset-def-section");
+    wrap.append(el("h5", "preset-def-heading", heading));
+    wrap.append(...children);
+    return wrap;
+  };
+
+  const nodes = [el("h4", "preset-def-title", def.label)];
+
+  nodes.push(
+    section(
+      "Filing unit",
+      el("p", "preset-def-line", `${def.filingUnit} — ${def.filingNote}`),
+    ),
+  );
+  nodes.push(
+    section("Tax schedule", el("p", "preset-def-line", def.scheduleNote)),
+  );
+
+  if (def.assetInclusions.length > 0) {
+    const list = el("ul", "preset-unmodeled");
+    for (const asset of def.assetInclusions) {
+      const li = el("li", "preset-unmodeled-item");
+      li.append(
+        el("strong", null, asset.class),
+        el("span", "preset-unmodeled-note", asset.note ? ` — ${asset.note}` : ""),
+      );
+      list.append(li);
+    }
+    nodes.push(section("Modeled tax base", list));
+  }
+
+  const spending = el("div", "preset-def-section");
+  spending.append(el("span", "preset-badge preset-badge-scope", "Tax side only"));
+  spending.append(el("p", "preset-def-line", def.spending.note));
+  nodes.push(spending);
+
+  if (def.enforcement) {
+    nodes.push(
+      section(
+        "Compliance & enforcement",
+        el("p", "preset-def-line", def.enforcement.planned),
+        el("p", "preset-def-line preset-def-muted", def.enforcement.modeled),
+      ),
+    );
+  }
+
+  if (def.unmodeled.length > 0) {
+    const list = el("ul", "preset-unmodeled");
+    for (const item of def.unmodeled) {
+      const li = el("li", "preset-unmodeled-item");
+      const badgeKind =
+        item.direction === "understates-revenue"
+          ? "preset-badge-low"
+          : item.direction === "overstates-revenue"
+            ? "preset-badge-high"
+            : "preset-badge-amb";
+      const badge = el("span", `preset-badge ${badgeKind}`);
+      badge.title = BIAS_DIRECTION[item.direction] ?? item.direction;
+      badge.textContent = item.component;
+      li.append(badge, el("span", "preset-unmodeled-note", ` — ${item.note}`));
+      list.append(li);
+    }
+    nodes.push(
+      section(
+        "Not yet modeled (definitional gaps)",
+        el(
+          "p",
+          "preset-def-line preset-def-muted",
+          "The engine's base does not capture these plan components; each label shows the direction it biases modeled revenue.",
+        ),
+        list,
+      ),
+    );
+  }
+
+  if (def.benchmarks.length > 0) {
+    const table = el("table", "preset-benchmarks");
+    const thead = el("thead");
+    const headRow = el("tr");
+    for (const label of ["Benchmark", "Published 10-yr", "Model 10-yr", "Deviation"]) {
+      headRow.append(el("th", null, label));
+    }
+    thead.append(headRow);
+    const tbody = el("tbody");
+    for (const bench of def.benchmarks) {
+      const row = el("tr");
+      row.dataset.basis = bench.basis;
+      const nameCell = el("td");
+      const link = bench.url ? el("a", null, bench.label) : el("span", null, bench.label);
+      if (bench.url) {
+        link.href = bench.url;
+        link.target = "_blank";
+        link.rel = "noreferrer";
+      }
+      nameCell.append(link);
+      nameCell.append(
+        el("small", "preset-benchmark-meta", ` ${REVENUE_BASIS[bench.basis] ?? bench.basis} · ${bench.vintage}`),
+      );
+      row.append(nameCell);
+      row.append(el("td", "preset-benchmark-published", compactMoney.format(bench.tenYearRevenue)));
+      row.append(el("td", "preset-benchmark-model", "—"));
+      row.append(el("td", "preset-benchmark-deviation", "—"));
+      tbody.append(row);
+    }
+    table.append(thead, tbody);
+    nodes.push(
+      section(
+        "Model vs. published revenue",
+        el(
+          "p",
+          "preset-def-line preset-def-muted",
+          "Benchmarks are for validation, not tuning targets. The model column fills after the scenario runs.",
+        ),
+        table,
+      ),
+    );
+  }
+
+  if (def.citations.length > 0) {
+    const sources = el("div", "preset-def-section preset-def-sources");
+    sources.append(el("h5", "preset-def-heading", "Sources"));
+    def.citations.forEach((cite, index) => {
+      if (index > 0) sources.append(document.createTextNode(" · "));
+      const link = el("a", null, cite.label);
+      link.href = cite.url;
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      sources.append(link);
+    });
+    nodes.push(sources);
+  }
+
+  panel.replaceChildren(...nodes);
+  panel.hidden = false;
+  // The model column intentionally stays "—" until the run for THIS preset
+  // completes (render() -> updatePresetBenchmark). Filling it from latestResult
+  // here would show the previously-selected preset's revenue against the new
+  // preset's benchmarks until the debounced rerun lands.
+}
+
+// Fills the benchmark table's model column with the just-computed revenue when a
+// named tax-schedule proposal is active. Year-one revenue is the response-adjusted
+// assessment; ten-year revenue is summed from the fiscal projection.
+function updatePresetBenchmark(result) {
+  const def = POLICY_PRESETS?.[activePreset];
+  const panel = byId("preset-definition");
+  if (!panel || panel.hidden || !def || def.kind === "baseline") return;
+  const tenYear = modelTenYearRevenue(result.projection);
+  for (const row of panel.querySelectorAll("tbody tr")) {
+    const bench = def.benchmarks.find((b) => b.basis === row.dataset.basis);
+    if (!bench) continue;
+    const modelCell = row.querySelector(".preset-benchmark-model");
+    const deviationCell = row.querySelector(".preset-benchmark-deviation");
+    if (modelCell) modelCell.textContent = compactMoney.format(tenYear);
+    const deviation = benchmarkDeviation(tenYear, bench.tenYearRevenue);
+    if (deviationCell) {
+      deviationCell.textContent =
+        deviation === null ? "—" : `${deviation > 0 ? "+" : ""}${(deviation * 100).toFixed(0)}%`;
+    }
+  }
+}
 
 const RATING_LABEL = {
   "better-off": "Better off",
@@ -2510,26 +2704,19 @@ const syncTargetControls = () => {
   byId("exemption-label").classList.toggle("is-disabled", bracketsActive || topShareMode);
 };
 
+// Real-world proposals (Warren/Sanders/current-law) derive their compact form
+// fields from the audited definitions in policy-presets.js so the schedule the
+// UI applies can never drift from the definition the reference panel and
+// validation harness describe. Generic invented scenarios stay inline — they are
+// illustrative dials, not published proposals, so they carry no proposal metadata.
 const PRESETS = {
   "top-one": { targetMode: "top-share", topShare: 1, exemption: 10, rate: 1 },
   billionaire: { targetMode: "exemption", topShare: 1, exemption: 1000, rate: 10 },
   "ten-million": { targetMode: "exemption", topShare: 1, exemption: 10, rate: 5 },
   universal: { targetMode: "exemption", topShare: 100, exemption: 0, rate: 1, adultBenefit: 1000, childBenefit: 500, directCashShare: 100 },
-  // Graduated proposals list [thresholdM, ratePct] rows; the shared setPresetFields
-  // body renders them into the bracket editor. current-law clears the editor.
-  "warren-2020": {
-    targetMode: "exemption",
-    exemption: 50,
-    rate: 2,
-    brackets: [[50, 2], [1000, 6]],
-  },
-  "sanders-2020": {
-    targetMode: "exemption",
-    exemption: 32,
-    rate: 1,
-    brackets: [[32, 1], [50, 2], [250, 3], [500, 4], [1000, 5], [2500, 6], [5000, 7], [10000, 8]],
-  },
-  "current-law": { targetMode: "exemption", topShare: 1, exemption: 10, rate: 0, brackets: [] },
+  ...Object.fromEntries(
+    Object.entries(POLICY_PRESETS).map(([name, def]) => [name, presetFormFields(def)]),
+  ),
 };
 
 const setPresetFields = (name) => {

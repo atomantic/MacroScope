@@ -84,6 +84,17 @@ describe("PortOS server", () => {
     expect(shellMarkup).toContain('id="wage-pass-through"');
     expect(shellMarkup).toContain('id="monetary-offset"');
     expect(shellMarkup).toContain('id="model-constants-body"');
+    expect(shellMarkup).toContain(
+      '<dialog class="scenario-drawer" id="scenario-drawer" aria-labelledby="scenario-drawer-title">',
+    );
+    expect(shellMarkup).toContain('aria-controls="scenario-drawer"');
+    expect(shellMarkup).toContain('aria-expanded="false"');
+    expect(shellMarkup).toContain('id="scenario-drawer-close"');
+    expect(shellMarkup).toContain('aria-label="Close scenario editor"');
+    expect(shellMarkup).toContain('id="scenario-drawer-done"');
+    expect(shellMarkup.match(/id="scenario-form"/g)).toHaveLength(1);
+    const shellIds = [...shellMarkup.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]);
+    expect(new Set(shellIds).size).toBe(shellIds.length);
   });
 
   it("validates and runs comparison requests over HTTP", async () => {

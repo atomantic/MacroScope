@@ -206,6 +206,58 @@ describe("PortOS server", () => {
     });
   });
 
+  it("streams progress and returns joint uncertainty bands over HTTP", async () => {
+    const app = createApp();
+    const server = app.listen(0, "127.0.0.1");
+    servers.push(server);
+    await new Promise<void>((resolve) => server.once("listening", () => resolve()));
+    const port = (server.address() as AddressInfo).port;
+    const origin = `http://127.0.0.1:${port}`;
+    const defaults = await fetch(`${origin}/api/scenarios/default`).then((response) =>
+      response.json(),
+    );
+    const body = {
+      request: { ...defaults, sampleSize: 100, representedHouseholds: 1_000 },
+      options: { draws: 32, seed: 101, populationMode: "fixed", populationReplicates: 4 },
+    };
+
+    const jsonResponse = await fetch(`${origin}/api/scenarios/uncertainty`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body),
+    });
+    expect(jsonResponse.status).toBe(200);
+    const analysis = await jsonResponse.json();
+    expect(analysis.runs).toBe(32);
+    expect(analysis.metrics.length).toBeGreaterThan(0);
+
+    const streamResponse = await fetch(`${origin}/api/scenarios/uncertainty`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "Application/X-NDJSON",
+      },
+      body: JSON.stringify(body),
+    });
+    expect(streamResponse.status).toBe(200);
+    const messages = (await streamResponse.text())
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    expect(messages.some((message) => message.progress?.completed === 0)).toBe(true);
+    expect(messages.at(-1)?.result.runs).toBe(32);
+
+    const invalidResponse = await fetch(`${origin}/api/scenarios/uncertainty`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...body, options: { ...body.options, draws: 2 } }),
+    });
+    expect(invalidResponse.status).toBe(400);
+    expect(await invalidResponse.json()).toMatchObject({
+      error: "Invalid uncertainty request.",
+    });
+  });
+
   it("runs the engine-backed comparison deterministically", () => {
     expect(createDemoComparison()).toEqual(createDemoComparison());
   });

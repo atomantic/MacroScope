@@ -1,0 +1,249 @@
+import { describe, expect, it, vi } from "vitest";
+import {
+  DEFAULT_COMPARISON_REQUEST,
+  DEFAULT_UNCERTAINTY_OPTIONS,
+  analyzeUncertainty,
+  parseUncertaintyOptions,
+  runUncertaintyAnalysis,
+  type ComparisonRequestV1,
+  type UncertaintyOptions,
+} from "../src/index.js";
+
+const request: ComparisonRequestV1 = {
+  ...DEFAULT_COMPARISON_REQUEST,
+  sampleSize: 100,
+  representedHouseholds: 1_000,
+};
+
+const options: UncertaintyOptions = {
+  ...DEFAULT_UNCERTAINTY_OPTIONS,
+  draws: 32,
+  seed: 987_654,
+  populationMode: "fixed",
+};
+
+describe("joint uncertainty analysis", () => {
+  it("replays exactly with the same request, seed, and model version", () => {
+    const first = runUncertaintyAnalysis(request, options);
+    const second = runUncertaintyAnalysis(request, options);
+    expect(second).toStrictEqual(first);
+    expect(first.modelVersion).toBe("joint-uncertainty-v1");
+    expect(first.runs).toBe(options.draws);
+  });
+
+  it("reports ordered percentile bands, verdict frequencies, and bounded output", () => {
+    const analysis = runUncertaintyAnalysis(request, options);
+    const verdictCount = Object.values(analysis.verdictFrequencies)
+      .reduce((sum, frequency) => sum + frequency.count, 0);
+    expect(verdictCount).toBe(options.draws);
+    expect(analysis.years).toHaveLength(11);
+    expect(analysis.years[0]?.year).toBe(0);
+    expect(analysis.years.at(-1)?.year).toBe(10);
+    expect(analysis.groups).toHaveLength(6);
+    expect(analysis.influences.length).toBeGreaterThan(0);
+    expect(analysis.interactions.length).toBeGreaterThan(0);
+    expect(analysis.influenceMethod)
+      .toBe("absolute-standardized-regression-coefficient-with-grouped-financing-axis");
+    expect(analysis.interactionMethod)
+      .toBe("pair-product-partial-correlation-after-main-effects");
+    expect(analysis.correlationMethod)
+      .toBe("rank-reordered-latin-hypercube-factor-with-direction-check");
+    expect(analysis.correlationChecks.length).toBeGreaterThan(0);
+    for (const check of analysis.correlationChecks) {
+      expect(Math.abs(check.observedCorrelation)).toBeGreaterThan(0.15);
+      expect(Math.sign(check.observedCorrelation)).toBe(
+        check.expectedDirection === "positive" ? 1 : -1,
+      );
+    }
+    expect(analysis.influences.every((influence) => Number.isFinite(influence.score))).toBe(true);
+    expect(analysis.influences.some((influence) => influence.parameterId === "borrow-share"))
+      .toBe(false);
+    expect(analysis.influences.some((influence) => influence.parameterId === "sell-share"))
+      .toBe(false);
+    expect(analysis.populationInfluence).toBeNull();
+    expect(analysis.interactions.every((interaction) => interaction.score <= 1)).toBe(true);
+    for (const metric of analysis.metrics) {
+      expect(metric.band.p10).toBeLessThanOrEqual(metric.band.p50);
+      expect(metric.band.p50).toBeLessThanOrEqual(metric.band.p90);
+    }
+    expect(JSON.stringify(analysis).length).toBeLessThan(100_000);
+  });
+
+  it("covers high-leverage families and marks normative choices fixed", () => {
+    const analysis = runUncertaintyAnalysis(request, options);
+    const sampled = new Set(analysis.sampledParameters.map((parameter) => parameter.id));
+    for (const id of [
+      "savings-response",
+      "demand-growth-offset",
+      "avoidance-elasticity",
+      "maximum-collateral-ltv",
+      "housing-supply",
+      "wage-pass-through",
+      "monetary-policy-offset",
+    ]) {
+      expect(sampled.has(id)).toBe(true);
+    }
+    expect(analysis.sampledParameters.some((parameter) => parameter.sourceUrl !== null)).toBe(true);
+    expect(analysis.sampledParameters.find((parameter) => parameter.id === "borrow-share")?.distribution)
+      .toBe("triangular-proposal-with-proportional-closure");
+    expect(analysis.sampledParameters.find((parameter) => parameter.id === "annual-asset-return")?.distribution)
+      .toBe("triangular");
+    const fixed = new Set(analysis.fixedAssumptions.map((assumption) => assumption.id));
+    expect(fixed.has("funding-rule")).toBe(true);
+    expect(fixed.has("wealth-tax-design")).toBe(true);
+    expect(fixed.has("benefit-levels")).toBe(true);
+    expect(fixed.has("direct-cash-share")).toBe(true);
+    expect(fixed.has("administrative-share")).toBe(true);
+    expect(fixed.has("verdict-threshold")).toBe(true);
+    expect(analysis.note).toMatch(/assumption distributions, not statistical confidence intervals/i);
+  });
+
+  it("ranks countermonotonic financing shares as one stable mix axis", () => {
+    const analyses = [64, 128].map((draws) => runUncertaintyAnalysis(request, {
+      ...options,
+      draws,
+      seed: 20_260_713,
+    }));
+    const financing = analyses.map((analysis) =>
+      analysis.influences.find((influence) => influence.parameterId === "borrow-vs-sale-mix"));
+    expect(financing.every((influence) => influence?.direction === "negative")).toBe(true);
+    for (const analysis of analyses) {
+      expect(analysis.influences.some((influence) =>
+        influence.parameterId === "borrow-share" || influence.parameterId === "sell-share"))
+        .toBe(false);
+    }
+  });
+
+  it("preserves declared dependency directions at the minimum draw budget", () => {
+    const analysis = runUncertaintyAnalysis(request, {
+      ...options,
+      draws: 32,
+      seed: 30,
+    });
+    for (const check of analysis.correlationChecks) {
+      expect(Math.sign(check.observedCorrelation)).toBe(
+        check.expectedDirection === "positive" ? 1 : -1,
+      );
+    }
+  });
+
+  it("enforces joint constraints in every completed draw", () => {
+    const analysis = runUncertaintyAnalysis(request, options);
+    expect(analysis.constraintChecks).toEqual({
+      borrowPlusSellAtMostOne: true,
+      allocationSharesValid: true,
+      fiscalAndLedgerRunsCompleted: options.draws,
+      fiscalAndLedgerAuditsPassed: true,
+    });
+  });
+
+  it("rejects an ensemble draw when an underlying strategy audit fails", () => {
+    expect(() => runUncertaintyAnalysis({
+      ...request,
+      wealthTax: {
+        ...request.wealthTax,
+        exemption: 0,
+        rate: 0.2,
+      },
+    }, options)).toThrow(/failed the accounting audit/i);
+  });
+
+  it("separates parameter-only from combined population uncertainty", () => {
+    const combined = runUncertaintyAnalysis(request, {
+      ...options,
+      draws: 128,
+      populationMode: "combined",
+      populationReplicates: 4,
+    });
+    expect(combined.sampledParameters.some((parameter) => parameter.id === "population-seed"))
+      .toBe(true);
+    expect(combined.options.populationMode).toBe("combined");
+    expect(combined.populationDesign).toBe("matched-parameter-draws");
+    expect(combined.parameterDraws).toBe(32);
+    expect(combined.populationInfluenceMethod)
+      .toBe("matched-draw-categorical-correlation-ratio");
+    expect(combined.populationInfluence)
+      .toMatchObject({ direction: "flat" });
+    expect(combined.influences.some((influence) => influence.parameterId === "population-seed"))
+      .toBe(false);
+  });
+
+  it("keeps adversarial derived population seeds distinct without retaining every population", () => {
+    const combined = runUncertaintyAnalysis(request, {
+      ...options,
+      draws: 512,
+      seed: -1_640_531_527,
+      populationMode: "combined",
+      populationReplicates: 16,
+    });
+    expect(combined.populationSeeds).toHaveLength(16);
+    expect(new Set(combined.populationSeeds).size).toBe(16);
+    expect(combined.runs).toBe(512);
+    expect(combined.parameterDraws).toBe(32);
+  });
+
+  it("labels cohort bands and top-share policy metadata with their actual semantics", () => {
+    const analysis = runUncertaintyAnalysis({
+      ...request,
+      wealthTax: {
+        ...request.wealthTax,
+        targetMode: "top-share",
+        topShare: 0.001,
+      },
+    }, options);
+    expect(analysis.groups.find((group) => group.id === "bottom-50-renter")?.metric)
+      .toBe("purchasing-power");
+    expect(analysis.groups.find((group) => group.id === "bottom-50-owner")?.metric)
+      .toBe("real-wealth");
+    expect(analysis.fixedAssumptions.find((assumption) => assumption.id === "wealth-tax-design")?.value)
+      .toMatch(/top 0\.1% of households/i);
+  });
+
+  it("reports progress and validates the run budget", () => {
+    const onProgress = vi.fn();
+    runUncertaintyAnalysis(request, options, { onProgress });
+    expect(onProgress.mock.calls[0]?.[0]).toMatchObject({ completed: 0, phase: "sampling" });
+    expect(onProgress.mock.calls.at(-1)?.[0]).toMatchObject({
+      completed: options.draws,
+      phase: "complete",
+    });
+    expect(parseUncertaintyOptions({ draws: 31 }).errors).toContain(
+      "draws must be a safe integer from 32 to 1000.",
+    );
+    expect(parseUncertaintyOptions({ draws: 1_001 }).value).toBeUndefined();
+    expect(parseUncertaintyOptions({
+      draws: 32,
+      populationMode: "combined",
+      populationReplicates: 8,
+    }).errors).toContain(
+      "combined population uncertainty requires at least 32 matched parameter draws per population seed; increase draws or reduce populationReplicates.",
+    );
+    expect(parseUncertaintyOptions({
+      draws: 1_000,
+      populationMode: "combined",
+      populationReplicates: 16,
+    }).errors).toContain(
+      "combined population uncertainty requires draws to be evenly divisible by populationReplicates so every parameter row is replayed across every population seed.",
+    );
+    expect(parseUncertaintyOptions({
+      draws: 1_000,
+      populationMode: "combined",
+      populationReplicates: 8,
+    }).value).toMatchObject({ draws: 1_000, populationReplicates: 8 });
+    expect(() =>
+      runUncertaintyAnalysis(request, options, { shouldCancel: () => true }))
+      .toThrow("Uncertainty analysis cancelled.");
+  });
+
+  it("uses the same validated implementation through the browser engine", () => {
+    const response = analyzeUncertainty(request, options);
+    expect(response.ok).toBe(true);
+    if (!response.ok) return;
+    expect(response.result).toStrictEqual(runUncertaintyAnalysis(request, options));
+
+    const invalid = analyzeUncertainty(request, { ...options, draws: 2 });
+    expect(invalid.ok).toBe(false);
+    if (invalid.ok) return;
+    expect(invalid.error).toBe("Invalid uncertainty request.");
+  });
+});

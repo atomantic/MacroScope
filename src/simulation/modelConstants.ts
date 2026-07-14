@@ -125,6 +125,9 @@ export const MODEL_CONSTANTS = {
   // "beneficial" conditions, decides the headline rating.
   verdict: {
     harmfulPurchasingPowerDrop: -0.02,
+    // A material output loss is independently harmful even when deflation
+    // temporarily cushions the bottom-half cash purchasing-power measure.
+    harmfulGdpChange: -0.02,
     harmfulPeakInflation: 0.2,
     harmfulPublicBurdenPerHousehold: 50_000,
     beneficialPurchasingPowerGain: 0.02,
@@ -397,6 +400,15 @@ const FIXED_DOCS: readonly ModelConstantDoc[] = [
     value: `${MODEL_CONSTANTS.fiscalSmoothingWindowYears} years`,
     rationale: "Uses available current and trailing revenue to set smoothed outlays.",
     source: "Scenario design assumption.",
+    tunable: false,
+  },
+  {
+    category: "Verdict",
+    label: "Harmful GDP change",
+    value: pct(MODEL_CONSTANTS.verdict.harmfulGdpChange),
+    rationale:
+      "Year-ten output per worker at or below this change is independently harmful.",
+    source: "Author threshold.",
     tunable: false,
   },
   {

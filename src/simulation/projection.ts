@@ -1367,25 +1367,30 @@ const makeVerdict = (input: {
   harmfulPeakInflation: number;
 }): PolicyProjection["verdict"] => {
   const v = MODEL_CONSTANTS.verdict;
-  const harmful =
-    input.bottom50PurchasingPowerChange < v.harmfulPurchasingPowerDrop ||
-    input.peakAnnualInflation >= input.harmfulPeakInflation ||
+  const harmfulPurchasingPower =
+    input.bottom50PurchasingPowerChange < v.harmfulPurchasingPowerDrop;
+  const harmfulGrowth = input.gdpChange <= v.harmfulGdpChange;
+  const harmfulInflation =
+    input.peakAnnualInflation >= input.harmfulPeakInflation;
+  const harmfulDebt =
     input.publicBurdenPerHousehold >= v.harmfulPublicBurdenPerHousehold;
+  const harmful =
+    harmfulPurchasingPower || harmfulGrowth || harmfulInflation || harmfulDebt;
   const beneficial =
     input.bottom50PurchasingPowerChange >= v.beneficialPurchasingPowerGain &&
     input.peakAnnualInflation < v.beneficialPeakInflation &&
     input.publicBurdenPerHousehold < v.beneficialPublicBurdenPerHousehold;
   if (harmful) {
-    // Attribute the harm to its actual driver. Only call it growth-driven when
-    // inflation stays in the "stable" regime (below the 5% "elevated" band, i.e.
-    // essentially at baseline) and debt is low — so an elevated inflation that
-    // is itself pushing buying power under the harmful line isn't misreported as
-    // a growth effect just because GDP also dipped. In that quiet-macro corner a
-    // materially negative GDP path is the credible cause of the harm.
+    // Attribute the harm to its actual driver. A harmful GDP path gets the
+    // growth explanation when inflation and debt do not independently cross
+    // their harmful thresholds. If purchasing power also crosses its threshold
+    // during elevated inflation, retain the macro-risk explanation rather than
+    // claiming growth is the sole driver.
     const growthDriven =
-      input.peakAnnualInflation < 0.05 &&
-      input.publicBurdenPerHousehold < 10_000 &&
-      input.gdpChange <= -0.02;
+      harmfulGrowth &&
+      !harmfulInflation &&
+      !harmfulDebt &&
+      (input.peakAnnualInflation < 0.05 || !harmfulPurchasingPower);
     return {
       rating: "harmful",
       headline: growthDriven

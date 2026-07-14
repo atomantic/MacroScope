@@ -696,6 +696,13 @@ describe("ten-year projection dynamics", () => {
       behavior: { ...nationalRequest().behavior, savingsResponseElasticity: 0.8 },
     });
     expect(result.projection.summary.gdpChange).toBeLessThan(-0.02);
+    // Instrument-level DFA calibration makes the large Treasury drain
+    // deflationary enough to keep this cash measure outside its harmful band.
+    // The verdict must therefore recognize the independently harmful output
+    // loss instead of passing only because purchasing power also crossed -2%.
+    expect(result.projection.summary.bottom50PurchasingPowerChange).toBeGreaterThan(
+      -0.02,
+    );
     expect(result.projection.summary.peakAnnualInflation).toBeLessThan(0.2);
     expect(result.projection.summary.publicBurdenPerHousehold).toBeLessThan(50_000);
     expect(result.projection.verdict.rating).toBe("harmful");

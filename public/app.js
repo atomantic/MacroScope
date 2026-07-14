@@ -545,12 +545,14 @@ const copyScenarioLink = async () => {
   );
 };
 
-let toastTimer = null;
+let globalToastTimer = null;
+let drawerFeedbackTimer = null;
 const showToast = (message, isError = false) => {
-  clearTimeout(toastTimer);
   const drawer = byId("scenario-drawer");
   const drawerFeedback = byId("drawer-action-feedback");
   const container = byId("toast-container");
+  clearTimeout(globalToastTimer);
+  clearTimeout(drawerFeedbackTimer);
   container?.replaceChildren();
   if (drawerFeedback) {
     drawerFeedback.hidden = true;
@@ -561,7 +563,7 @@ const showToast = (message, isError = false) => {
     drawerFeedback.textContent = message;
     drawerFeedback.classList.toggle("error", isError);
     drawerFeedback.hidden = false;
-    toastTimer = setTimeout(() => {
+    drawerFeedbackTimer = setTimeout(() => {
       drawerFeedback.hidden = true;
       drawerFeedback.textContent = "";
       drawerFeedback.classList.remove("error");
@@ -573,7 +575,7 @@ const showToast = (message, isError = false) => {
   toast.className = `toast${isError ? " error" : ""}`;
   container.replaceChildren(toast);
   requestAnimationFrame(() => toast.classList.add("visible"));
-  toastTimer = setTimeout(() => {
+  globalToastTimer = setTimeout(() => {
     toast.classList.remove("visible");
     setTimeout(() => toast.remove(), 300);
   }, 3600);
@@ -775,7 +777,7 @@ const runScenario = async ({ auto = false } = {}) => {
 // it settles, so rapid slider drags can never pile up requests (last-wins).
 const dashState = { running: false, pending: false, promise: null };
 
-const setRecalculating = (on) => {
+const setRecalculating = (on, succeeded = true) => {
   const indicator = byId("recalc-indicator");
   if (indicator) indicator.hidden = !on;
   byId("scenario-form")?.classList.toggle("is-recalculating", on);
@@ -784,13 +786,19 @@ const setRecalculating = (on) => {
   const liveStatus = byId("scenario-recalc-status");
   if (trigger) {
     trigger.classList.toggle("is-recalculating", on);
+    trigger.classList.toggle("has-recalc-error", !on && !succeeded);
     trigger.setAttribute("aria-busy", String(on));
   }
-  if (triggerStatus) triggerStatus.hidden = !on;
+  if (triggerStatus) {
+    triggerStatus.textContent = on ? "Recalculating…" : "Update failed — open to resolve";
+    triggerStatus.hidden = !on && succeeded;
+  }
   if (liveStatus) {
     liveStatus.textContent = on
       ? "Scenario results are recalculating."
-      : "Scenario results updated.";
+      : succeeded
+        ? "Scenario results updated."
+        : "Scenario update failed. Open the scenario editor to resolve the error.";
   }
 };
 
@@ -808,7 +816,7 @@ const dashboardRerun = () => {
       ok = await runScenario({ auto: true });
     } while (dashState.pending);
     dashState.running = false;
-    setRecalculating(false);
+    setRecalculating(false, ok);
     return ok;
   })();
   return dashState.promise;
@@ -859,13 +867,18 @@ const finishDrawerClose = () => {
   trigger?.setAttribute("aria-expanded", "false");
   unlockDashboardScroll();
   if (drawerFeedback) {
-    clearTimeout(toastTimer);
+    clearTimeout(drawerFeedbackTimer);
     drawerFeedback.hidden = true;
     drawerFeedback.textContent = "";
     drawerFeedback.classList.remove("error");
   }
   if (drawerState.restoreFocus) {
-    const focusTarget = returnFocus?.isConnected ? returnFocus : trigger;
+    const canReceiveFocus =
+      returnFocus?.isConnected &&
+      returnFocus !== document.body &&
+      typeof returnFocus.focus === "function" &&
+      returnFocus.tabIndex >= 0;
+    const focusTarget = canReceiveFocus ? returnFocus : trigger;
     requestAnimationFrame(() => focusTarget?.focus({ preventScroll: true }));
   }
   drawerState.returnFocus = null;

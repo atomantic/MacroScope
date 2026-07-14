@@ -285,6 +285,7 @@ body.scenario-drawer-open { position: fixed; inset: 0; width: 100%; overflow: hi
 .scenario-drawer-trigger-label { font-size: 0.82rem; font-weight: 800; }
 .scenario-drawer-trigger-status { color: #cde5d4; font-size: 0.64rem; font-weight: 700; }
 .scenario-drawer-trigger.is-recalculating { border-color: var(--green); }
+.scenario-drawer-trigger.has-recalc-error { border-color: var(--red); background: var(--red); }
 body[data-view="story"] .scenario-drawer-trigger { display: none; }
 
 .scenario-drawer {

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_COMPARISON_REQUEST,
+  POPULATION_FLOW_CALIBRATION,
+  US_BASELINE,
   runComparison,
   type ComparisonRequestV1,
 } from "../src/index.js";
@@ -39,6 +41,43 @@ describe("vertical-slice scenario runner", () => {
     expect(sell.markets.equityPriceChange).toBeLessThan(0);
     expect(cash.distribution.deciles).toHaveLength(10);
     expect(cash.macro.sectors).toHaveLength(8);
+    const scale = request.representedHouseholds / US_BASELINE.households;
+    expect(first.population.representedAdults).toBeCloseTo(
+      POPULATION_FLOW_CALIBRATION.adults * scale,
+      7,
+    );
+    expect(first.population.representedChildren).toBeCloseTo(
+      POPULATION_FLOW_CALIBRATION.children * scale,
+      7,
+    );
+    expect(first.population.aggregateAnnualIncome).toBeCloseTo(
+      US_BASELINE.annualPersonalIncome * scale,
+      -2,
+    );
+    expect(first.population.baselineAnnualConsumption).toBeCloseTo(
+      US_BASELINE.annualPce * scale,
+      -2,
+    );
+    expect(
+      cash.macro.sectors.reduce((total, sector) => total + sector.baselineDemand, 0),
+    ).toBeCloseTo(first.population.baselineAnnualConsumption, -2);
+    for (const sector of cash.macro.sectors) {
+      expect(sector.baselineDemand).toBeCloseTo(
+        first.population.baselineAnnualConsumption *
+          POPULATION_FLOW_CALIBRATION.consumptionSectors.shares[sector.sector],
+        -2,
+      );
+    }
+    expect(cash.fiscal.requestedUbi).toBeCloseTo(
+      12 *
+        (POPULATION_FLOW_CALIBRATION.adults *
+          scale *
+          request.ubi.adultMonthlyBenefit +
+          POPULATION_FLOW_CALIBRATION.children *
+            scale *
+            request.ubi.childMonthlyBenefit),
+      -2,
+    );
     expect(first.population.aggregateNetWorth).toBeCloseTo(
       174_009_620_000_000 * (request.representedHouseholds / 135_134_121),
       -2,
@@ -50,6 +89,48 @@ describe("vertical-slice scenario runner", () => {
       cash.macro.sectors.reduce((total, sector) => total + sector.demandChange, 0),
     ).toBeCloseTo(cash.macro.firstYearConsumptionDemandChange, 4);
     expect(Math.abs(sell.accounting.housingQuantityResidual)).toBeLessThan(0.01);
+  });
+
+  it("scales transfer demand pressure against the fixed calibrated PCE denominator", () => {
+    const request = compactRequest();
+    const run = (benefitMultiplier: number) =>
+      runComparison({
+        ...request,
+        ubi: {
+          ...request.ubi,
+          adultMonthlyBenefit: 100 * benefitMultiplier,
+          childMonthlyBenefit: 50 * benefitMultiplier,
+          fundingRule: "fixed",
+          administrativeShare: 0,
+          directCashShare: 1,
+        },
+      });
+    const single = run(1);
+    const double = run(2);
+    const triple = run(3);
+    const singleCash = single.strategies["cash-first"];
+    const doubleCash = double.strategies["cash-first"];
+    const tripleCash = triple.strategies["cash-first"];
+
+    expect(double.population.baselineAnnualConsumption).toBeCloseTo(
+      single.population.baselineAnnualConsumption,
+      -2,
+    );
+    expect(
+      tripleCash.macro.firstYearConsumptionDemandChange -
+        singleCash.macro.firstYearConsumptionDemandChange,
+    ).toBeCloseTo(
+      (doubleCash.macro.firstYearConsumptionDemandChange -
+        singleCash.macro.firstYearConsumptionDemandChange) *
+        2,
+      -2,
+    );
+    expect(
+      tripleCash.macro.demandInflation - singleCash.macro.demandInflation,
+    ).toBeCloseTo(
+      (doubleCash.macro.demandInflation - singleCash.macro.demandInflation) * 2,
+      10,
+    );
   });
 
   it("produces a liquidation cascade only under stressed depth and leverage", () => {
@@ -126,7 +207,7 @@ describe("vertical-slice scenario runner", () => {
       },
       behavior: {
         ...DEFAULT_COMPARISON_REQUEST.behavior,
-        rentPassThrough: 0.7,
+        rentPassThrough: 0.9,
       },
     };
     const active = runComparison({

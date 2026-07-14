@@ -83,11 +83,11 @@ Floating-point comparisons use an explicit tolerance. Production-scale simulatio
 
 ## Vertical-slice population and markets
 
-The interactive runner uses a deterministic weighted sample representing 135.1 million U.S. households. The default run uses 4,000 agents, allocates 80% of them to the bottom 99%, then explicitly oversamples the top 1%, 0.1%, and 0.01%. Wealth-group totals are calibrated to the Federal Reserve Distributional Financial Accounts; within-group joint distributions remain stylized.
+The interactive runner uses a deterministic weighted sample representing 135.1 million U.S. households. The default run uses 4,000 agents, allocates 80% of them to the bottom 99%, then explicitly oversamples the top 1%, 0.1%, and 0.01%. Wealth-group totals are calibrated to the Federal Reserve Distributional Financial Accounts; within-group joint distributions remain stylized. Adult and child counts reconcile to the July 2025 Census resident population, while aggregate personal income and PCE reconcile independently to calendar-year 2025 BEA totals. Full targets, eligibility rules, sector crosswalk, and diagnostics are documented in [POPULATION_FLOW_CALIBRATION.md](POPULATION_FLOW_CALIBRATION.md).
 
 Each comparison reuses the same households for cash-first, borrow-first, and sell-first strategies. Public-equity sales interact with configurable buyer depth and price impact. Falling equity values can breach collateral limits, producing iterative forced sales and loan repayment. Domestic buyers absorb asset quantities, so ownership changes and price revaluation remain distinct. Housing can fund otherwise-unpayable tax liabilities as a slower last-resort transfer, but regional housing price feedback is deferred.
 
-Demand changes are allocated across housing, food, healthcare, transportation, energy, durable goods, discretionary spending, and services. Sector inflation pressure, supply-constraint amplification, and monetary-policy offset are reduced-form assumptions rather than forecasts.
+Demand changes are allocated across housing, food, healthcare, transportation, energy, durable goods, discretionary spending, and services. Baseline sector totals use a BEA/BLS crosswalk whose shares sum to the calibrated PCE total; percentile-varying demand changes preserve the model's distributional shape. Sector inflation pressure, supply-constraint amplification, and monetary-policy offset are reduced-form assumptions rather than forecasts.
 
 ## Owner-renter theory test
 

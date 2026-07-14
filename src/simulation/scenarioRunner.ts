@@ -20,7 +20,11 @@ import {
   householdNetWorth,
   type SyntheticHousehold,
 } from "./population.js";
-import { calibratePopulationToUs } from "./usBaseline.js";
+import {
+  buildPopulationFlowDiagnostics,
+  calibratePopulationToUs,
+  POPULATION_FLOW_CALIBRATION,
+} from "./usBaseline.js";
 import {
   buildPolicyProjection,
   type HouseholdProjectionTaxAssessment,
@@ -185,6 +189,7 @@ export const runComparisonWithPopulation = (
     caveats: [
       "Results are conditional scenarios, not forecasts.",
       "Every modeled asset and liability class is calibrated by wealth group to the Federal Reserve DFA for 2026:Q1; within-group joint distributions remain stylized.",
+      "Adult and child counts match the July 2025 resident population estimate, including group-quarters residents and excluding nonresidents. Personal income and consumption retain their synthetic percentile shapes but reconcile independently to calendar-year 2025 BEA totals.",
       "Equity price impact and inflation are reduced-form assumptions exposed for sensitivity testing.",
       "The current closed economy assumes domestic buyers absorb all equity and housing sales.",
       "Housing sales remain a national, closed-economy transfer channel; the ten-year owner-renter view adds reduced-form price, supply, and rent feedback rather than regional market clearing.",
@@ -334,7 +339,13 @@ const runStrategy = (
   let endingBookHousing = 0;
   let perHouseholdDepositsChange = 0;
   let consumptionDemandChange = 0;
-  const sectorBaseline = emptySectorRecord();
+  const sectorBaseline = Object.fromEntries(
+    SECTORS.map((sector) => [
+      sector,
+      population.baselineAnnualConsumption *
+        POPULATION_FLOW_CALIBRATION.consumptionSectors.shares[sector],
+    ]),
+  ) as Record<ConsumptionSector, number>;
   const sectorChanges = emptySectorRecord();
   const taxCashDemandBySector = emptySectorRecord();
   const scheduledCashDemandNumerator = emptySectorRecord();
@@ -399,11 +410,7 @@ const runStrategy = (
       (receivedUbi - item.cash) * household.marginalPropensityToConsume;
     consumptionDemandChange += consumptionChange * household.weight;
     const shares = consumptionShares(household.percentile);
-    const baselineConsumption =
-      household.annualIncome * baselineConsumptionShare(household.marginalPropensityToConsume);
     for (const sector of SECTORS) {
-      sectorBaseline[sector] +=
-        baselineConsumption * shares[sector] * household.weight;
       sectorChanges[sector] += consumptionChange * shares[sector] * household.weight;
       taxCashDemandBySector[sector] -=
         item.cash *
@@ -759,20 +766,16 @@ const summarizePopulation = (
     households,
     (household) => household.assets.publicEquity,
   ),
+  aggregateAnnualIncome: weightedSum(
+    households,
+    (household) => household.annualIncome,
+  ),
   baselineAnnualConsumption: weightedSum(
     households,
-    (household) =>
-      household.annualIncome *
-      baselineConsumptionShare(household.marginalPropensityToConsume),
+    (household) => household.annualConsumption,
   ),
+  calibration: buildPopulationFlowDiagnostics(households),
 });
-
-// Baseline household consumption as a share of income, rising with the
-// household's marginal propensity to consume (shared by runStrategy and the
-// population summary so both use one calibration).
-const baselineConsumptionShare = (marginalPropensityToConsume: number): number =>
-  MODEL_CONSTANTS.baselineConsumptionIncomeShare +
-  marginalPropensityToConsume * MODEL_CONSTANTS.baselineConsumptionMpcWeight;
 
 const buildWealthTaxPolicy = (
   request: ComparisonRequestV1,

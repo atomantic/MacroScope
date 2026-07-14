@@ -84,9 +84,12 @@ describe("sensitivity tornado analysis", () => {
   });
 
   it("names the smallest single-dial change that flips the verdict when one exists", () => {
-    // A near break-even mixed scenario flips to beneficial as the asset return
-    // rises, so a flip must be reported with a plain-language sentence.
-    const analysis = runSensitivityAnalysis(request());
+    // A 0.5% near break-even mixed scenario flips to beneficial as the asset
+    // return rises, so a flip must be reported with a plain-language sentence.
+    const base = request({
+      wealthTax: { ...DEFAULT_COMPARISON_REQUEST.wealthTax, rate: 0.005 },
+    });
+    const analysis = runSensitivityAnalysis(base);
     expect(analysis.base.verdict).toBe("mixed");
     const flip = analysis.verdictFlip;
     expect(flip).not.toBeNull();
@@ -98,7 +101,7 @@ describe("sensitivity tornado analysis", () => {
     // The reported threshold really does flip the verdict when applied alone.
     const spec = SENSITIVITY_DIALS.find((candidate) => candidate.id === flip.dialId);
     if (!spec) throw new Error("missing flip dial spec");
-    const flipped = runComparison(spec.apply(request(), flip.value));
+    const flipped = runComparison(spec.apply(base, flip.value));
     expect(flipped.projection.verdict.rating).toBe(flip.toVerdict);
   });
 

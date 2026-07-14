@@ -322,19 +322,20 @@ export const createApp = (options: AppOptions = {}): Express => {
     }
     const streaming =
       request.get("accept")?.toLowerCase().includes("application/x-ndjson") ?? false;
-    if (streaming) {
-      response.status(200);
-      response.type("application/x-ndjson");
-      response.flushHeaders();
-    }
-    job = analyzeUncertainty(parsed.value, parsedOptions.value, (progress) => {
-      if (streaming && !response.writableEnded) {
-        response.write(`${JSON.stringify({ progress })}\n`);
-      }
-    });
-    if (disconnect.signal.aborted) job.cancel();
     try {
-      const result = await job.result;
+      const activeJob = analyzeUncertainty(parsed.value, parsedOptions.value, (progress) => {
+        if (streaming && !response.writableEnded) {
+          response.write(`${JSON.stringify({ progress })}\n`);
+        }
+      });
+      job = activeJob;
+      if (disconnect.signal.aborted) activeJob.cancel();
+      if (streaming) {
+        response.status(200);
+        response.type("application/x-ndjson");
+        response.flushHeaders();
+      }
+      const result = await activeJob.result;
       if (response.writableEnded) return;
       if (streaming) {
         response.end(`${JSON.stringify({ result })}\n`);
@@ -344,6 +345,10 @@ export const createApp = (options: AppOptions = {}): Express => {
     } catch (error) {
       if (error instanceof UncertaintyCancelledError || response.destroyed) return;
       if (streaming) {
+        if (!response.headersSent) {
+          response.status(500).json({ error: "Uncertainty analysis failed." });
+          return;
+        }
         response.end(`${JSON.stringify({
           error: "Uncertainty analysis failed.",
         })}\n`);

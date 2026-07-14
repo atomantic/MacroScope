@@ -77,6 +77,10 @@ describe("joint uncertainty analysis", () => {
       expect(sampled.has(id)).toBe(true);
     }
     expect(analysis.sampledParameters.some((parameter) => parameter.sourceUrl !== null)).toBe(true);
+    expect(analysis.sampledParameters.find((parameter) => parameter.id === "borrow-share")?.distribution)
+      .toBe("triangular-proposal-with-proportional-closure");
+    expect(analysis.sampledParameters.find((parameter) => parameter.id === "annual-asset-return")?.distribution)
+      .toBe("triangular");
     const fixed = new Set(analysis.fixedAssumptions.map((assumption) => assumption.id));
     expect(fixed.has("funding-rule")).toBe(true);
     expect(fixed.has("wealth-tax-design")).toBe(true);
@@ -93,7 +97,19 @@ describe("joint uncertainty analysis", () => {
       borrowPlusSellAtMostOne: true,
       allocationSharesValid: true,
       fiscalAndLedgerRunsCompleted: options.draws,
+      fiscalAndLedgerAuditsPassed: true,
     });
+  });
+
+  it("rejects an ensemble draw when an underlying strategy audit fails", () => {
+    expect(() => runUncertaintyAnalysis({
+      ...request,
+      wealthTax: {
+        ...request.wealthTax,
+        exemption: 0,
+        rate: 0.2,
+      },
+    }, options)).toThrow(/failed the accounting audit/i);
   });
 
   it("separates parameter-only from combined population uncertainty", () => {

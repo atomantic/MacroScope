@@ -19,7 +19,11 @@ export const MAX_POPULATION_REPLICATES = 16;
 
 export type UncertaintyPopulationMode = "fixed" | "combined";
 export type UncertaintyKind = "empirical" | "structural" | "normative";
-export type UncertaintyDistribution = "triangular" | "fixed" | "seed-replicates";
+export type UncertaintyDistribution =
+  | "triangular"
+  | "triangular-proposal-with-proportional-closure"
+  | "fixed"
+  | "seed-replicates";
 export type UncertaintyUnit = "share" | "rate" | "elasticity" | "coefficient";
 
 export interface UncertaintyOptions {
@@ -135,9 +139,9 @@ const PARAMETER_SPECS: readonly ParameterSpec[] = [
     low: 0.1,
     high: 0.9,
     correlationGroup: "payment-strategy",
-    correlationLoading: 0.75,
+    correlationLoading: 1,
     kind: "structural",
-    source: "Scenario financing range; constrained jointly with asset sales.",
+    source: "Countermonotonic triangular proposal; if borrowing plus sales still exceeds one, both shares are proportionally projected onto the feasible boundary.",
     read: (request) => request.behavior.borrowShare,
     apply: (request, value) => withBehavior(request, { borrowShare: value }),
   },
@@ -149,9 +153,9 @@ const PARAMETER_SPECS: readonly ParameterSpec[] = [
     low: 0.05,
     high: 0.6,
     correlationGroup: "payment-strategy",
-    correlationLoading: -0.75,
+    correlationLoading: -1,
     kind: "structural",
-    source: "Scenario financing range; constrained jointly with borrowing.",
+    source: "Countermonotonic triangular proposal; if borrowing plus sales still exceeds one, both shares are proportionally projected onto the feasible boundary.",
     read: (request) => request.behavior.sellShare,
     apply: (request, value) => withBehavior(request, { sellShare: value }),
   },
@@ -517,6 +521,7 @@ export interface UncertaintyAnalysis {
     readonly borrowPlusSellAtMostOne: true;
     readonly allocationSharesValid: true;
     readonly fiscalAndLedgerRunsCompleted: number;
+    readonly fiscalAndLedgerAuditsPassed: true;
   };
   readonly sampledParameters: readonly UncertaintyParameterMetadata[];
   readonly correlationMethod: "rank-reordered-latin-hypercube-factor";
@@ -703,7 +708,16 @@ export const runUncertaintyAnalysis = (
       ) {
         throw new Error("Uncertainty draw violated a program-allocation constraint.");
       }
-      const projection = runComparisonWithPopulation(candidate, households).projection;
+      const comparison = runComparisonWithPopulation(candidate, households);
+      const failedAudits = Object.entries(comparison.strategies)
+        .filter(([, strategy]) => !strategy.accounting.passed)
+        .map(([strategy]) => strategy);
+      if (failedAudits.length > 0) {
+        throw new Error(
+          `Uncertainty draw ${runIndex + 1} failed the accounting audit for: ${failedAudits.join(", ")}.`,
+        );
+      }
+      const { projection } = comparison;
       const parameterValues = PARAMETER_SPECS.map((spec) => spec.read(candidate));
       const groups = new Map<WealthGroupOutcomeId, number>();
       for (const group of projection.groupOutcomes) {
@@ -796,7 +810,8 @@ export const runUncertaintyAnalysis = (
     note:
       "These are assumption distributions, not statistical confidence intervals or a forecast. " +
       "Declared structural dependencies use rank-factor loadings; combined runs replay matched " +
-      "parameter draws across population seeds. Public-service value currently uses dollars " +
+      "parameter draws across population seeds. Financing shares use triangular proposals with " +
+      "proportional closure at their joint boundary. Public-service value currently uses dollars " +
       "spent as a transparent proxy.",
     runs: records.length,
     parameterDraws,
@@ -808,6 +823,7 @@ export const runUncertaintyAnalysis = (
       borrowPlusSellAtMostOne: true,
       allocationSharesValid: true,
       fiscalAndLedgerRunsCompleted: records.length,
+      fiscalAndLedgerAuditsPassed: true,
     },
     sampledParameters: influenceMetadata,
     correlationMethod: "rank-reordered-latin-hypercube-factor",
@@ -851,7 +867,9 @@ const parameterMetadata = (
       low: Math.min(spec.low, base),
       base,
       high: Math.max(spec.high, base),
-      distribution: "triangular",
+      distribution: spec.correlationGroup === "payment-strategy"
+        ? "triangular-proposal-with-proportional-closure"
+        : "triangular",
       correlationGroup: spec.correlationGroup,
       correlationLoading: spec.correlationLoading,
       kind: spec.kind,

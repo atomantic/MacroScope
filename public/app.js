@@ -2083,7 +2083,7 @@ const renderUncertainty = (analysis) => {
     `${analysis.note} Seed ${analysis.options.seed}; ${analysis.sampledParameters.length} sampled assumptions; ` +
     `${analysis.fixedAssumptions.length} policy or judgment choices held fixed. ` +
     populationDesign +
-    "Declared dependency groups use rank-factor loadings while preserving each Latin-hypercube marginal. " +
+    "Declared dependency groups use rank-factor loadings; borrowing and sales use triangular proposals with proportional closure at their joint boundary. " +
     "Influence scores are standardized regression coefficients (matched-draw categorical correlation ratio for population seeds); interaction scores partial out linear main effects from both the outcome and each parameter pair.";
   byId("uncertainty-results").hidden = false;
 };

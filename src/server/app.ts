@@ -122,6 +122,7 @@ export const createApp = (options: AppOptions = {}): Express => {
         "three-strategy-comparison",
         "reduced-form-equity-cascade",
         "distributional-deciles",
+        "federal-reserve-dfa-calibration",
         "instrument-level-federal-reserve-dfa-calibration",
         "ten-year-purchasing-power-projection",
         "inflation-and-monetization-stress-test",

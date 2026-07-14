@@ -50,13 +50,20 @@ describe("PortOS server", () => {
 
     expect(health.status).toBe(200);
     expect(await health.json()).toMatchObject({ status: "healthy", service: "macroscope" });
-    expect(await status.json()).toMatchObject({
+    const statusPayload = await status.json();
+    expect(statusPayload).toMatchObject({
       deterministic: true,
       calibration: {
         vintage: "2026:Q1",
         residualAssetClass: { modelClass: "otherAssets", includedInModel: true },
       },
     });
+    expect(statusPayload.implemented).toEqual(
+      expect.arrayContaining([
+        "federal-reserve-dfa-calibration",
+        "instrument-level-federal-reserve-dfa-calibration",
+      ]),
+    );
     expect(backtest.status).toBe(200);
     expect(await backtest.json()).toMatchObject({
       modeledPeak: { year: 2021 },

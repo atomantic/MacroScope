@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f2efe7" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./styles.css?v=15" />
+    <link rel="stylesheet" href="./styles.css?v=17" />
     <title>MacroScope</title>
   </head>
   <body>
@@ -290,9 +290,39 @@
         <p class="debt-answer" id="debt-answer"><strong>Does rich-people debt get passed to the poor?</strong> Not automatically. It remains the borrower’s liability unless government later socializes losses through bailouts, guarantees, or monetary financing.</p>
       </section>
 
-      <details class="assumptions-panel" id="assumptions-anchor" open>
-        <summary><span>Change the policy and behavior assumptions</span><small>Re-run the U.S. model</small></summary>
+      <span class="scenario-anchor" id="assumptions-anchor" aria-hidden="true"></span>
+      <button
+        type="button"
+        class="scenario-drawer-trigger"
+        id="scenario-drawer-trigger"
+        aria-controls="scenario-drawer"
+        aria-expanded="false"
+      >
+        <span class="scenario-drawer-trigger-label">Edit scenario</span>
+        <span
+          class="scenario-drawer-trigger-status"
+          id="scenario-drawer-trigger-status"
+          aria-hidden="true"
+          hidden
+        >Recalculating…</span>
+      </button>
+      <span class="visually-hidden" id="scenario-recalc-status" role="status" aria-live="polite" aria-atomic="true"></span>
+
+      <dialog class="scenario-drawer" id="scenario-drawer" aria-labelledby="scenario-drawer-title">
         <form id="scenario-form">
+          <header class="scenario-drawer-header">
+            <div class="scenario-drawer-heading">
+              <p class="kicker">Scenario controls</p>
+              <h2 id="scenario-drawer-title">Edit the policy</h2>
+              <p id="scenario-drawer-summary">2% above $10M · $1,000/mo adult equivalent</p>
+              <p class="drawer-action-feedback" id="drawer-action-feedback" role="status" aria-live="polite" aria-atomic="true" hidden></p>
+            </div>
+            <div class="scenario-drawer-header-actions">
+              <button class="preset-share-button" id="copy-link-button" type="button">Copy link</button>
+              <button class="scenario-drawer-close" id="scenario-drawer-close" type="button" aria-label="Close scenario editor">×</button>
+            </div>
+          </header>
+          <div class="scenario-drawer-body">
           <div class="policy-presets" aria-label="Policy scenario presets">
             <span>Start with a scenario</span>
             <button type="button" data-preset="top-one">1% on top 1%</button>
@@ -305,7 +335,6 @@
             <button type="button" data-preset="warren-2020">Warren 2020</button>
             <button type="button" data-preset="sanders-2020">Sanders 2020</button>
             <button type="button" data-preset="current-law">Current law (no tax)</button>
-            <button class="preset-share-button" id="copy-link-button" type="button">Copy scenario link</button>
             <a class="preset-reference-link" href="#policy-references">See real-world precedents ↓</a>
           </div>
           <fieldset class="wealth-tax-fieldset">
@@ -344,46 +373,58 @@
             <label for="sell-share">Asset-sale share (%)<input id="sell-share" name="sellShare" type="number" min="0" max="100" step="5" /></label>
             <label for="loan-rate">Loan interest (%)<input id="loan-rate" name="loanRate" type="number" min="0" max="50" step="0.1" /></label>
           </fieldset>
-          <fieldset class="behavior-fieldset">
-            <legend>Taxpayer response</legend>
-            <div class="behavior-presets" aria-label="Taxpayer-response presets">
-              <span>Response scenario</span>
-              <button type="button" data-behavior-preset="full-compliance">Full compliance</button>
-              <button type="button" data-behavior-preset="scandinavian">Scandinavian experience</button>
-              <button type="button" data-behavior-preset="french-isf">French ISF experience</button>
-            </div>
-            <div class="behavior-grid">
-              <label for="avoidance-elasticity">Avoidance per point (%)<input id="avoidance-elasticity" name="avoidanceElasticity" type="number" min="0" max="50" step="1" /><small class="field-hint">Share of the taxable base that vanishes into valuation games and reclassification for each percentage point of tax rate.</small></label>
-              <label for="expatriation-share">Expatriation over decade (%)<input id="expatriation-share" name="expatriationShare" type="number" min="0" max="90" step="1" /><small class="field-hint">Share of top-tier taxable wealth that leaves the country and the tax base over the ten-year horizon.</small></label>
-              <label for="private-business-inclusion">Private-business included (%)<input id="private-business-inclusion" name="privateBusinessInclusionRate" type="number" min="0" max="100" step="5" /><small class="field-hint">Share of hard-to-value private-business wealth actually captured in the base after valuation discounts.</small></label>
-            </div>
-          </fieldset>
-          <fieldset class="split-fieldset">
-            <legend>Macro assumptions</legend>
-            <div class="split-fieldset-grid">
-              <label for="asset-return">Annual asset return (%)<input id="asset-return" name="assetReturn" type="number" min="-50" max="50" step="0.5" /></label>
-              <label for="monetization">Deficit monetized (%)<input id="monetization" name="monetization" type="number" min="0" max="100" step="5" /></label>
-              <label for="buyer-depth">Buyer depth (% equity)<input id="buyer-depth" name="buyerDepth" type="number" min="0.1" max="200" step="0.1" /></label>
-            </div>
-          </fieldset>
-          <fieldset class="behavior-fieldset">
-            <legend>Growth channel</legend>
-            <div class="behavior-grid">
-              <label for="savings-response">Savings response elasticity<input id="savings-response" name="savingsResponseElasticity" type="number" min="0" max="3" step="0.1" /><small class="field-hint">How much the wealth tax's drag on the after-tax return to wealth cuts investment, shrinking capital, wages, and GDP over the decade. 0 leaves growth on trend; ~0.5–1 spans the Penn-Wharton / Tax Foundation dynamic-scoring range.</small></label>
-              <label for="demand-offset">Demand growth offset<input id="demand-offset" name="demandGrowthOffset" type="number" min="0" max="3" step="0.1" /><small class="field-hint">How strongly the transfer's demand impulse (program budget as a share of GDP) feeds investment and output the other way. 0 turns the offset off; raise it to model redistribution to high-spending households lifting demand.</small></label>
-            </div>
-          </fieldset>
-          <fieldset class="split-fieldset">
-            <legend>Asset feedback</legend>
-            <div class="split-fieldset-grid">
-              <label for="asset-hedge-share">New liquidity to assets (%)<input id="asset-hedge-share" name="assetHedgeShare" type="number" min="0" max="100" step="5" /></label>
-              <label for="housing-hedge-share">Asset flow to housing (%)<input id="housing-hedge-share" name="housingHedgeShare" type="number" min="0" max="100" step="5" /></label>
-              <label for="housing-supply">Housing supply response<input id="housing-supply" name="housingSupply" type="number" min="0" max="2" step="0.1" /></label>
-              <label for="rent-pass-through">Price gain passed to rent (%)<input id="rent-pass-through" name="rentPassThrough" type="number" min="0" max="100" step="5" /></label>
-            </div>
-          </fieldset>
-          <details class="advanced-controls">
-            <summary>Advanced simulation controls</summary>
+          <details class="scenario-control-section">
+            <summary><span>Taxpayer response</span><small>Compliance and migration</small></summary>
+            <fieldset class="behavior-fieldset">
+              <legend class="visually-hidden">Taxpayer response</legend>
+              <div class="behavior-presets" aria-label="Taxpayer-response presets">
+                <span>Response scenario</span>
+                <button type="button" data-behavior-preset="full-compliance">Full compliance</button>
+                <button type="button" data-behavior-preset="scandinavian">Scandinavian experience</button>
+                <button type="button" data-behavior-preset="french-isf">French ISF experience</button>
+              </div>
+              <div class="behavior-grid">
+                <label for="avoidance-elasticity">Avoidance per point (%)<input id="avoidance-elasticity" name="avoidanceElasticity" type="number" min="0" max="50" step="1" /><small class="field-hint">Share of the taxable base that vanishes into valuation games and reclassification for each percentage point of tax rate.</small></label>
+                <label for="expatriation-share">Expatriation over decade (%)<input id="expatriation-share" name="expatriationShare" type="number" min="0" max="90" step="1" /><small class="field-hint">Share of top-tier taxable wealth that leaves the country and the tax base over the ten-year horizon.</small></label>
+                <label for="private-business-inclusion">Private-business included (%)<input id="private-business-inclusion" name="privateBusinessInclusionRate" type="number" min="0" max="100" step="5" /><small class="field-hint">Share of hard-to-value private-business wealth actually captured in the base after valuation discounts.</small></label>
+              </div>
+            </fieldset>
+          </details>
+          <details class="scenario-control-section">
+            <summary><span>Macro assumptions</span><small>Returns, monetization, and market depth</small></summary>
+            <fieldset class="split-fieldset">
+              <legend class="visually-hidden">Macro assumptions</legend>
+              <div class="split-fieldset-grid">
+                <label for="asset-return">Annual asset return (%)<input id="asset-return" name="assetReturn" type="number" min="-50" max="50" step="0.5" /></label>
+                <label for="monetization">Deficit monetized (%)<input id="monetization" name="monetization" type="number" min="0" max="100" step="5" /></label>
+                <label for="buyer-depth">Buyer depth (% equity)<input id="buyer-depth" name="buyerDepth" type="number" min="0.1" max="200" step="0.1" /></label>
+              </div>
+            </fieldset>
+          </details>
+          <details class="scenario-control-section">
+            <summary><span>Growth channel</span><small>Investment drag and demand offset</small></summary>
+            <fieldset class="behavior-fieldset">
+              <legend class="visually-hidden">Growth channel</legend>
+              <div class="behavior-grid">
+                <label for="savings-response">Savings response elasticity<input id="savings-response" name="savingsResponseElasticity" type="number" min="0" max="3" step="0.1" /><small class="field-hint">How much the wealth tax's drag on the after-tax return to wealth cuts investment, shrinking capital, wages, and GDP over the decade. 0 leaves growth on trend; ~0.5–1 spans the Penn-Wharton / Tax Foundation dynamic-scoring range.</small></label>
+                <label for="demand-offset">Demand growth offset<input id="demand-offset" name="demandGrowthOffset" type="number" min="0" max="3" step="0.1" /><small class="field-hint">How strongly the transfer's demand impulse (program budget as a share of GDP) feeds investment and output the other way. 0 turns the offset off; raise it to model redistribution to high-spending households lifting demand.</small></label>
+              </div>
+            </fieldset>
+          </details>
+          <details class="scenario-control-section">
+            <summary><span>Asset feedback</span><small>Liquidity, housing, and rent</small></summary>
+            <fieldset class="split-fieldset">
+              <legend class="visually-hidden">Asset feedback</legend>
+              <div class="split-fieldset-grid">
+                <label for="asset-hedge-share">New liquidity to assets (%)<input id="asset-hedge-share" name="assetHedgeShare" type="number" min="0" max="100" step="5" /></label>
+                <label for="housing-hedge-share">Asset flow to housing (%)<input id="housing-hedge-share" name="housingHedgeShare" type="number" min="0" max="100" step="5" /></label>
+                <label for="housing-supply">Housing supply response<input id="housing-supply" name="housingSupply" type="number" min="0" max="2" step="0.1" /></label>
+                <label for="rent-pass-through">Price gain passed to rent (%)<input id="rent-pass-through" name="rentPassThrough" type="number" min="0" max="100" step="5" /></label>
+              </div>
+            </fieldset>
+          </details>
+          <details class="advanced-controls scenario-control-section">
+            <summary><span>Advanced simulation controls</span><small>Sampling and model constants</small></summary>
             <div>
               <label for="seed">Random seed<input id="seed" name="seed" type="number" step="1" /></label>
               <label for="sample-size">Sample size<select id="sample-size" name="sampleSize"><option value="1000">1,000</option><option value="4000">4,000</option><option value="8000">8,000</option></select></label>
@@ -400,15 +441,21 @@
               <label for="verdict-harmful-inflation">Verdict harmful inflation (%)<input id="verdict-harmful-inflation" name="verdictHarmfulInflation" type="number" min="5" max="200" step="1" /></label>
             </div>
           </details>
-          <div class="form-actions">
-            <button class="run-button" id="run-button" type="submit">Recalculate verdict</button>
-            <span class="recalc-indicator" id="recalc-indicator" role="status" aria-live="polite" hidden>Recalculating…</span>
-            <button class="link-button" id="pin-button" type="button" aria-pressed="false">Pin this scenario (A)</button>
-            <button class="link-button" id="clear-pin-button" type="button" hidden>Clear pinned</button>
-            <p class="form-status" id="form-status" role="status">Loading baseline scenario…</p>
           </div>
+          <footer class="form-actions">
+            <div class="form-action-status">
+              <span class="recalc-indicator" id="recalc-indicator" role="status" aria-live="polite" hidden>Recalculating…</span>
+              <p class="form-status" id="form-status" role="status">Loading baseline scenario…</p>
+            </div>
+            <div class="form-action-buttons">
+              <button class="link-button" id="run-button" type="submit">Recalculate now</button>
+              <button class="link-button" id="pin-button" type="button" aria-pressed="false">Pin this scenario (A)</button>
+              <button class="link-button" id="clear-pin-button" type="button" hidden>Clear pinned</button>
+              <button class="run-button" id="scenario-drawer-done" type="button">Done — view results</button>
+            </div>
+          </footer>
         </form>
-      </details>
+      </dialog>
 
       <details class="model-details">
         <summary><span>Inspect model details</span><small>Funding paths, deciles, sectors, and accounting</small></summary>
@@ -487,6 +534,6 @@
     </footer>
     <div class="toast-container" id="toast-container" aria-live="polite" aria-atomic="true"></div>
     <div class="visually-hidden" id="chart-readout" role="status" aria-live="polite"></div>
-    <script src="./app.js?v=15" type="module"></script>
+    <script src="./app.js?v=17" type="module"></script>
   </body>
 </html>

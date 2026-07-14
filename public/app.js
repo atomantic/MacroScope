@@ -72,6 +72,12 @@ const percent = new Intl.NumberFormat(undefined, {
 
 const byId = (id) => document.getElementById(id);
 
+const setScenarioSummary = (summary) => {
+  byId("scenario-summary").textContent = summary;
+  const drawerSummary = byId("scenario-drawer-summary");
+  if (drawerSummary) drawerSummary.textContent = summary;
+};
+
 const initialize = async () => {
   try {
     loadModelConstants();
@@ -110,7 +116,7 @@ const initialize = async () => {
       } else {
         latestResult = snapshot;
         render(snapshot);
-        byId("scenario-summary").textContent = scenarioSummary(defaults, snapshot);
+        setScenarioSummary(scenarioSummary(defaults, snapshot));
         setFormStatus("Default scenario shown. Change any assumption and recalculate — the model runs in your browser.");
         void refreshSensitivity(formRequest());
       }
@@ -539,16 +545,37 @@ const copyScenarioLink = async () => {
   );
 };
 
-let toastTimer = null;
+let globalToastTimer = null;
+let drawerFeedbackTimer = null;
 const showToast = (message, isError = false) => {
+  const drawer = byId("scenario-drawer");
+  const drawerFeedback = byId("drawer-action-feedback");
   const container = byId("toast-container");
+  clearTimeout(globalToastTimer);
+  clearTimeout(drawerFeedbackTimer);
+  container?.replaceChildren();
+  if (drawerFeedback) {
+    drawerFeedback.hidden = true;
+    drawerFeedback.textContent = "";
+    drawerFeedback.classList.remove("error");
+  }
+  if (drawer?.open && drawerFeedback) {
+    drawerFeedback.textContent = message;
+    drawerFeedback.classList.toggle("error", isError);
+    drawerFeedback.hidden = false;
+    drawerFeedbackTimer = setTimeout(() => {
+      drawerFeedback.hidden = true;
+      drawerFeedback.textContent = "";
+      drawerFeedback.classList.remove("error");
+    }, 3600);
+    return;
+  }
   if (!container) return;
   const toast = element("div", message);
   toast.className = `toast${isError ? " error" : ""}`;
   container.replaceChildren(toast);
   requestAnimationFrame(() => toast.classList.add("visible"));
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => {
+  globalToastTimer = setTimeout(() => {
     toast.classList.remove("visible");
     setTimeout(() => toast.remove(), 300);
   }, 3600);
@@ -728,7 +755,7 @@ const runScenario = async ({ auto = false } = {}) => {
       : await runServerScenario(request);
     latestResult = payload;
     render(payload);
-    byId("scenario-summary").textContent = scenarioSummary(request, payload);
+    setScenarioSummary(scenarioSummary(request, payload));
     updateScenarioUrl();
     setFormStatus(`Updated from ${integer.format(payload.population.sampledHouseholds)} weighted household agents${isStaticSnapshot ? ", computed in your browser" : ""}.`);
     // Rank the assumptions behind this verdict without blocking the main render.
@@ -740,7 +767,7 @@ const runScenario = async ({ auto = false } = {}) => {
   } finally {
     if (!auto) {
       button.disabled = false;
-      button.textContent = "Recalculate verdict";
+      button.textContent = "Recalculate now";
     }
   }
 };
@@ -750,10 +777,29 @@ const runScenario = async ({ auto = false } = {}) => {
 // it settles, so rapid slider drags can never pile up requests (last-wins).
 const dashState = { running: false, pending: false, promise: null };
 
-const setRecalculating = (on) => {
+const setRecalculating = (on, succeeded = true) => {
   const indicator = byId("recalc-indicator");
   if (indicator) indicator.hidden = !on;
   byId("scenario-form")?.classList.toggle("is-recalculating", on);
+  const trigger = byId("scenario-drawer-trigger");
+  const triggerStatus = byId("scenario-drawer-trigger-status");
+  const liveStatus = byId("scenario-recalc-status");
+  if (trigger) {
+    trigger.classList.toggle("is-recalculating", on);
+    trigger.classList.toggle("has-recalc-error", !on && !succeeded);
+    trigger.setAttribute("aria-busy", String(on));
+  }
+  if (triggerStatus) {
+    triggerStatus.textContent = on ? "Recalculating…" : "Update failed — open to resolve";
+    triggerStatus.hidden = !on && succeeded;
+  }
+  if (liveStatus) {
+    liveStatus.textContent = on
+      ? "Scenario results are recalculating."
+      : succeeded
+        ? "Scenario results updated."
+        : "Scenario update failed. Open the scenario editor to resolve the error.";
+  }
 };
 
 const dashboardRerun = () => {
@@ -770,7 +816,7 @@ const dashboardRerun = () => {
       ok = await runScenario({ auto: true });
     } while (dashState.pending);
     dashState.running = false;
-    setRecalculating(false);
+    setRecalculating(false, ok);
     return ok;
   })();
   return dashState.promise;
@@ -781,7 +827,121 @@ const dashboardRerun = () => {
 let autoRunTimer = null;
 const scheduleAutoRun = () => {
   clearTimeout(autoRunTimer);
-  autoRunTimer = setTimeout(() => void dashboardRerun(), 300);
+  autoRunTimer = setTimeout(() => {
+    autoRunTimer = null;
+    void dashboardRerun();
+  }, 300);
+};
+
+// --- Persistent scenario drawer -----------------------------------------
+// Keep the dashboard frozen at the user's current reading position while the
+// native dialog owns focus. Drawer state is deliberately presentation-only:
+// it never enters scenario URLs or the model request.
+const drawerState = {
+  scrollY: 0,
+  returnFocus: null,
+  restoreFocus: true,
+  highlightTimer: null,
+};
+const drawerScrollBehavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  ? "auto"
+  : "smooth";
+
+const unlockDashboardScroll = () => {
+  if (!document.body.classList.contains("scenario-drawer-open")) return;
+  document.body.classList.remove("scenario-drawer-open");
+  document.body.style.top = "";
+  // The site globally uses smooth scrolling. Override it for this one restore
+  // so closing the drawer cannot visibly glide away from the result the user
+  // was reading or report an intermediate scroll position to focus handling.
+  const previousScrollBehavior = document.documentElement.style.scrollBehavior;
+  document.documentElement.style.scrollBehavior = "auto";
+  window.scrollTo(0, drawerState.scrollY);
+  document.documentElement.style.scrollBehavior = previousScrollBehavior;
+};
+
+const finishDrawerClose = () => {
+  const trigger = byId("scenario-drawer-trigger");
+  const returnFocus = drawerState.returnFocus;
+  const drawerFeedback = byId("drawer-action-feedback");
+  trigger?.setAttribute("aria-expanded", "false");
+  unlockDashboardScroll();
+  if (drawerFeedback) {
+    clearTimeout(drawerFeedbackTimer);
+    drawerFeedback.hidden = true;
+    drawerFeedback.textContent = "";
+    drawerFeedback.classList.remove("error");
+  }
+  if (drawerState.restoreFocus) {
+    const canReceiveFocus =
+      returnFocus?.isConnected &&
+      returnFocus !== document.body &&
+      typeof returnFocus.focus === "function" &&
+      returnFocus.tabIndex >= 0;
+    const focusTarget = canReceiveFocus ? returnFocus : trigger;
+    requestAnimationFrame(() => focusTarget?.focus({ preventScroll: true }));
+  }
+  drawerState.returnFocus = null;
+  drawerState.restoreFocus = true;
+};
+
+const closeScenarioDrawer = ({ restoreFocus = true } = {}) => {
+  const drawer = byId("scenario-drawer");
+  drawerState.restoreFocus = restoreFocus;
+  if (drawer?.open) drawer.close();
+  else finishDrawerClose();
+};
+
+const focusDrawerField = (focusId) => {
+  const field = byId(focusId);
+  if (!field) return;
+  const section = field.closest("details");
+  if (section instanceof HTMLDetailsElement) section.open = true;
+  clearTimeout(drawerState.highlightTimer);
+  requestAnimationFrame(() => {
+    field.focus({ preventScroll: true });
+    field.scrollIntoView({ behavior: drawerScrollBehavior, block: "center" });
+    field.classList.add("scenario-focus-target");
+    drawerState.highlightTimer = setTimeout(
+      () => field.classList.remove("scenario-focus-target"),
+      1800,
+    );
+  });
+};
+
+const openScenarioDrawer = ({ focusId = null, trigger = null } = {}) => {
+  if (document.body.dataset.view === "story") return;
+  const drawer = byId("scenario-drawer");
+  if (!drawer) return;
+  if (!drawer.open) {
+    drawerState.scrollY = window.scrollY;
+    drawerState.returnFocus = trigger ?? document.activeElement;
+    drawerState.restoreFocus = true;
+    document.body.style.top = `-${drawerState.scrollY}px`;
+    document.body.classList.add("scenario-drawer-open");
+    drawer.showModal();
+    byId("scenario-drawer-trigger")?.setAttribute("aria-expanded", "true");
+  }
+  if (focusId) focusDrawerField(focusId);
+  else requestAnimationFrame(() => byId("scenario-drawer-close")?.focus({ preventScroll: true }));
+};
+
+const finishScenarioEdits = async () => {
+  const button = byId("scenario-drawer-done");
+  clearTimeout(autoRunTimer);
+  autoRunTimer = null;
+  button.disabled = true;
+  button.textContent = "Updating results…";
+  try {
+    // Always validate/run once, even when an incomplete bracket row cancelled
+    // the normal debounce. Invalid edits stay visible in the open drawer rather
+    // than closing over stale results.
+    const ok = await dashboardRerun();
+    if (ok) closeScenarioDrawer();
+  } finally {
+    button.disabled = false;
+    button.textContent = "Done — view results";
+  }
 };
 
 // Compute one scenario without disturbing the live form: snapshot the fields and
@@ -1653,8 +1813,10 @@ const applyDialValue = (formId, formValue, snap = "nearest") => {
   if (snapped > max) snapped = Math.floor(max / step) * step;
   field.value = clamp(snapped, min, max).toFixed(decimals);
   activePreset = null;
-  void runScenario();
-  byId("assumptions-anchor")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  syncSlider(formId);
+  updateScenarioUrl();
+  openScenarioDrawer({ focusId: formId });
+  void dashboardRerun();
 };
 
 const TORNADO_TONE = {
@@ -2135,6 +2297,7 @@ const bracketRowsComplete = () =>
   );
 byId("scenario-form").addEventListener("input", (event) => {
   const target = event.target;
+  activePreset = null;
   // Direct typing into a number field mirrors onto its slider (the slider's own
   // handler covers the reverse); also enforce the joint borrow/sell clamp.
   if (target instanceof HTMLInputElement && target.type === "number") {
@@ -2158,6 +2321,45 @@ byId("scenario-form").addEventListener("change", (event) => {
 byId("pin-button").addEventListener("click", () => void pinCurrentScenario());
 byId("clear-pin-button").addEventListener("click", () => clearPin());
 byId("copy-link-button").addEventListener("click", () => void copyScenarioLink());
+byId("scenario-drawer-trigger").addEventListener("click", (event) =>
+  openScenarioDrawer({ trigger: event.currentTarget }),
+);
+byId("scenario-drawer-close").addEventListener("click", () => closeScenarioDrawer());
+byId("scenario-drawer-done").addEventListener("click", () => void finishScenarioEdits());
+byId("scenario-drawer").addEventListener("cancel", (event) => {
+  event.preventDefault();
+  closeScenarioDrawer();
+});
+byId("scenario-drawer").addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  event.preventDefault();
+  closeScenarioDrawer();
+});
+byId("scenario-drawer").addEventListener("close", finishDrawerClose);
+byId("scenario-drawer").addEventListener("click", (event) => {
+  const drawer = event.currentTarget;
+  if (event.target === drawer) {
+    closeScenarioDrawer();
+    return;
+  }
+  const link = event.target.closest?.('a[href^="#"]');
+  if (!link) return;
+  const targetId = decodeURIComponent(link.hash.slice(1));
+  const target = byId(targetId);
+  if (!target) return;
+  event.preventDefault();
+  closeScenarioDrawer({ restoreFocus: false });
+  requestAnimationFrame(() => {
+    const details = target.closest("details");
+    if (details instanceof HTMLDetailsElement) details.open = true;
+    window.history.replaceState(
+      null,
+      "",
+      `${window.location.pathname}${window.location.search}${link.hash}`,
+    );
+    target.scrollIntoView({ behavior: drawerScrollBehavior, block: "start" });
+  });
+});
 byId("distribution-strategy").addEventListener("change", () => {
   renderDistribution();
   updateScenarioUrl();
@@ -2185,6 +2387,13 @@ byId("persona-form").addEventListener("submit", (event) => event.preventDefault(
 // Caveat links open the collapsed model-details panel so "see the limits"
 // always lands on the boundaries list rather than an unopened <details>.
 document.addEventListener("click", (event) => {
+  const scenarioLink = event.target.closest?.('a[href="#assumptions-anchor"]');
+  if (scenarioLink && !byId("scenario-drawer").contains(scenarioLink)) {
+    event.preventDefault();
+    if (document.body.dataset.view === "story") enterDashboard();
+    openScenarioDrawer({ trigger: scenarioLink });
+    return;
+  }
   const link = event.target.closest?.(".caveat-link");
   if (!link) return;
   const details = byId("caveats")?.closest("details");
@@ -2655,6 +2864,7 @@ const syncStoryUrl = () => {
 };
 
 const enterStory = (index = 0) => {
+  closeScenarioDrawer({ restoreFocus: false });
   storyState.index = clamp(index, 0, STORY_STEPS.length - 1);
   document.body.dataset.view = "story";
   syncStoryUrl();
@@ -2696,6 +2906,12 @@ const initStory = () => {
     return;
   }
 
+  if (window.location.hash === "#assumptions-anchor") {
+    enterDashboard();
+    requestAnimationFrame(() => openScenarioDrawer());
+    return;
+  }
+
   const params = new URLSearchParams(window.location.search);
   // Floor so a fractional ?step=2.5 can't produce a fractional array index
   // (STORY_STEPS[1.5] is undefined → renderStory would throw).
@@ -2717,5 +2933,10 @@ const initStory = () => {
 
 document.querySelectorAll("[data-behavior-preset]").forEach((button) => {
   button.addEventListener("click", () => applyBehaviorPreset(button.dataset.behaviorPreset));
+});
+window.addEventListener("hashchange", () => {
+  if (window.location.hash !== "#assumptions-anchor") return;
+  if (document.body.dataset.view === "story") enterDashboard();
+  openScenarioDrawer();
 });
 void initialize().then(initStory);

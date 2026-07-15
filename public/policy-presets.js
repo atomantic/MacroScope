@@ -205,7 +205,12 @@ export const POLICY_PRESETS = {
     brackets: [],
     // Baseline needs an explicit compact form because it has no schedule to
     // derive the exemption/rate from.
-    form: { targetMode: "exemption", topShare: 1, exemption: 10, rate: 0, brackets: [] },
+    form: {
+      targetMode: "exemption", topShare: 1, exemption: 10, rate: 0, brackets: [],
+      // Keep the no-policy benchmark visibly and mechanically transfer-free;
+      // zero revenue alone should not have to imply a zero requested benefit.
+      adultBenefit: 0, childBenefit: 0,
+    },
     scheduleNote: "No wealth tax applied.",
     spending: TAX_SCHEDULE_ONLY,
     enforcement: null,

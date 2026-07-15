@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f2efe7" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./styles.css?v=23" />
+    <link rel="stylesheet" href="./styles.css?v=24" />
     <title>MacroScope</title>
   </head>
   <body>
@@ -376,6 +376,14 @@
             <button type="button" data-preset="current-law">Current law (no tax)</button>
             <a class="preset-reference-link" href="#policy-references">See real-world precedents ↓</a>
           </div>
+          <div class="policy-presets policy-presets-diagnostic" aria-label="Diagnostic benchmark presets">
+            <span>Test a mechanism</span>
+            <button type="button" data-preset="cash-rebate">Cash tax / rebate</button>
+            <button type="button" data-preset="borrow-rent-stress">Borrowing + rent stress</button>
+            <button type="button" data-preset="asset-sale-stress">Asset-sale stress</button>
+            <button type="button" data-preset="services-only">Services only</button>
+            <button type="button" data-preset="extreme-universal-borrow">Extreme 20% universal</button>
+          </div>
           <div class="preset-definition" id="preset-definition" hidden></div>
           <fieldset class="wealth-tax-fieldset">
             <legend>Wealth tax</legend>
@@ -579,6 +587,6 @@
     </footer>
     <div class="toast-container" id="toast-container" aria-live="polite" aria-atomic="true"></div>
     <div class="visually-hidden" id="chart-readout" role="status" aria-live="polite"></div>
-    <script src="./app.js?v=23" type="module"></script>
+    <script src="./app.js?v=24" type="module"></script>
   </body>
 </html>

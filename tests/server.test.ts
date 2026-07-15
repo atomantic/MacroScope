@@ -97,6 +97,7 @@ describe("PortOS server", () => {
     expect(shellMarkup).toContain('id="buyer-depth"');
     expect(shellMarkup).toContain('step="0.1"');
     expect(shellMarkup).toContain('data-preset="top-one"');
+    expect(shellMarkup).toContain('data-preset="extreme-universal-borrow"');
     expect(shellMarkup).toContain('id="theory-chart"');
     expect(shellMarkup).toContain('id="backtest-chart"');
     expect(shellMarkup).toContain('id="validation-heading"');

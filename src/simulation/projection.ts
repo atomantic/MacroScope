@@ -1675,6 +1675,18 @@ const makeVerdict = (input: {
     input.bottom50PurchasingPowerChange >= v.beneficialPurchasingPowerGain &&
     input.peakAnnualInflation < v.beneficialPeakInflation &&
     input.publicBurdenPerHousehold < v.beneficialPublicBurdenPerHousehold;
+  const margins = {
+    beneficialPurchasingPower:
+      input.bottom50PurchasingPowerChange - v.beneficialPurchasingPowerGain,
+    harmfulPurchasingPower:
+      input.bottom50PurchasingPowerChange - v.harmfulPurchasingPowerDrop,
+    beneficialInflation: v.beneficialPeakInflation - input.peakAnnualInflation,
+    harmfulInflation: input.harmfulPeakInflation - input.peakAnnualInflation,
+    beneficialPublicBurden:
+      v.beneficialPublicBurdenPerHousehold - input.publicBurdenPerHousehold,
+    harmfulPublicBurden:
+      v.harmfulPublicBurdenPerHousehold - input.publicBurdenPerHousehold,
+  };
   if (harmful) {
     // Attribute the harm to its actual driver. A harmful GDP path gets the
     // growth explanation when inflation and debt do not independently cross
@@ -1690,6 +1702,7 @@ const makeVerdict = (input: {
       growthDriven && input.bottom50PurchasingPowerChange >= 0;
     return {
       rating: "harmful",
+      detail: "harmful",
       scope: input.serviceValueScored ? "cash-with-service-estimate" : "cash-only",
       headline: growthDriven
         ? growthDespitePurchasingPowerGain
@@ -1701,11 +1714,13 @@ const makeVerdict = (input: {
           ? "Under these assumptions, transfers or lower prices lift bottom-half buying power, but reduced saving and investment shrink output per worker past the model’s harmful threshold."
           : "Under these assumptions the tax reduces saving and investment enough to shrink the capital stock and wages, so the bottom half ends with less real buying power even without a modeled inflation or debt crisis."
         : "Under these assumptions, the bottom half ends with less relative buying power or the financing path enters a high-risk inflation/debt regime.",
+      margins,
     };
   }
   if (beneficial) {
     return {
       rating: "beneficial",
+      detail: "beneficial",
       scope: input.serviceValueScored ? "cash-with-service-estimate" : "cash-only",
       headline:
         input.borrowShare > v.fragileBorrowShare
@@ -1713,17 +1728,31 @@ const makeVerdict = (input: {
           : "The bottom half gains buying power without a modeled inflation crisis.",
       explanation:
         "The annual transfer remains larger than the modeled loss from higher prices, while the federal balance and inflation stay inside the model’s guardrails.",
+      margins,
     };
   }
+  const buyingPowerGap = Math.abs(margins.beneficialPurchasingPower * 100).toFixed(2);
+  const detail =
+    input.bottom50PurchasingPowerChange >= 0 ? "mixed-positive" : "mixed-negative";
+  const primaryConstraint =
+    margins.beneficialPurchasingPower < 0
+      ? `cash buying power is ${buyingPowerGap} percentage points below the beneficial guardrail`
+      : margins.beneficialInflation <= 0
+        ? "peak inflation is outside the beneficial guardrail"
+        : margins.beneficialPublicBurden <= 0
+          ? "the public-burden guardrail is exceeded"
+          : "the cash result remains inside the model’s middle band";
   return {
     rating: "mixed",
+    detail,
     scope: input.serviceValueScored ? "cash-with-service-estimate" : "cash-only",
     headline: input.serviceValueScored
-      ? "Cash buying power is near break-even; the stated service value remains a separate resource estimate."
-      : "Cash-only result: service value is not scored, so overall welfare is not rated.",
+      ? `Mixed result: ${primaryConstraint}.`
+      : `Cash-only mixed result: ${primaryConstraint}.`,
     explanation: input.serviceValueScored
-      ? "Cash purchasing power is near break-even as prices adjust. The displayed service resource estimate is conditional on the selected effectiveness assumption and is not spendable cash."
-      : "The model reports cash purchasing power and service spending separately. Choose an explicit zero, base, or high service-effectiveness assumption to display a resource-equivalent range; this cash-only rating is not an overall welfare claim.",
+      ? `The model keeps the three headline categories for comparability, while this scenario is ${detail.replace("-", " ")}. The binding constraint is that ${primaryConstraint}; the displayed service resource estimate remains conditional on the selected effectiveness assumption and is not spendable cash.`
+      : `The model keeps the three headline categories for comparability, while this scenario is ${detail.replace("-", " ")}. The binding constraint is that ${primaryConstraint}. No service value is counted, so this cash-only rating is not an overall welfare claim.`,
+    margins,
   };
 };
 

@@ -13,6 +13,19 @@ const nationalRequest = (): ComparisonRequestV1 => ({
 });
 
 describe("ten-year projection dynamics", () => {
+  it("reports threshold margins and never attributes a cash-funded mixed result to borrowing", () => {
+    const result = runComparison({
+      ...nationalRequest(),
+      behavior: { ...nationalRequest().behavior, borrowShare: 0, sellShare: 0 },
+    });
+    const verdict = result.projection.verdict;
+    expect(["mixed-positive", "mixed-negative", "beneficial", "harmful"]).toContain(verdict.detail);
+    expect(verdict.margins.beneficialPurchasingPower).toBeCloseTo(
+      result.projection.summary.bottom50PurchasingPowerChange - 0.02,
+      8,
+    );
+    if (verdict.rating === "mixed") expect(verdict.explanation).not.toMatch(/borrow/i);
+  });
   it("never releases more Treasury cash than previously drained from M2", () => {
     const parked = applyTreasuryMoneyFlow({
       m2: US_BASELINE.m2,

@@ -254,9 +254,20 @@ export interface ServiceValueRange {
 export interface PolicyProjection {
   readonly verdict: {
     readonly rating: "beneficial" | "mixed" | "harmful";
+    readonly detail: "beneficial" | "mixed-positive" | "mixed-negative" | "harmful";
     readonly scope: "cash-only" | "cash-with-service-estimate";
     readonly headline: string;
     readonly explanation: string;
+    // Positive values are headroom; negative values are distance beyond the
+    // corresponding guardrail. All purchasing-power values are fractions.
+    readonly margins: {
+      readonly beneficialPurchasingPower: number;
+      readonly harmfulPurchasingPower: number;
+      readonly beneficialInflation: number;
+      readonly harmfulInflation: number;
+      readonly beneficialPublicBurden: number;
+      readonly harmfulPublicBurden: number;
+    };
   };
   readonly behaviorMix: {
     readonly cashShare: number;

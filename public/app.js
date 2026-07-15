@@ -34,6 +34,7 @@ const {
   modelTenYearRevenue,
   benchmarkDeviation,
 } = await import(versioned("./policy-presets.js"));
+const { DIAGNOSTIC_PRESETS } = await import(versioned("./diagnostic-presets.js"));
 
 const STRATEGIES = ["cash-first", "borrow-first", "sell-first"];
 const LABELS = {
@@ -1271,18 +1272,28 @@ const clearPin = () => {
 };
 
 const PIN_METRICS = [
+  { label: "Tax revenue (year one)", get: (r) => r.projection.annualFlows.taxCollected, kind: "money" },
+  { label: "Taxpayers reached (year ten)", get: (r) => r.projection.years.at(-1)?.taxpayerHouseholds ?? 0, kind: "number" },
+  { label: "Effective tax rate (year ten)", get: (r) => r.projection.years.at(-1)?.effectiveTaxRate ?? 0, kind: "pct" },
+  { label: "Cash delivered (year one)", get: (r) => r.projection.annualFlows.ubiReceived, kind: "money" },
+  { label: "Public services (year one)", get: (r) => r.projection.annualFlows.publicServicesSpending, kind: "money" },
+  { label: "Administration (year one)", get: (r) => r.projection.annualFlows.administrativeCost, kind: "money" },
   { label: "Bottom 50% buying power", get: (r) => r.projection.summary.bottom50PurchasingPowerChange, kind: "pct" },
+  { label: "Gap to beneficial buying-power guardrail", get: (r) => r.projection.verdict.margins.beneficialPurchasingPower, kind: "points" },
+  { label: "Top 1% real wealth", get: (r) => r.projection.summary.top1RealWealthChange, kind: "pct" },
+  { label: "GDP per worker", get: (r) => r.projection.summary.gdpChange, kind: "pct" },
   { label: "Peak annual inflation", get: (r) => r.projection.summary.peakAnnualInflation, kind: "rate" },
   { label: "M2 money stock", get: (r) => r.projection.summary.cumulativeM2Change, kind: "pct" },
+  { label: "Private tax debt (year ten)", get: (r) => r.projection.summary.privateTaxDebt, kind: "money" },
   // housingPriceChange lives on the theory-test summary, not the top-level one.
   { label: "Housing price", get: (r) => r.projection.theoryTest.summary.housingPriceChange, kind: "pct" },
   { label: "Wealth Gini (after)", get: (r) => r.strategies["cash-first"].distribution.wealthGiniAfter, kind: "gini" },
 ];
 
 const fmtMetric = (kind, value) =>
-  kind === "gini" ? value.toFixed(3) : kind === "rate" ? formatRate(value) : signedPercent(value);
+  kind === "money" ? compactMoney.format(value) : kind === "number" ? integer.format(value) : kind === "gini" ? value.toFixed(3) : kind === "rate" ? formatRate(value) : kind === "points" ? signedPoints(value) : signedPercent(value);
 const fmtDelta = (kind, delta) =>
-  kind === "gini" ? `${delta > 0 ? "+" : ""}${delta.toFixed(3)}` : signedPoints(delta);
+  kind === "money" ? compactMoney.format(delta) : kind === "number" ? integer.format(delta) : kind === "gini" ? `${delta > 0 ? "+" : ""}${delta.toFixed(3)}` : signedPoints(delta);
 
 const renderPinComparison = () => {
   const wrap = byId("pin-comparison");
@@ -1292,6 +1303,12 @@ const renderPinComparison = () => {
     return;
   }
   wrap.hidden = false;
+  const pinnedVerdict = pinnedResult.projection.verdict;
+  const liveVerdict = latestResult.projection.verdict;
+  byId("pin-comparison-note").textContent =
+    pinnedVerdict.rating === liveVerdict.rating
+      ? `Both scenarios are rated ${liveVerdict.rating}, but their continuous outcomes and guardrail distances below can still differ materially.`
+      : `Scenario A is rated ${pinnedVerdict.rating}; the live scenario is rated ${liveVerdict.rating}. The table decomposes the drivers of that change.`;
   byId("pin-comparison-body").replaceChildren(
     ...PIN_METRICS.map((metric) => {
       const liveValue = metric.get(latestResult);
@@ -1333,18 +1350,29 @@ const render = (result) => {
 function renderPresetDefinition(name) {
   const panel = byId("preset-definition");
   if (!panel) return;
-  const def = POLICY_PRESETS?.[name];
-  if (!def || def.kind === "baseline") {
-    panel.hidden = true;
-    panel.replaceChildren();
-    return;
-  }
   const el = (tag, className, text) => {
     const node = document.createElement(tag);
     if (className) node.className = className;
     if (text !== undefined) node.textContent = text;
     return node;
   };
+  const diagnostic = DIAGNOSTIC_PRESETS?.[name];
+  if (diagnostic) {
+    panel.hidden = false;
+    panel.replaceChildren(
+      el("h4", "preset-def-title", diagnostic.label),
+      el("span", "preset-badge preset-badge-amb", diagnostic.nonForecast ? "Diagnostic corner · not a forecast" : "Diagnostic mechanism"),
+      el("p", "preset-def-line", diagnostic.mechanism),
+      el("p", "preset-def-line preset-def-muted", "This preset is immutable and shareable through its scenario URL. It exists to expose one modeled mechanism at a time, not to estimate likelihood."),
+    );
+    return;
+  }
+  const def = POLICY_PRESETS?.[name];
+  if (!def || def.kind === "baseline") {
+    panel.hidden = true;
+    panel.replaceChildren();
+    return;
+  }
   const section = (heading, ...children) => {
     const wrap = el("div", "preset-def-section");
     wrap.append(el("h5", "preset-def-heading", heading));
@@ -2730,6 +2758,9 @@ const PRESETS = {
   ...Object.fromEntries(
     Object.entries(POLICY_PRESETS).map(([name, def]) => [name, presetFormFields(def)]),
   ),
+  ...Object.fromEntries(
+    Object.entries(DIAGNOSTIC_PRESETS).map(([name, def]) => [name, def.form]),
+  ),
 };
 
 const setPresetFields = (name) => {
@@ -2754,6 +2785,16 @@ const setPresetFields = (name) => {
   if (preset.adultBenefit !== undefined) byId("adult-benefit").value = preset.adultBenefit;
   if (preset.childBenefit !== undefined) byId("child-benefit").value = preset.childBenefit;
   if (preset.directCashShare !== undefined) byId("direct-cash-share").value = preset.directCashShare;
+  const fieldMap = {
+    administrativeShare: "administrative-share", borrowShare: "borrow-share",
+    sellShare: "sell-share", surplusUse: "surplus-use", assetHedgeShare: "asset-hedge-share",
+    housingHedgeShare: "housing-hedge-share", housingSupply: "housing-supply",
+    rentPassThrough: "rent-pass-through", buyerDepth: "buyer-depth",
+    priceImpact: "price-impact", serviceEffectiveness: "service-effectiveness",
+  };
+  for (const [key, id] of Object.entries(fieldMap)) {
+    if (preset[key] !== undefined) byId(id).value = preset[key];
+  }
   syncTargetControls();
   syncAllSliders();
 };

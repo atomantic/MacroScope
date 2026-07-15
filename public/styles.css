@@ -388,6 +388,8 @@ input.scenario-focus-target, select.scenario-focus-target { border-color: var(--
 .policy-presets-real button { border-style: dashed; }
 .policy-presets-real button:hover { border-style: solid; }
 .policy-presets-real button[aria-pressed="true"] { border-style: solid; }
+.policy-presets-diagnostic { background: color-mix(in srgb, var(--orange) 8%, transparent); padding-inline: 10px; }
+.policy-presets-diagnostic button { border-color: var(--orange); }
 .preset-reference-link { margin-left: auto; color: var(--orange); font-size: 0.7rem; font-weight: 750; text-decoration: none; }
 .preset-reference-link:hover { color: var(--green); }
 

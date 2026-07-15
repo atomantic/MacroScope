@@ -30,6 +30,7 @@ export interface ModelTunables {
 
 export type PaymentStrategy = "cash-first" | "borrow-first" | "sell-first";
 export type BenefitIndexation = "none" | "cpi";
+export type ServiceEffectiveness = "unscored" | "zero" | "base" | "high";
 export type ConsumptionSector =
   | "housing"
   | "food"
@@ -73,6 +74,9 @@ export interface ComparisonRequestV1 {
     // Optional on the wire for schema-v1 compatibility; normalizeComparisonRequest
     // defaults an omitted value to "none" (fixed nominal benefits).
     readonly benefitIndexation?: BenefitIndexation;
+    // Omitted values preserve the cash-only boundary rather than quietly
+    // treating service spending as household income.
+    readonly serviceEffectiveness?: ServiceEffectiveness;
     readonly directCashShare: number;
     readonly administrativeShare: number;
   };
@@ -234,9 +238,23 @@ export interface WealthGroupOutcome {
   readonly headline: string;
 }
 
+/**
+ * Resource-equivalent value of delivered public services. The zero/base/high
+ * cases are explicit sensitivity cases, not a claim that a service dollar is
+ * interchangeable with cash.
+ */
+export interface ServiceValueRange {
+  readonly mode: ServiceEffectiveness;
+  readonly zero: number;
+  readonly base: number;
+  readonly high: number;
+  readonly selected: number | null;
+}
+
 export interface PolicyProjection {
   readonly verdict: {
     readonly rating: "beneficial" | "mixed" | "harmful";
+    readonly scope: "cash-only" | "cash-with-service-estimate";
     readonly headline: string;
     readonly explanation: string;
   };
@@ -250,6 +268,7 @@ export interface PolicyProjection {
     readonly ubiReceived: number;
     readonly rebate: number;
     readonly publicServicesSpending: number;
+    readonly serviceValue: ServiceValueRange;
     readonly administrativeCost: number;
     readonly newPrivateLoans: number;
     readonly assetSales: number;
@@ -260,6 +279,7 @@ export interface PolicyProjection {
       readonly ubiReceived: number;
       readonly rebate: number;
       readonly publicServicesSpending: number;
+      readonly serviceValue: ServiceValueRange;
       readonly administrativeCost: number;
       readonly newPrivateLoans: number;
       readonly governmentDeficit: number;
@@ -283,6 +303,7 @@ export interface PolicyProjection {
     readonly peakAnnualInflation: number;
     readonly cumulativeM2Change: number;
     readonly bottom50PurchasingPowerChange: number;
+    readonly selectedAnnualResourceValue: number | null;
     readonly top1RealWealthChange: number;
     // Year-10 real GDP-per-worker change versus the no-policy path (fractional;
     // e.g. -0.04 = 4% output drag). Zero when both growth dials are 0.
@@ -479,6 +500,7 @@ export const DEFAULT_COMPARISON_REQUEST: ComparisonRequestV1 = {
     fundingRule: "revenue-constrained",
     surplusUse: "debt-reduction",
     benefitIndexation: "none",
+    serviceEffectiveness: "unscored",
     directCashShare: 1,
     administrativeShare: 0.05,
   },

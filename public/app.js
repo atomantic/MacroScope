@@ -198,6 +198,7 @@ const populateForm = (request) => {
   byId("funding-rule").value = request.ubi.fundingRule;
   byId("surplus-use").value = request.ubi.surplusUse ?? "debt-reduction";
   byId("benefit-indexation").value = request.ubi.benefitIndexation ?? "none";
+  byId("service-effectiveness").value = request.ubi.serviceEffectiveness ?? "unscored";
   byId("direct-cash-share").value = request.ubi.directCashShare * 100;
   byId("administrative-share").value = request.ubi.administrativeShare * 100;
   byId("buyer-depth").value = request.market.buyerDepthRatio * 100;
@@ -251,6 +252,7 @@ const formRequest = () => {
       fundingRule: byId("funding-rule").value,
       surplusUse: byId("surplus-use").value,
       benefitIndexation: byId("benefit-indexation").value,
+      serviceEffectiveness: byId("service-effectiveness").value,
       directCashShare: Number(byId("direct-cash-share").value) / 100,
       administrativeShare: Number(byId("administrative-share").value) / 100,
     },
@@ -1671,7 +1673,7 @@ const restorePersona = () => {
 const renderVerdict = (projection) => {
   const { verdict, summary } = projection;
   document.body.dataset.verdict = verdict.rating;
-  byId("verdict-badge").textContent = verdict.rating;
+  byId("verdict-badge").textContent = `${verdict.scope === "cash-only" ? "cash-only · " : "cash + service estimate · "}${verdict.rating}`;
   byId("verdict-headline").textContent = verdict.headline;
   byId("verdict-explanation").textContent = verdict.explanation;
   byId("metric-buying-power").textContent = signedPercent(summary.bottom50PurchasingPowerChange);
@@ -2046,7 +2048,9 @@ const renderFlow = (projection) => {
         ? `${compactMoney.format(firstFiscal.treasuryBalance)} Treasury balance`
         : "no modeled deficit";
   byId("flow-balance").textContent = `${compactMoney.format(annualFlows.administrativeCost)} administration · ${fiscalAction}`;
-  byId("flow-result").textContent = `${signedPercent(summary.bottom50PurchasingPowerChange)} buying power`;
+  byId("flow-result").textContent = annualFlows.serviceValue.selected === null
+    ? `${signedPercent(summary.bottom50PurchasingPowerChange)} cash-only buying power`
+    : `${signedPercent(summary.bottom50PurchasingPowerChange)} buying power · ${compactMoney.format(summary.selectedAnnualResourceValue)} cash + selected services`;
   byId("flow-debt").textContent = `${compactMoney.format(summary.privateTaxDebt)} private tax debt${finalYear?.privateTaxLoanInterestPaid > 1 ? ` · ${compactMoney.format(finalYear.privateTaxLoanInterestPaid)} annual interest paid` : ""} · ${compactMoney.format(fiscal?.endingProgramDebt ?? 0)} program debt`;
   const m2Sentence = annualFlows.m2Injection >= 0
     ? `The selected borrowing behavior adds ${compactMoney.format(annualFlows.m2Injection)} to M2 in year one`
@@ -2414,7 +2418,13 @@ const renderVerdictFlip = (flip) => {
 
 const renderReasons = (projection) => {
   const { annualFlows, summary, behaviorMix } = projection;
-  byId("reason-benefit").textContent = `${compactMoney.format(annualFlows.ubiReceived)} reaches households as cash and ${compactMoney.format(annualFlows.publicServicesSpending)} funds services in year one, after ${compactMoney.format(annualFlows.administrativeCost)} in modeled administration${annualFlows.finalYear ? `; modeled year-ten flows deliver ${compactMoney.format(annualFlows.finalYear.ubiReceived)} in cash` : ""}. Cash buying power for the bottom half ends ${plainDirection(summary.bottom50PurchasingPowerChange)} relative to a no-policy path; in-kind service value is reported separately.`;
+  const services = annualFlows.serviceValue;
+  const serviceSentence = annualFlows.publicServicesSpending <= 0
+    ? "No year-one services are funded in this scenario."
+    : services.selected === null
+      ? `Services are unscored, so this is a cash-only result. The transparent zero/base/high resource-equivalent cases are ${compactMoney.format(services.zero)}, ${compactMoney.format(services.base)}, and ${compactMoney.format(services.high)}; none is spendable cash.`
+      : `The selected ${services.mode} service assumption values delivery at ${compactMoney.format(services.selected)} resource-equivalent, within the explicit ${compactMoney.format(services.zero)} to ${compactMoney.format(services.high)} range; it is not spendable cash.`;
+  byId("reason-benefit").textContent = `${compactMoney.format(annualFlows.ubiReceived)} reaches households as cash and ${compactMoney.format(annualFlows.publicServicesSpending)} funds services in year one, after ${compactMoney.format(annualFlows.administrativeCost)} in modeled administration${annualFlows.finalYear ? `; modeled year-ten flows deliver ${compactMoney.format(annualFlows.finalYear.ubiReceived)} in cash` : ""}. Cash buying power for the bottom half ends ${plainDirection(summary.bottom50PurchasingPowerChange)} relative to a no-policy path. ${serviceSentence}`;
   byId("reason-risk").textContent = `${percent.format(behaviorMix.borrowShare)} of wealthy households’ payment behavior is represented by the borrow-first path. That leaves ${compactMoney.format(summary.privateTaxDebt)} of private tax debt after ten years and lifts M2 ${signedPercent(summary.cumulativeM2Change)}.`;
 };
 
@@ -3205,7 +3215,7 @@ const renderStory = () => {
     document.body.dataset.verdict = verdict.rating;
     const panel = document.createElement("div");
     panel.className = "story-verdict";
-    const badge = element("span", verdict.rating);
+    const badge = element("span", `${verdict.scope === "cash-only" ? "cash-only · " : "cash + service estimate · "}${verdict.rating}`);
     badge.className = "verdict-badge";
     const headline = element("strong", verdict.headline);
     panel.append(badge, headline);
@@ -3310,7 +3320,7 @@ const refreshStoryDynamic = () => {
   if (dynamic.verdict) {
     const verdict = latestResult.projection.verdict;
     document.body.dataset.verdict = verdict.rating;
-    dynamic.verdict.badge.textContent = verdict.rating;
+    dynamic.verdict.badge.textContent = `${verdict.scope === "cash-only" ? "cash-only · " : "cash + service estimate · "}${verdict.rating}`;
     dynamic.verdict.headline.textContent = verdict.headline;
   }
 };

@@ -3,6 +3,7 @@ import {
   type BenefitIndexation,
   type ComparisonRequestV1,
   type ModelTunables,
+  type ServiceEffectiveness,
 } from "../simulation/contracts.js";
 import { MODEL_TUNABLES } from "../simulation/modelConstants.js";
 import type { TaxBracket } from "../policies/schema.js";
@@ -109,6 +110,7 @@ export const parseComparisonRequest = (input: unknown): ParsedComparisonRequest 
   const fundingRule = readFundingRule(ubi.fundingRule, errors);
   const surplusUse = readSurplusUse(ubi.surplusUse, errors);
   const benefitIndexation = readBenefitIndexation(ubi.benefitIndexation, errors);
+  const serviceEffectiveness = readServiceEffectiveness(ubi.serviceEffectiveness, errors);
   const directCashShare = readNumber(
     ubi,
     "directCashShare",
@@ -288,6 +290,7 @@ export const parseComparisonRequest = (input: unknown): ParsedComparisonRequest 
         fundingRule,
         surplusUse,
         benefitIndexation,
+        serviceEffectiveness,
         directCashShare,
         administrativeShare,
       },
@@ -432,6 +435,16 @@ const readBenefitIndexation = (
   if (raw === "none" || raw === "cpi") return raw;
   errors.push("benefitIndexation must be none or cpi.");
   return DEFAULT_COMPARISON_REQUEST.ubi.benefitIndexation ?? "none";
+};
+
+const readServiceEffectiveness = (
+  raw: unknown,
+  errors: string[],
+): ServiceEffectiveness => {
+  if (raw === undefined) return DEFAULT_COMPARISON_REQUEST.ubi.serviceEffectiveness ?? "unscored";
+  if (raw === "unscored" || raw === "zero" || raw === "base" || raw === "high") return raw;
+  errors.push("serviceEffectiveness must be unscored, zero, base, or high.");
+  return DEFAULT_COMPARISON_REQUEST.ubi.serviceEffectiveness ?? "unscored";
 };
 
 const readSurplusUse = (

@@ -192,6 +192,47 @@ describe("vertical-slice scenario runner", () => {
     expect(finalYear?.privateTaxLoanRepayments).toBeGreaterThan(0);
   });
 
+  it("resolves missed tax-loan debt service through the selected loss path", () => {
+    const request = {
+      ...compactRequest(),
+      wealthTax: { exemption: 0, rate: 0.2 },
+      market: { ...compactRequest().market, maximumCollateralLtv: 0.5 },
+      behavior: {
+        ...compactRequest().behavior,
+        borrowShare: 1,
+        sellShare: 0,
+        loanInterestRate: 0.2,
+      },
+    };
+    const run = (taxLoanResolution: "private-bank-loss" | "government-guarantee" | "central-bank-facility") =>
+      runComparison({
+        ...request,
+        behavior: { ...request.behavior, taxLoanResolution },
+      });
+    const privateLoss = run("private-bank-loss").projection;
+    const guarantee = run("government-guarantee").projection;
+    const facility = run("central-bank-facility").projection;
+
+    expect(privateLoss.summary.taxLoanDefaults).toBeGreaterThan(0);
+    expect(privateLoss.summary.privateBankLosses).toBeGreaterThan(0);
+    expect(guarantee.summary.governmentGuarantees).toBeGreaterThan(0);
+    expect(facility.summary.centralBankFacilities).toBeGreaterThan(0);
+    for (const summary of [privateLoss.summary, guarantee.summary, facility.summary]) {
+      expect(summary.taxLoanDefaults).toBeCloseTo(
+        summary.collateralSeized +
+          summary.privateBankLosses +
+          summary.governmentGuarantees +
+          summary.centralBankFacilities,
+        4,
+      );
+    }
+    expect(guarantee.years.at(-1)?.governmentDebtAdded).toBeGreaterThan(
+      privateLoss.years.at(-1)?.governmentDebtAdded ?? 0,
+    );
+    expect(facility.years.at(-1)?.m2).toBeGreaterThan(guarantee.years.at(-1)?.m2 ?? 0);
+    expect(privateLoss.summary.bankCapital).toBeLessThan(guarantee.summary.bankCapital);
+  });
+
   it("uses housing sales as a reconciled last-resort liquidity channel", () => {
     const result = runComparison({
       ...compactRequest(),

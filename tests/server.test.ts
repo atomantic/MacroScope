@@ -359,6 +359,19 @@ describe("PortOS server", () => {
     });
   });
 
+  it("accepts only declared tax-loan loss-resolution paths", () => {
+    const accepted = parseComparisonRequest({
+      behavior: { taxLoanResolution: "government-guarantee" },
+    });
+    expect(accepted.errors).toEqual([]);
+    expect(accepted.value?.behavior.taxLoanResolution).toBe("government-guarantee");
+    expect(parseComparisonRequest({
+      behavior: { taxLoanResolution: "leave-it-unresolved" },
+    }).errors).toContain(
+      "taxLoanResolution must be private-bank-loss, government-guarantee, or central-bank-facility.",
+    );
+  });
+
   it("parses an explicit aggregate open-economy closure and rejects invalid shares", () => {
     const parsed = parseComparisonRequest({
       economy: {

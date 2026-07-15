@@ -207,14 +207,16 @@ export const runComparisonWithPopulation = (
       "Every modeled asset and liability class is calibrated by wealth group to the Federal Reserve DFA for 2026:Q1; within-group joint distributions remain stylized.",
       "Adult and child counts match the July 2025 resident population estimate, including group-quarters residents and excluding nonresidents. Personal income and consumption retain their synthetic percentile shapes but reconcile independently to calendar-year 2025 BEA totals.",
       "Equity price impact and inflation are reduced-form assumptions exposed for sensitivity testing.",
-      "The current closed economy assumes domestic buyers absorb all equity and housing sales.",
+      request.economy.closure === "closed"
+        ? "Closed-economy mode assumes domestic buyers absorb all equity and housing sales; all foreign-sector dials are zero by default."
+        : "Open-economy mode uses one aggregate rest-of-world sector for foreign buyers, Treasury debt holders, and resident foreign claims; it is an auditable closure, not a multi-country DSGE forecast.",
       "Housing sales remain a national, closed-economy transfer channel; the ten-year owner-renter view adds reduced-form price, supply, and rent feedback rather than regional market clearing.",
       "Wealth Gini values treat negative net worth as zero for the inequality calculation.",
       `The ten-year path is a transparent reduced-form projection with ${request.ubi.benefitIndexation === "cpi" ? "CPI-indexed policy benefits (one-year recognition lag)" : "fixed nominal policy benefits"}. Each year re-assesses the unchanged nominal wealth-tax schedule against evolved synthetic household balances, so fixed exemptions and bracket crossings are not approximated by a single aggregate revenue multiplier. Tax-payment loans are re-underwritten against current collateral; scheduled principal repayment destroys matching loans and deposits, while unpaid tax remains explicit deferred tax. Bank-capital, default, and bailout resolution remain outside this projection.`,
       `Fiscal closure is explicit: the ${request.ubi.fundingRule} funding rule is paired with ${normalizedSurplusUse(request)} for revenue left after scheduled outlays and program-debt service. Program debt carries a documented average interest rate; this is a stock-flow score, not a Treasury maturity model.`,
       "Demand pressure is recomputed from each year's household cash, uniform rebates, and public-service sector mix; equal total outlays can therefore produce different inflation paths when their composition differs.",
       "The growth/investment channel is a reduced-form Solow-style block: investment deviates from the capital-replacement rate as the wealth tax lowers the after-tax return on wealth (savings response) and the transfer adds a demand impulse (demand offset); wages and real GDP per worker track the resulting capital stock. Both response dials default to zero, which holds output on the constant-trend baseline. It captures direction and rough magnitude, not a general-equilibrium forecast.",
-      "Taxpayer-response dials apply to each annual household assessment: avoidance responds to that household's marginal rate, the private-business inclusion rule is applied before assessment, and expatriation reduces the top-tier household balances between years. Paid tax reduces included assets; avoided or deferred tax does not. The inflation stress grid remains a reduced-form sensitivity path that evolves aggregate revenue and private-loan flows with matching return, effective-rate, and expatriation assumptions.",
+      "Taxpayer-response dials apply to each annual household assessment: avoidance responds to that household's marginal rate, the private-business inclusion rule is applied before assessment, and expatriation separates residence change, U.S. tax-jurisdiction change, and resident capital flow into foreign claims. Only the tax-jurisdiction share reduces the top-tier taxable base. Paid tax reduces included assets; avoided or deferred tax does not. The inflation stress grid remains a reduced-form sensitivity path that evolves aggregate revenue and private-loan flows with matching return, effective-rate, and tax-base-retention assumptions.",
       request.ubi.serviceEffectiveness === "unscored" || request.ubi.serviceEffectiveness === undefined
         ? "Cash purchasing-power measures do not assign a dollar welfare value to healthcare or social services delivered in kind; the displayed verdict is cash-only."
         : `Cash purchasing power remains distinct from in-kind services. The selected ${request.ubi.serviceEffectiveness} service case reports a resource-equivalent range, not spendable cash or a cardinal welfare score.`,
@@ -241,6 +243,10 @@ export const normalizeComparisonRequest = (
     ...DEFAULT_COMPARISON_REQUEST.market,
     ...request.market,
   },
+  economy: normalizeEconomy({
+    ...DEFAULT_COMPARISON_REQUEST.economy,
+    ...request.economy,
+  }),
   behavior: {
     ...DEFAULT_COMPARISON_REQUEST.behavior,
     ...request.behavior,
@@ -268,6 +274,19 @@ const normalizeWealthTax = (
     brackets: sorted,
   };
 };
+
+const normalizeEconomy = (
+  economy: ComparisonRequestV1["economy"],
+): ComparisonRequestV1["economy"] =>
+  economy.closure === "closed"
+    ? {
+        ...economy,
+        foreignBuyerShare: 0,
+        foreignTreasuryDebtShare: 0,
+        capitalOutflowResponse: 0,
+        repatriationFxPassThrough: 0,
+      }
+    : economy;
 
 const runStrategy = (
   households: readonly SyntheticHousehold[],

@@ -12,6 +12,7 @@ import type {
   ConsumptionSector,
   FiscalProjectionYear,
   InflationRegime,
+  OpenEconomyProjectionYear,
   PaymentStrategy,
   PolicyProjection,
   ServiceEffectiveness,
@@ -22,6 +23,7 @@ import type {
 } from "./contracts.js";
 import { US_BASELINE, type UsWealthGroupBaseline } from "./usBaseline.js";
 import { MODEL_CONSTANTS } from "./modelConstants.js";
+import { auditOpenEconomyFlows } from "./openEconomy.js";
 import {
   createFiscalState,
   initialFiscalStateForRequest,
@@ -282,6 +284,8 @@ type AnnualHouseholdTaxResult = {
   readonly interestPaid: number;
   readonly privateTaxDebt: number;
   readonly deferredTax: number;
+  readonly equitySold: number;
+  readonly housingSold: number;
 };
 
 const createAnnualHouseholdTaxStates = (
@@ -443,6 +447,8 @@ const assessAnnualHouseholdTaxes = (
   let interestPaid = 0;
   let privateTaxDebt = 0;
   let deferredTax = 0;
+  let equitySold = 0;
+  let housingSold = 0;
 
   for (const state of states) {
     const servicing = isYearOne
@@ -486,6 +492,8 @@ const assessAnnualHouseholdTaxes = (
     interestPaid += servicing.interestPaid * state.source.weight;
     privateTaxDebt += state.taxLoanBalance * state.source.weight;
     deferredTax += state.deferredTax * state.source.weight;
+    equitySold += funding.equitySold * state.source.weight;
+    housingSold += funding.housingSold * state.source.weight;
 
     const group = wealthGroupForPercentile(state.source.percentile);
     groupTaxCollected.set(
@@ -514,6 +522,8 @@ const assessAnnualHouseholdTaxes = (
     interestPaid,
     privateTaxDebt,
     deferredTax,
+    equitySold,
+    housingSold,
   };
 };
 
@@ -682,10 +692,12 @@ export const buildPolicyProjection = (
   // sub-base only. The household-derived share can be below 1 even with a
   // positive exemption when that cutoff reaches part of a non-top cohort.
   // Spread geometrically so each year retains an equal fraction and the
-  // top-tier base has lost expatriationShare by year ten. Share 0 leaves the
-  // retention at 1 and reproduces the prior path.
+  // top-tier base has lost the tax-jurisdiction portion of expatriation by year
+  // ten. A residence change and a capital flow are reported separately; neither
+  // silently deletes the domestic tax base. Defaults preserve the prior path.
   const expatriationRetention =
-    (1 - request.behavior.expatriationShare) ** (1 / YEARS);
+    (1 - request.behavior.expatriationShare * request.behavior.expatriationTaxBaseShare) **
+    (1 / YEARS);
 
   // Growth/investment channel state (issue #13). The savings dial turns the
   // wealth tax's drag on the after-tax return to wealth into an investment
@@ -738,6 +750,30 @@ export const buildPolicyProjection = (
   let housingPriceIndex = 1;
   let equityPriceIndex = 1;
   let rentPremiumIndex = 1;
+  let residentForeignClaims = 0;
+  let foreignOwnedDomesticClaims = 0;
+  let foreignHeldTreasuryDebt = 0;
+  let cumulativeNetCapitalOutflow = 0;
+  const openEconomyFlows = {
+    foreignAssetPurchases: 0,
+    foreignTreasuryPurchases: 0,
+    residentCapitalOutflow: 0,
+    repatriatedCapital: 0,
+  };
+  const openEconomyYears: OpenEconomyProjectionYear[] = [
+    {
+      year: 0,
+      foreignAssetPurchases: 0,
+      foreignTreasuryPurchases: 0,
+      residentCapitalOutflow: 0,
+      repatriatedCapital: 0,
+      netForeignAssetPosition: 0,
+      foreignOwnedDomesticClaims: 0,
+      exchangeRatePressure: 0,
+      residentsChangingJurisdiction: 0,
+      taxableBaseLeavingJurisdiction: 0,
+    },
+  ];
   const theoryYears: PolicyProjection["theoryTest"]["years"][number][] = [
     {
       year: 0,
@@ -819,6 +855,53 @@ export const buildPolicyProjection = (
       bottom50ScheduledCash *
         (yearOneScheduledCash > 0 ? scheduledCashYear / yearOneScheduledCash : 0) +
       fiscalYear.rebate / Math.max(1, request.representedHouseholds);
+
+    // One aggregate rest-of-world sector closes the formerly domestic-only
+    // buyer pool. The four paths are intentionally separate: a non-resident
+    // can buy a domestic claim, Treasury can place debt abroad, a resident can
+    // acquire a foreign claim, and some of that claim can be repatriated.
+    const foreignAssetPurchases =
+      (annualTax.equitySold + annualTax.housingSold) * request.economy.foreignBuyerShare;
+    const foreignTreasuryPurchases =
+      governmentDeficitYear * request.economy.foreignTreasuryDebtShare;
+    const residentCapitalOutflow =
+      (topWealth * request.behavior.expatriationShare * request.economy.capitalOutflowResponse) /
+      YEARS;
+    const repatriatedCapital =
+      residentCapitalOutflow * request.economy.repatriationFxPassThrough;
+    const netCapitalOutflow = residentCapitalOutflow - repatriatedCapital;
+    residentForeignClaims += netCapitalOutflow;
+    foreignOwnedDomesticClaims += foreignAssetPurchases;
+    foreignHeldTreasuryDebt += foreignTreasuryPurchases;
+    cumulativeNetCapitalOutflow += netCapitalOutflow;
+    openEconomyFlows.foreignAssetPurchases += foreignAssetPurchases;
+    openEconomyFlows.foreignTreasuryPurchases += foreignTreasuryPurchases;
+    openEconomyFlows.residentCapitalOutflow += residentCapitalOutflow;
+    openEconomyFlows.repatriatedCapital += repatriatedCapital;
+    const netForeignAssetPosition =
+      residentForeignClaims - foreignOwnedDomesticClaims - foreignHeldTreasuryDebt;
+    const exchangeRatePressure =
+      ((netCapitalOutflow - foreignAssetPurchases - foreignTreasuryPurchases) /
+        Math.max(1, US_BASELINE.nominalGdp)) *
+      request.economy.repatriationFxPassThrough;
+    openEconomyYears.push({
+      year,
+      foreignAssetPurchases,
+      foreignTreasuryPurchases,
+      residentCapitalOutflow,
+      repatriatedCapital,
+      netForeignAssetPosition,
+      foreignOwnedDomesticClaims,
+      exchangeRatePressure,
+      residentsChangingJurisdiction:
+        (US_BASELINE.households * (1 - MODEL_CONSTANTS.topOnePercentPercentile) *
+          request.behavior.expatriationShare * request.behavior.expatriationResidenceShare) /
+        YEARS,
+      taxableBaseLeavingJurisdiction:
+        (topWealth * request.behavior.expatriationShare *
+          request.behavior.expatriationTaxBaseShare) /
+        YEARS,
+    });
 
     const repayments = annualTax.principalRepayments;
     privateTaxDebt = annualTax.privateTaxDebt;
@@ -1074,6 +1157,7 @@ export const buildPolicyProjection = (
     },
   );
   const theoryTest = buildTheoryTest(request, theoryYears, finalYear.m2Index / 100 - 1);
+  const openEconomyAudit = auditOpenEconomyFlows(openEconomyFlows);
 
   const groupOutcomes = buildGroupOutcomes({
     request,
@@ -1143,6 +1227,30 @@ export const buildPolicyProjection = (
     groupOutcomes,
     stressTest,
     theoryTest,
+    openEconomy: {
+      closure: request.economy.closure,
+      assumptions: {
+        foreignBuyerShare: request.economy.foreignBuyerShare,
+        foreignTreasuryDebtShare: request.economy.foreignTreasuryDebtShare,
+        capitalOutflowResponse: request.economy.capitalOutflowResponse,
+        repatriationFxPassThrough: request.economy.repatriationFxPassThrough,
+        residenceChangeShare: request.behavior.expatriationResidenceShare,
+        taxBaseJurisdictionShare: request.behavior.expatriationTaxBaseShare,
+      },
+      summary: {
+        foreignOwnedDomesticClaims,
+        foreignHeldTreasuryDebt,
+        residentForeignClaims,
+        netForeignAssetPosition:
+          residentForeignClaims - foreignOwnedDomesticClaims - foreignHeldTreasuryDebt,
+        cumulativeNetCapitalOutflow,
+        peakExchangeRatePressure: Math.max(
+          ...openEconomyYears.map((year) => Math.abs(year.exchangeRatePressure)),
+        ),
+      },
+      accounting: openEconomyAudit,
+      years: openEconomyYears,
+    },
     interpretation: [
       "A tax-funded UBI moves existing deposits between households; it does not by itself create money.",
       `The ${request.ubi.fundingRule} rule determines scheduled outlays, while ${surplusUse} explicitly closes surpluses. Debt reduction is capped by the opening public-debt stock and any remainder stays at Treasury. Only the share of a growing Treasury balance that actually drains M2 can be released later; debt retirement, rebates, and additional services recycle the collected cash.`,
@@ -1151,6 +1259,9 @@ export const buildPolicyProjection = (
       "Purchasing-power results compare the bottom half with a no-policy baseline after prices; they include partial wage adjustment and an annual UBI flow.",
       "The asset-price and rent channel is not implied by the accounting identities. It activates only when the selected share of new liquidity seeks housing or equities, housing supply is constrained, and rents follow asset prices.",
       "The growth channel weighs the real objection to a wealth tax: taxing wealth can lower saving and investment, shrinking the capital stock, wages, and GDP over the decade. The demand offset represents the opposite pull of transfers to high-spending households. Both are off by default; turn them up to see either steelman.",
+      request.economy.closure === "closed"
+        ? "Closed-economy mode keeps foreign buyer, foreign debt, and capital-flow channels at their selected zero baseline; it reproduces the domestic-only accounting path."
+        : "The rest-of-world result is an aggregate stock-flow closure, not a country-by-country exchange-rate forecast: it reports who holds claims, Treasury financing, resident foreign claims, and directional FX pressure separately.",
     ],
   };
 };

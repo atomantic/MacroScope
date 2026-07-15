@@ -103,6 +103,10 @@ describe("PortOS server", () => {
     expect(shellMarkup).toContain('id="validation-heading"');
     expect(shellMarkup).toContain('id="avoidance-elasticity"');
     expect(shellMarkup).toContain('id="expatriation-share"');
+    expect(shellMarkup).toContain('id="economy-closure"');
+    expect(shellMarkup).toContain('id="foreign-buyer-share"');
+    expect(shellMarkup).toContain('data-economy-preset="open-stress"');
+    expect(shellMarkup).toContain('id="open-economy-heading"');
     expect(shellMarkup).toContain('id="private-business-inclusion"');
     expect(shellMarkup).toContain('data-behavior-preset="scandinavian"');
     expect(shellMarkup).toContain('id="wage-pass-through"');
@@ -353,5 +357,27 @@ describe("PortOS server", () => {
       expatriationShare: 0.2,
       privateBusinessInclusionRate: 0.6,
     });
+  });
+
+  it("parses an explicit aggregate open-economy closure and rejects invalid shares", () => {
+    const parsed = parseComparisonRequest({
+      economy: {
+        closure: "partially-open",
+        foreignBuyerShare: 0.3,
+        foreignTreasuryDebtShare: 0.4,
+        capitalOutflowResponse: 0.5,
+        repatriationFxPassThrough: 0.2,
+      },
+      behavior: { expatriationResidenceShare: 0.6, expatriationTaxBaseShare: 0.7 },
+    });
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.value?.economy).toMatchObject({ closure: "partially-open", foreignBuyerShare: 0.3 });
+    expect(parsed.value?.behavior).toMatchObject({ expatriationResidenceShare: 0.6, expatriationTaxBaseShare: 0.7 });
+    expect(parseComparisonRequest({ economy: { closure: "floating", foreignBuyerShare: 2 } }).errors).toEqual(
+      expect.arrayContaining([
+        "economy.closure must be closed, partially-open, or open-stress.",
+        "foreignBuyerShare must be between 0 and 1.",
+      ]),
+    );
   });
 });

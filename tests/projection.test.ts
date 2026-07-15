@@ -13,6 +13,65 @@ const nationalRequest = (): ComparisonRequestV1 => ({
 });
 
 describe("ten-year projection dynamics", () => {
+  it("keeps the closed-economy baseline unchanged and reports zero foreign flows", () => {
+    const result = runComparison({
+      ...nationalRequest(),
+      economy: {
+        ...nationalRequest().economy,
+        // Closed is a mode, not a cosmetic label: even an API caller that
+        // carries stale nonzero shares receives the domestic-only path.
+        foreignBuyerShare: 1,
+        foreignTreasuryDebtShare: 1,
+        capitalOutflowResponse: 1,
+        repatriationFxPassThrough: 1,
+      },
+    });
+    const openEconomy = result.projection.openEconomy;
+    expect(openEconomy.closure).toBe("closed");
+    expect(openEconomy.summary.foreignOwnedDomesticClaims).toBe(0);
+    expect(openEconomy.summary.foreignHeldTreasuryDebt).toBe(0);
+    expect(openEconomy.summary.residentForeignClaims).toBe(0);
+    expect(openEconomy.summary.netForeignAssetPosition).toBe(0);
+    expect(openEconomy.accounting.passed).toBe(true);
+  });
+
+  it("routes foreign asset sales, Treasury debt, and resident capital flows through a balanced rest-of-world ledger", () => {
+    const result = runComparison({
+      ...nationalRequest(),
+      wealthTax: {
+        ...nationalRequest().wealthTax,
+        exemption: 0,
+        rate: 0.12,
+      },
+      ubi: { ...nationalRequest().ubi, fundingRule: "fixed", adultMonthlyBenefit: 8_000 },
+      behavior: {
+        ...nationalRequest().behavior,
+        sellShare: 0.8,
+        borrowShare: 0,
+        expatriationShare: 0.3,
+        expatriationResidenceShare: 0.4,
+        expatriationTaxBaseShare: 0.5,
+      },
+      economy: {
+        closure: "partially-open",
+        foreignBuyerShare: 0.45,
+        foreignTreasuryDebtShare: 0.4,
+        capitalOutflowResponse: 0.6,
+        repatriationFxPassThrough: 0.25,
+      },
+    });
+    const openEconomy = result.projection.openEconomy;
+    expect(openEconomy.summary.foreignOwnedDomesticClaims).toBeGreaterThan(0);
+    expect(openEconomy.summary.foreignHeldTreasuryDebt).toBeGreaterThan(0);
+    expect(openEconomy.summary.residentForeignClaims).toBeGreaterThan(0);
+    expect(openEconomy.summary.netForeignAssetPosition).not.toBe(0);
+    expect(openEconomy.years.some((year) => year.residentsChangingJurisdiction > 0)).toBe(true);
+    expect(openEconomy.years.some((year) => year.taxableBaseLeavingJurisdiction > 0)).toBe(true);
+    expect(openEconomy.accounting.passed).toBe(true);
+    expect(openEconomy.accounting.trialBalanceResidual).toBeCloseTo(0, 6);
+    expect(openEconomy.accounting.instrumentResidual).toBeCloseTo(0, 6);
+  });
+
   it("reports threshold margins and never attributes a cash-funded mixed result to borrowing", () => {
     const result = runComparison({
       ...nationalRequest(),

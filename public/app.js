@@ -206,6 +206,11 @@ const populateForm = (request) => {
   byId("price-impact").value = request.market.priceImpactCoefficient;
   byId("maximum-ltv").value = request.market.maximumCollateralLtv * 100;
   byId("housing-supply").value = request.market.housingSupplyElasticity;
+  byId("economy-closure").value = request.economy?.closure ?? "closed";
+  byId("foreign-buyer-share").value = (request.economy?.foreignBuyerShare ?? 0) * 100;
+  byId("foreign-treasury-share").value = (request.economy?.foreignTreasuryDebtShare ?? 0) * 100;
+  byId("capital-outflow-response").value = (request.economy?.capitalOutflowResponse ?? 0) * 100;
+  byId("repatriation-fx-pass-through").value = (request.economy?.repatriationFxPassThrough ?? 0) * 100;
   byId("borrow-share").value = request.behavior.borrowShare * 100;
   byId("sell-share").value = request.behavior.sellShare * 100;
   byId("asset-return").value = request.behavior.annualAssetReturn * 100;
@@ -216,6 +221,8 @@ const populateForm = (request) => {
   byId("rent-pass-through").value = request.behavior.rentPassThrough * 100;
   byId("avoidance-elasticity").value = request.behavior.avoidanceElasticity * 100;
   byId("expatriation-share").value = request.behavior.expatriationShare * 100;
+  byId("expatriation-residence-share").value = (request.behavior.expatriationResidenceShare ?? 1) * 100;
+  byId("expatriation-tax-base-share").value = (request.behavior.expatriationTaxBaseShare ?? 1) * 100;
   byId("private-business-inclusion").value =
     request.behavior.privateBusinessInclusionRate * 100;
   byId("savings-response").value = request.behavior.savingsResponseElasticity;
@@ -263,6 +270,13 @@ const formRequest = () => {
       maximumCollateralLtv: Number(byId("maximum-ltv").value) / 100,
       housingSupplyElasticity: Number(byId("housing-supply").value),
     },
+    economy: {
+      closure: byId("economy-closure").value,
+      foreignBuyerShare: Number(byId("foreign-buyer-share").value) / 100,
+      foreignTreasuryDebtShare: Number(byId("foreign-treasury-share").value) / 100,
+      capitalOutflowResponse: Number(byId("capital-outflow-response").value) / 100,
+      repatriationFxPassThrough: Number(byId("repatriation-fx-pass-through").value) / 100,
+    },
     behavior: {
       borrowShare: Number(byId("borrow-share").value) / 100,
       sellShare: Number(byId("sell-share").value) / 100,
@@ -274,6 +288,8 @@ const formRequest = () => {
       rentPassThrough: Number(byId("rent-pass-through").value) / 100,
       avoidanceElasticity: Number(byId("avoidance-elasticity").value) / 100,
       expatriationShare: Number(byId("expatriation-share").value) / 100,
+      expatriationResidenceShare: Number(byId("expatriation-residence-share").value) / 100,
+      expatriationTaxBaseShare: Number(byId("expatriation-tax-base-share").value) / 100,
       privateBusinessInclusionRate:
         Number(byId("private-business-inclusion").value) / 100,
       savingsResponseElasticity: Number(byId("savings-response").value),
@@ -1333,6 +1349,7 @@ const render = (result) => {
   renderWinners(result.projection);
   renderFlow(result.projection);
   renderTheory(result.projection.theoryTest, result.projection);
+  renderOpenEconomy(result.projection.openEconomy);
   renderStress(result.projection.stressTest);
   renderReasons(result.projection);
   renderDetails(result);
@@ -2108,6 +2125,22 @@ const renderTheory = (theory, projection) => {
   });
 };
 
+const renderOpenEconomy = (openEconomy) => {
+  const { summary, accounting, closure } = openEconomy;
+  byId("open-economy-badge").textContent = closure.replace("-", " ");
+  byId("open-economy-foreign-claims").textContent = compactMoney.format(summary.foreignOwnedDomesticClaims);
+  byId("open-economy-foreign-debt").textContent = compactMoney.format(summary.foreignHeldTreasuryDebt);
+  byId("open-economy-resident-claims").textContent = compactMoney.format(summary.residentForeignClaims);
+  byId("open-economy-nfa").textContent = compactMoney.format(summary.netForeignAssetPosition);
+  byId("open-economy-fx").textContent = signedPercent(summary.peakExchangeRatePressure);
+  byId("open-economy-explanation").textContent = closure === "closed"
+    ? "Closed mode keeps the rest-of-world channels at zero, so the domestic-only path remains directly comparable to prior runs."
+    : "The aggregate rest-of-world sector distinguishes foreign asset buyers, foreign Treasury holders, and U.S. residents' foreign claims without treating a tax-base change as cash disappearing.";
+  byId("open-economy-accounting").textContent = accounting.passed
+    ? `All ${accounting.events} aggregate cross-border journal events balance; domestic and foreign claims reconcile in one consolidated ledger.`
+    : `Cross-border accounting needs attention: ${accounting.failures.join(" ")}`;
+};
+
 const theoryChartOptions = (theory) => {
   const { years } = theory;
   return {
@@ -2826,6 +2859,24 @@ const applyBehaviorPreset = (name) => {
   void dashboardRerun();
 };
 
+const applyEconomyPreset = (name) => {
+  const presets = {
+    closed: { foreignBuyers: 0, foreignDebt: 0, outflow: 0, repatriation: 0 },
+    "partially-open": { foreignBuyers: 35, foreignDebt: 40, outflow: 30, repatriation: 15 },
+    "open-stress": { foreignBuyers: 70, foreignDebt: 60, outflow: 80, repatriation: 10 },
+  };
+  const preset = presets[name];
+  if (!preset) return;
+  byId("economy-closure").value = name;
+  byId("foreign-buyer-share").value = preset.foreignBuyers;
+  byId("foreign-treasury-share").value = preset.foreignDebt;
+  byId("capital-outflow-response").value = preset.outflow;
+  byId("repatriation-fx-pass-through").value = preset.repatriation;
+  syncAllSliders();
+  setActivePreset(null);
+  void dashboardRerun();
+};
+
 const setFormStatus = (message, isError = false) => {
   const status = byId("form-status");
   status.textContent = message;
@@ -3490,6 +3541,9 @@ const initStory = () => {
 
 document.querySelectorAll("[data-behavior-preset]").forEach((button) => {
   button.addEventListener("click", () => applyBehaviorPreset(button.dataset.behaviorPreset));
+});
+document.querySelectorAll("[data-economy-preset]").forEach((button) => {
+  button.addEventListener("click", () => applyEconomyPreset(button.dataset.economyPreset));
 });
 byId("uncertainty-run").addEventListener("click", () => void startUncertainty());
 byId("uncertainty-cancel").addEventListener("click", () => {

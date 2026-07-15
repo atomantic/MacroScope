@@ -3,7 +3,8 @@ export type EntityKind =
   | "bank"
   | "government"
   | "central-bank"
-  | "firm";
+  | "firm"
+  | "rest-of-world";
 
 export type AccountClass = "asset" | "liability" | "equity" | "income" | "expense";
 
@@ -14,7 +15,8 @@ export type Instrument =
   | "treasury-account"
   | "public-equity"
   | "productive-capital"
-  | "government-security";
+  | "government-security"
+  | "foreign-claim";
 
 export type ClaimSide = "holder" | "issuer";
 export type ReconciliationFlow = "tax" | "ubi";
@@ -33,7 +35,8 @@ export type EventCause =
   | "margin-call"
   | "default"
   | "policy-rate"
-  | "shock";
+  | "shock"
+  | "cross-border-flow";
 
 export interface EntityDefinition {
   readonly id: string;

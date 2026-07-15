@@ -282,6 +282,11 @@ type AnnualHouseholdTaxResult = {
   readonly newPrivateLoans: number;
   readonly principalRepayments: number;
   readonly interestPaid: number;
+  readonly defaults: number;
+  readonly collateralSeized: number;
+  readonly privateBankLosses: number;
+  readonly governmentGuarantees: number;
+  readonly centralBankFacilities: number;
   readonly privateTaxDebt: number;
   readonly deferredTax: number;
   readonly equitySold: number;
@@ -366,6 +371,7 @@ const settleAnnualTax = (
   taxDue: number,
   request: ComparisonRequestV1,
   weights: ReturnType<typeof strategyWeights>,
+  maximumNewBorrowing: number,
 ): HouseholdProjectionFunding => {
   let remaining = Math.max(0, taxDue);
   let cash = 0;
@@ -382,6 +388,7 @@ const settleAnnualTax = (
     const amount = Math.min(
       remaining,
       target,
+      maximumNewBorrowing - borrowed,
       borrowCapacity(state, request.market.maximumCollateralLtv),
     );
     state.taxLoanBalance += amount;
@@ -408,20 +415,85 @@ const settleAnnualTax = (
   return { cash, borrowed, equitySold, housingSold, deferred: remaining };
 };
 
+const seizeTaxLoanCollateral = (
+  state: AnnualHouseholdTaxState,
+  amount: number,
+): number => {
+  // Mortgages are senior to the modeled tax-payment lien. The remainder is
+  // collateral the bank can take in kind; this reclassifies a real asset, not
+  // a deposit, so it does not manufacture M2.
+  let remaining = Math.min(
+    Math.max(0, amount),
+    Math.max(0, state.assets.publicEquity + state.assets.housing - state.liabilities.mortgage),
+  );
+  const equity = Math.min(remaining, state.assets.publicEquity);
+  state.assets.publicEquity -= equity;
+  remaining -= equity;
+  const housing = Math.min(remaining, state.assets.housing);
+  state.assets.housing -= housing;
+  return equity + housing;
+};
+
+type TaxLoanServiceResult = {
+  readonly principalRepaid: number;
+  readonly interestPaid: number;
+  readonly defaults: number;
+  readonly collateralSeized: number;
+  readonly privateBankLosses: number;
+  readonly governmentGuarantees: number;
+  readonly centralBankFacilities: number;
+};
+
 const serviceTaxLoan = (
   state: AnnualHouseholdTaxState,
   request: ComparisonRequestV1,
-): { readonly principalRepaid: number; readonly interestPaid: number } => {
-  if (state.taxLoanBalance <= 0) return { principalRepaid: 0, interestPaid: 0 };
+): TaxLoanServiceResult => {
+  if (state.taxLoanBalance <= 0) {
+    return {
+      principalRepaid: 0,
+      interestPaid: 0,
+      defaults: 0,
+      collateralSeized: 0,
+      privateBankLosses: 0,
+      governmentGuarantees: 0,
+      centralBankFacilities: 0,
+    };
+  }
   const interestDue = state.taxLoanBalance * request.behavior.loanInterestRate;
   const interestPaid = debitCash(state, interestDue);
-  // Unpaid interest is capitalized as a constrained delinquency balance. Default
-  // resolution and loss allocation are deliberately separate follow-up work.
   state.taxLoanBalance += interestDue - interestPaid;
   const scheduledPrincipal = state.taxLoanBalance * request.model.loanAmortizationRate;
   const principalRepaid = debitCash(state, scheduledPrincipal);
   state.taxLoanBalance -= principalRepaid;
-  return { principalRepaid, interestPaid };
+  const missedDebtService =
+    interestPaid + 0.01 < interestDue || principalRepaid + 0.01 < scheduledPrincipal;
+  if (!missedDebtService) {
+    return {
+      principalRepaid,
+      interestPaid,
+      defaults: 0,
+      collateralSeized: 0,
+      privateBankLosses: 0,
+      governmentGuarantees: 0,
+      centralBankFacilities: 0,
+    };
+  }
+  const defaulted = state.taxLoanBalance;
+  const collateralSeized = seizeTaxLoanCollateral(state, defaulted);
+  const residualLoss = Math.max(0, defaulted - collateralSeized);
+  state.taxLoanBalance = 0;
+  return {
+    principalRepaid,
+    interestPaid,
+    defaults: defaulted,
+    collateralSeized,
+    privateBankLosses:
+      request.behavior.taxLoanResolution === "private-bank-loss" ? residualLoss : 0,
+    governmentGuarantees:
+      request.behavior.taxLoanResolution === "government-guarantee" ? residualLoss : 0,
+    centralBankFacilities:
+      request.behavior.taxLoanResolution === "central-bank-facility" ? residualLoss : 0,
+  };
 };
 
 // Year one preserves the strategy engine's observed funding. Later years
@@ -435,6 +507,7 @@ const assessAnnualHouseholdTaxes = (
   request: ComparisonRequestV1,
   weights: ReturnType<typeof strategyWeights>,
   isYearOne: boolean,
+  bankLoanHeadroom: number,
 ): AnnualHouseholdTaxResult => {
   const groupTaxCollected = new Map<string, number>(
     US_BASELINE.wealthGroups.map((group) => [group.id, 0]),
@@ -445,6 +518,11 @@ const assessAnnualHouseholdTaxes = (
   let newPrivateLoans = 0;
   let principalRepayments = 0;
   let interestPaid = 0;
+  let defaults = 0;
+  let collateralSeized = 0;
+  let privateBankLosses = 0;
+  let governmentGuarantees = 0;
+  let centralBankFacilities = 0;
   let privateTaxDebt = 0;
   let deferredTax = 0;
   let equitySold = 0;
@@ -452,7 +530,15 @@ const assessAnnualHouseholdTaxes = (
 
   for (const state of states) {
     const servicing = isYearOne
-      ? { principalRepaid: 0, interestPaid: 0 }
+      ? {
+          principalRepaid: 0,
+          interestPaid: 0,
+          defaults: 0,
+          collateralSeized: 0,
+          privateBankLosses: 0,
+          governmentGuarantees: 0,
+          centralBankFacilities: 0,
+        }
       : serviceTaxLoan(state, request);
     const assessment = assessWealthTax(
       {
@@ -473,6 +559,7 @@ const assessAnnualHouseholdTaxes = (
           response.taxAssessed + state.deferredTax,
           request,
           weights,
+          Math.max(0, bankLoanHeadroom / Math.max(1, state.source.weight)),
         );
     if (isYearOne) {
       state.assets.deposits = Math.max(0, state.assets.deposits - funding.cash);
@@ -488,8 +575,14 @@ const assessAnnualHouseholdTaxes = (
     taxableBase += assessment.taxableBase * state.source.weight;
     if (response.taxAssessed > 0) taxpayerHouseholds += state.source.weight;
     newPrivateLoans += funding.borrowed * state.source.weight;
+    bankLoanHeadroom = Math.max(0, bankLoanHeadroom - funding.borrowed * state.source.weight);
     principalRepayments += servicing.principalRepaid * state.source.weight;
     interestPaid += servicing.interestPaid * state.source.weight;
+    defaults += servicing.defaults * state.source.weight;
+    collateralSeized += servicing.collateralSeized * state.source.weight;
+    privateBankLosses += servicing.privateBankLosses * state.source.weight;
+    governmentGuarantees += servicing.governmentGuarantees * state.source.weight;
+    centralBankFacilities += servicing.centralBankFacilities * state.source.weight;
     privateTaxDebt += state.taxLoanBalance * state.source.weight;
     deferredTax += state.deferredTax * state.source.weight;
     equitySold += funding.equitySold * state.source.weight;
@@ -520,6 +613,11 @@ const assessAnnualHouseholdTaxes = (
     newPrivateLoans,
     principalRepayments,
     interestPaid,
+    defaults,
+    collateralSeized,
+    privateBankLosses,
+    governmentGuarantees,
+    centralBankFacilities,
     privateTaxDebt,
     deferredTax,
     equitySold,
@@ -676,6 +774,7 @@ export const buildPolicyProjection = (
     request,
     weights,
     true,
+    Number.POSITIVE_INFINITY,
   );
   const initialCollectionDifference = Math.abs(initialAnnualTax.taxCollected - taxCollected);
   const initialCollectionTolerance = Math.max(
@@ -731,6 +830,13 @@ export const buildPolicyProjection = (
   let priceLevel = 1;
   let baselinePriceLevel = 1;
   let privateTaxDebt = 0;
+  // This is an allocated ten-year capital buffer for the modeled tax-payment
+  // loan book, not a claim about the capitalization of the entire banking
+  // system. It avoids assuming that a new policy's first annual loans consume
+  // every dollar of the banking sector's pre-existing lending capacity.
+  let bankCapital =
+    initialAnnualTax.privateTaxDebt * MODEL_CONSTANTS.taxLoanBankCapitalRatio * YEARS;
+  let cumulativeGovernmentGuarantees = 0;
   let drainedTreasuryBalance = 0;
   let publicDebt = 0;
   const openingPublicDebt = initialFiscalState.externalPublicDebt;
@@ -801,6 +907,12 @@ export const buildPolicyProjection = (
       newPrivateLoans: 0,
       privateTaxLoanRepayments: 0,
       privateTaxLoanInterestPaid: 0,
+      taxLoanDefaults: 0,
+      collateralSeized: 0,
+      privateBankLosses: 0,
+      governmentGuarantees: 0,
+      centralBankFacilities: 0,
+      bankCapital,
       deferredTax: 0,
       governmentDebtAdded: publicDebt,
       bottom50PurchasingPowerIndex: 100,
@@ -825,6 +937,10 @@ export const buildPolicyProjection = (
             request,
             weights,
             false,
+            Math.max(
+              0,
+              bankCapital / MODEL_CONSTANTS.taxLoanBankCapitalRatio - privateTaxDebt,
+            ),
           );
     const taxCollectedYear = annualTax.taxCollected;
     const taxDemandMultiplier = taxCollected > 0 ? taxCollectedYear / taxCollected : 0;
@@ -905,7 +1021,15 @@ export const buildPolicyProjection = (
 
     const repayments = annualTax.principalRepayments;
     privateTaxDebt = annualTax.privateTaxDebt;
-    publicDebt = fiscalYear.netPublicDebtChange;
+    // Retained interest rebuilds the loan-book buffer. A private resolution
+    // consumes it; the other paths make the rescue assumption explicit rather
+    // than silently leaving a bank loss in the balance sheet.
+    bankCapital = Math.max(
+      0,
+      bankCapital + annualTax.interestPaid - annualTax.privateBankLosses,
+    );
+    cumulativeGovernmentGuarantees += annualTax.governmentGuarantees;
+    publicDebt = fiscalYear.netPublicDebtChange + cumulativeGovernmentGuarantees;
     const treasuryBalanceChange =
       fiscalYear.treasuryBalance - openingTreasuryBalance;
     const moneyFlow = applyTreasuryMoneyFlow({
@@ -916,6 +1040,10 @@ export const buildPolicyProjection = (
         // Interest moves a household deposit into bank income/equity; unlike a
         // transfer to another depositor, it extinguishes a deposit liability.
         annualTax.interestPaid +
+        // A facility is represented as a central-bank purchase of the residual
+        // bad claim. It is intentionally the only loss path that expands the
+        // model's broad-money proxy; guarantees instead add public debt.
+        annualTax.centralBankFacilities +
         governmentDeficitYear * request.behavior.deficitMonetizationShare,
       treasuryBalanceChange,
       drainedTreasuryBalance,
@@ -1031,7 +1159,8 @@ export const buildPolicyProjection = (
       annualTax.interestPaid * request.model.topTaxIncidenceShare;
     topWealth = Math.max(
       0,
-      topWealth * (1 + request.behavior.annualAssetReturn) - topTaxBurden - interestCost,
+      topWealth * (1 + request.behavior.annualAssetReturn) - topTaxBurden - interestCost -
+        annualTax.collateralSeized,
     );
     baselineTopWealth *= 1 + request.behavior.annualAssetReturn;
 
@@ -1082,6 +1211,12 @@ export const buildPolicyProjection = (
       newPrivateLoans: newPrivateLoansYear,
       privateTaxLoanRepayments: repayments,
       privateTaxLoanInterestPaid: annualTax.interestPaid,
+      taxLoanDefaults: annualTax.defaults,
+      collateralSeized: annualTax.collateralSeized,
+      privateBankLosses: annualTax.privateBankLosses,
+      governmentGuarantees: annualTax.governmentGuarantees,
+      centralBankFacilities: annualTax.centralBankFacilities,
+      bankCapital,
       deferredTax: annualTax.deferredTax,
       governmentDebtAdded: publicDebt,
       bottom50PurchasingPowerIndex:
@@ -1124,6 +1259,22 @@ export const buildPolicyProjection = (
   const bottom50PurchasingPowerChange = finalYear.bottom50PurchasingPowerIndex / 100 - 1;
   const top1RealWealthChange = finalYear.top1RealWealthIndex / 100 - 1;
   const gdpChange = finalYear.gdpIndex / 100 - 1;
+  const loanResolutionTotals = years.slice(1).reduce(
+    (totals, year) => ({
+      taxLoanDefaults: totals.taxLoanDefaults + year.taxLoanDefaults,
+      collateralSeized: totals.collateralSeized + year.collateralSeized,
+      privateBankLosses: totals.privateBankLosses + year.privateBankLosses,
+      governmentGuarantees: totals.governmentGuarantees + year.governmentGuarantees,
+      centralBankFacilities: totals.centralBankFacilities + year.centralBankFacilities,
+    }),
+    {
+      taxLoanDefaults: 0,
+      collateralSeized: 0,
+      privateBankLosses: 0,
+      governmentGuarantees: 0,
+      centralBankFacilities: 0,
+    },
+  );
   const publicBurdenPerHousehold =
     Math.max(0, publicDebt) / Math.max(1, request.representedHouseholds);
   const yearOneServiceValue = serviceValueRange(
@@ -1218,6 +1369,8 @@ export const buildPolicyProjection = (
       top1RealWealthChange,
       gdpChange,
       privateTaxDebt,
+      ...loanResolutionTotals,
+      bankCapital,
       publicBurdenPerHousehold,
       firstHyperinflationYear:
         years.find((year) => year.monthlyInflation >= STRICT_HYPER_MONTHLY_RATE)?.year ??

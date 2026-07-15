@@ -94,6 +94,10 @@ export const MODEL_CONSTANTS = {
   // Fraction of outstanding private tax-payment loans amortized each year
   // (≈10-year straight-line runoff of collateralized borrowing).
   loanAmortizationRate: 0.1,
+  // Equity capital allocated to the aggregate tax-payment loan book. New loans
+  // cannot exceed capital divided by this ratio; retained interest replenishes
+  // capacity while private write-offs consume it.
+  taxLoanBankCapitalRatio: 0.1,
 
   // --- Asset / housing feedback ------------------------------------------
   // Floor added to the user's housing supply elasticity so a perfectly
@@ -392,6 +396,15 @@ const FIXED_DOCS: readonly ModelConstantDoc[] = [
     value: pct(MODEL_CONSTANTS.averagePublicDebtInterestRate),
     rationale: "Scores annual interest on debt issued by the modeled program.",
     source: "Documented reduced-form Treasury financing assumption.",
+    tunable: false,
+  },
+  {
+    category: "Credit",
+    label: "Tax-loan bank capital ratio",
+    value: pct(MODEL_CONSTANTS.taxLoanBankCapitalRatio),
+    rationale:
+      "Capital allocated to the modeled tax-payment loan book; it limits new lending and absorbs private write-offs.",
+    source: "Reduced-form bank-capital constraint for the aggregate tax-loan book.",
     tunable: false,
   },
   {

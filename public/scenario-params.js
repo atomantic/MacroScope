@@ -22,6 +22,7 @@ export const SCENARIO_FIELD_SPECS = [
   { id: "borrow-share", param: "bs" },
   { id: "sell-share", param: "ss" },
   { id: "loan-rate", param: "lr" },
+  { id: "tax-loan-resolution", param: "tlr" },
   { id: "avoidance-elasticity", param: "ae" },
   { id: "expatriation-share", param: "es" },
   { id: "expatriation-residence-share", param: "ers" },

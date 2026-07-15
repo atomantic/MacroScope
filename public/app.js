@@ -215,6 +215,7 @@ const populateForm = (request) => {
   byId("sell-share").value = request.behavior.sellShare * 100;
   byId("asset-return").value = request.behavior.annualAssetReturn * 100;
   byId("loan-rate").value = request.behavior.loanInterestRate * 100;
+  byId("tax-loan-resolution").value = request.behavior.taxLoanResolution ?? "private-bank-loss";
   byId("monetization").value = request.behavior.deficitMonetizationShare * 100;
   byId("asset-hedge-share").value = request.behavior.assetHedgeShare * 100;
   byId("housing-hedge-share").value = request.behavior.housingHedgeShare * 100;
@@ -282,6 +283,7 @@ const formRequest = () => {
       sellShare: Number(byId("sell-share").value) / 100,
       annualAssetReturn: Number(byId("asset-return").value) / 100,
       loanInterestRate: Number(byId("loan-rate").value) / 100,
+      taxLoanResolution: byId("tax-loan-resolution").value,
       deficitMonetizationShare: Number(byId("monetization").value) / 100,
       assetHedgeShare: Number(byId("asset-hedge-share").value) / 100,
       housingHedgeShare: Number(byId("housing-hedge-share").value) / 100,
@@ -2083,7 +2085,10 @@ const renderFlow = (projection) => {
     ? `${compactMoney.format(finalYear.taxCollected)} from ${integer.format(finalYear.taxpayerHouseholds)} modeled taxpayers at a ${percent.format(finalYear.effectiveTaxRate)} effective rate by year ten as the taxed base ${baseTrend}`
     : "on net worth above the exemption";
   byId("flow-mix").textContent = `${percent.format(behaviorMix.borrowShare)} borrow · ${percent.format(behaviorMix.sellShare)} sell`;
-  byId("flow-loans").textContent = `${compactMoney.format(annualFlows.newPrivateLoans)} in new bank loans in year one${finalYear ? ` · ${compactMoney.format(finalYear.newPrivateLoans)} newly underwritten by year ten${finalYear.deferredTax > 1 ? ` · ${compactMoney.format(finalYear.deferredTax)} tax deferred after funding limits` : ""}` : ""}`;
+  const resolutionDetail = summary.taxLoanDefaults > 1
+    ? ` · ${compactMoney.format(summary.taxLoanDefaults)} defaults resolved over 10 years (${compactMoney.format(summary.collateralSeized)} collateral seized)`
+    : "";
+  byId("flow-loans").textContent = `${compactMoney.format(annualFlows.newPrivateLoans)} in new bank loans in year one${finalYear ? ` · ${compactMoney.format(finalYear.newPrivateLoans)} newly underwritten by year ten${finalYear.deferredTax > 1 ? ` · ${compactMoney.format(finalYear.deferredTax)} tax deferred after funding limits` : ""}${resolutionDetail}` : ""}`;
   byId("flow-ubi").textContent = `${compactMoney.format(annualFlows.ubiReceived)} cash · ${compactMoney.format(annualFlows.publicServicesSpending)} services`;
   const fiscalAction = firstFiscal?.debtIssued > 1
     ? `${compactMoney.format(firstFiscal.debtIssued)} debt issued`
@@ -2099,7 +2104,14 @@ const renderFlow = (projection) => {
   byId("flow-result").textContent = hasSelectedFinalService
     ? `${signedPercent(summary.bottom50PurchasingPowerChange)} buying power · ${compactMoney.format((finalYear?.ubiReceived ?? 0) + finalServiceValue)} cash + selected services`
     : `${signedPercent(summary.bottom50PurchasingPowerChange)} cash-only buying power`;
-  byId("flow-debt").textContent = `${compactMoney.format(summary.privateTaxDebt)} private tax debt${finalYear?.privateTaxLoanInterestPaid > 1 ? ` · ${compactMoney.format(finalYear.privateTaxLoanInterestPaid)} annual interest paid` : ""} · ${compactMoney.format(fiscal?.endingProgramDebt ?? 0)} program debt`;
+  const resolutionCost = summary.governmentGuarantees > 1
+    ? ` · ${compactMoney.format(summary.governmentGuarantees)} public guarantee`
+    : summary.centralBankFacilities > 1
+      ? ` · ${compactMoney.format(summary.centralBankFacilities)} central-bank facility`
+      : summary.privateBankLosses > 1
+        ? ` · ${compactMoney.format(summary.privateBankLosses)} bank loss`
+        : "";
+  byId("flow-debt").textContent = `${compactMoney.format(summary.privateTaxDebt)} private tax debt${finalYear?.privateTaxLoanInterestPaid > 1 ? ` · ${compactMoney.format(finalYear.privateTaxLoanInterestPaid)} annual interest paid` : ""}${resolutionCost} · ${compactMoney.format(fiscal?.endingProgramDebt ?? 0)} program debt`;
   const m2Sentence = annualFlows.m2Injection >= 0
     ? `The selected borrowing behavior adds ${compactMoney.format(annualFlows.m2Injection)} to M2 in year one`
     : `The selected Treasury-balance closure parks enough revenue to drain ${compactMoney.format(Math.abs(annualFlows.m2Injection))} from M2 in year one, outweighing loan-created deposits`;

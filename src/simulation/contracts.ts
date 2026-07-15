@@ -29,6 +29,11 @@ export interface ModelTunables {
 }
 
 export type PaymentStrategy = "cash-first" | "borrow-first" | "sell-first";
+/** Who absorbs a tax-payment loan loss after pledged collateral is seized. */
+export type TaxLoanResolution =
+  | "private-bank-loss"
+  | "government-guarantee"
+  | "central-bank-facility";
 export type EconomyClosure = "closed" | "partially-open" | "open-stress";
 export type BenefitIndexation = "none" | "cpi";
 export type ServiceEffectiveness = "unscored" | "zero" | "base" | "high";
@@ -108,6 +113,8 @@ export interface ComparisonRequestV1 {
     readonly sellShare: number;
     readonly annualAssetReturn: number;
     readonly loanInterestRate: number;
+    /** Declared loss-allocation path when a tax-payment loan misses debt service. */
+    readonly taxLoanResolution: TaxLoanResolution;
     readonly deficitMonetizationShare: number;
     readonly assetHedgeShare: number;
     readonly housingHedgeShare: number;
@@ -169,6 +176,18 @@ export interface ProjectionYear {
   readonly privateTaxLoanRepayments: number;
   /** Interest transferred from borrowers to banks this year. */
   readonly privateTaxLoanInterestPaid: number;
+  /** Tax-payment debt resolved after missed interest or scheduled principal. */
+  readonly taxLoanDefaults: number;
+  /** Pledged equity/housing transferred to the lender during resolution. */
+  readonly collateralSeized: number;
+  /** Loss absorbed by the modeled commercial-bank capital buffer. */
+  readonly privateBankLosses: number;
+  /** Loss converted into an explicit public-debt guarantee. */
+  readonly governmentGuarantees: number;
+  /** Loss purchased/funded by a central-bank liquidity facility. */
+  readonly centralBankFacilities: number;
+  /** Capital supporting the aggregate tax-payment loan book. */
+  readonly bankCapital: number;
   /** Tax assessed but not fundable after current collateral is exhausted. */
   readonly deferredTax: number;
   readonly governmentDebtAdded: number;
@@ -355,6 +374,13 @@ export interface PolicyProjection {
     // e.g. -0.04 = 4% output drag). Zero when both growth dials are 0.
     readonly gdpChange: number;
     readonly privateTaxDebt: number;
+    /** Ten-year totals for resolved tax-payment-loan defaults. */
+    readonly taxLoanDefaults: number;
+    readonly collateralSeized: number;
+    readonly privateBankLosses: number;
+    readonly governmentGuarantees: number;
+    readonly centralBankFacilities: number;
+    readonly bankCapital: number;
     readonly publicBurdenPerHousehold: number;
     readonly firstHyperinflationYear: number | null;
   };
@@ -595,6 +621,7 @@ export const DEFAULT_COMPARISON_REQUEST: ComparisonRequestV1 = {
     sellShare: 0.2,
     annualAssetReturn: 0.06,
     loanInterestRate: 0.045,
+    taxLoanResolution: "private-bank-loss",
     deficitMonetizationShare: 0,
     assetHedgeShare: 0.35,
     housingHedgeShare: 0.6,

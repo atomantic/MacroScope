@@ -5,6 +5,7 @@ import {
   type EconomyClosure,
   type ModelTunables,
   type ServiceEffectiveness,
+  type TaxLoanResolution,
 } from "../simulation/contracts.js";
 import { MODEL_TUNABLES } from "../simulation/modelConstants.js";
 import type { TaxBracket } from "../policies/schema.js";
@@ -226,6 +227,10 @@ export const parseComparisonRequest = (input: unknown): ParsedComparisonRequest 
     0.5,
     errors,
   );
+  const taxLoanResolution = readTaxLoanResolution(
+    behavior.taxLoanResolution,
+    errors,
+  );
   const deficitMonetizationShare = readNumber(
     behavior,
     "deficitMonetizationShare",
@@ -363,6 +368,7 @@ export const parseComparisonRequest = (input: unknown): ParsedComparisonRequest 
         sellShare,
         annualAssetReturn,
         loanInterestRate,
+        taxLoanResolution,
         deficitMonetizationShare,
         assetHedgeShare,
         housingHedgeShare,
@@ -545,6 +551,24 @@ const readTargetMode = (
   if (raw === "exemption" || raw === "top-share") return raw;
   errors.push("targetMode must be exemption or top-share.");
   return DEFAULT_COMPARISON_REQUEST.wealthTax.targetMode;
+};
+
+const readTaxLoanResolution = (
+  raw: unknown,
+  errors: string[],
+): TaxLoanResolution => {
+  if (raw === undefined) return DEFAULT_COMPARISON_REQUEST.behavior.taxLoanResolution;
+  if (
+    raw === "private-bank-loss" ||
+    raw === "government-guarantee" ||
+    raw === "central-bank-facility"
+  ) {
+    return raw;
+  }
+  errors.push(
+    "taxLoanResolution must be private-bank-loss, government-guarantee, or central-bank-facility.",
+  );
+  return DEFAULT_COMPARISON_REQUEST.behavior.taxLoanResolution;
 };
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>

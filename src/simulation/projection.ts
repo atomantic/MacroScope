@@ -14,6 +14,8 @@ import type {
   InflationRegime,
   PaymentStrategy,
   PolicyProjection,
+  ServiceEffectiveness,
+  ServiceValueRange,
   StrategyOutcome,
   StressCell,
   WealthGroupOutcome,
@@ -42,6 +44,37 @@ const STRICT_HYPER_ANNUAL_RATE =
 const BASELINE_RENTER_HOUSING_COST_SHARE =
   MODEL_CONSTANTS.baselineRenterHousingCostShare;
 const BOTTOM_HALF_RENTER_SHARE = MODEL_CONSTANTS.bottomHalfRenterShare;
+// These are resource-equivalent cases, not cash-equivalent welfare claims. The
+// higher avoided-cost/value factor for healthcare reflects insurance and care
+// access; the services factor covers the mixed childcare, education, housing,
+// and social-service delivery bundle currently represented in the model.
+const SERVICE_VALUE_FACTORS = {
+  zero: { healthcare: 0, services: 0 },
+  base: { healthcare: 0.6, services: 0.35 },
+  high: { healthcare: 0.85, services: 0.65 },
+} as const;
+
+const serviceValueRange = (
+  publicServicesSpending: number,
+  mode: ServiceEffectiveness,
+): ServiceValueRange => {
+  const valueFor = (effectiveness: keyof typeof SERVICE_VALUE_FACTORS) => {
+    const factors = SERVICE_VALUE_FACTORS[effectiveness];
+    return publicServicesSpending * (
+      MODEL_CONSTANTS.publicServicesHealthcareShare * factors.healthcare +
+      MODEL_CONSTANTS.publicServicesServicesShare * factors.services
+    );
+  };
+  const base = valueFor("base");
+  const high = valueFor("high");
+  return {
+    mode,
+    zero: 0,
+    base,
+    high,
+    selected: mode === "unscored" ? null : mode === "zero" ? 0 : mode === "base" ? base : high,
+  };
+};
 // A cohort ends "better off"/"worse off" once its leading real measure clears
 // this band around the no-policy path; inside it the result reads as mixed.
 const GROUP_OUTCOME_BAND = MODEL_CONSTANTS.groupOutcomeBand;
@@ -571,6 +604,7 @@ export const buildPolicyProjection = (
   strategies: Strategies,
   taxInputs: PolicyProjectionTaxInputs,
 ): PolicyProjection => {
+  const serviceEffectiveness = request.ubi.serviceEffectiveness ?? "unscored";
   const weights = strategyWeights(request);
   const blended = <T>(select: (outcome: StrategyOutcome) => T): number => {
     const value = select(strategies["cash-first"]);
@@ -674,6 +708,7 @@ export const buildPolicyProjection = (
     ubiReceived,
     rebate: yearOneFiscal.rebate,
     publicServicesSpending,
+    serviceValue: serviceValueRange(publicServicesSpending, serviceEffectiveness),
     administrativeCost,
     newPrivateLoans,
     governmentDeficit,
@@ -982,6 +1017,10 @@ export const buildPolicyProjection = (
       ubiReceived: allocation.ubiReceived,
       rebate: fiscalYear.rebate,
       publicServicesSpending: allocation.publicServicesSpending,
+      serviceValue: serviceValueRange(
+        allocation.publicServicesSpending,
+        serviceEffectiveness,
+      ),
       administrativeCost: allocation.administrativeCost,
       newPrivateLoans: newPrivateLoansYear,
       governmentDeficit: governmentDeficitYear,
@@ -1004,6 +1043,10 @@ export const buildPolicyProjection = (
   const gdpChange = finalYear.gdpIndex / 100 - 1;
   const publicBurdenPerHousehold =
     Math.max(0, publicDebt) / Math.max(1, request.representedHouseholds);
+  const yearOneServiceValue = serviceValueRange(
+    publicServicesSpending,
+    serviceEffectiveness,
+  );
   const verdict = makeVerdict({
     bottom50PurchasingPowerChange,
     peakAnnualInflation,
@@ -1011,6 +1054,8 @@ export const buildPolicyProjection = (
     gdpChange,
     borrowShare: weights.borrow,
     harmfulPeakInflation: request.model.verdictHarmfulInflation,
+    serviceValueScored:
+      publicServicesSpending > 0 && (yearOneServiceValue.selected ?? 0) > 0,
   });
   const stressTest = buildStressTest(
     strategies,
@@ -1057,6 +1102,7 @@ export const buildPolicyProjection = (
       ubiReceived,
       rebate: yearOneFiscal.rebate,
       publicServicesSpending,
+      serviceValue: yearOneServiceValue,
       administrativeCost,
       newPrivateLoans,
       assetSales,
@@ -1081,6 +1127,10 @@ export const buildPolicyProjection = (
       peakAnnualInflation,
       cumulativeM2Change: finalYear.m2Index / 100 - 1,
       bottom50PurchasingPowerChange,
+      selectedAnnualResourceValue:
+        yearOneServiceValue.selected === null
+          ? null
+          : ubiReceived + yearOneServiceValue.selected,
       top1RealWealthChange,
       gdpChange,
       privateTaxDebt,
@@ -1609,6 +1659,7 @@ const makeVerdict = (input: {
   gdpChange: number;
   borrowShare: number;
   harmfulPeakInflation: number;
+  serviceValueScored: boolean;
 }): PolicyProjection["verdict"] => {
   const v = MODEL_CONSTANTS.verdict;
   const harmfulPurchasingPower =
@@ -1639,6 +1690,7 @@ const makeVerdict = (input: {
       growthDriven && input.bottom50PurchasingPowerChange >= 0;
     return {
       rating: "harmful",
+      scope: input.serviceValueScored ? "cash-with-service-estimate" : "cash-only",
       headline: growthDriven
         ? growthDespitePurchasingPowerGain
           ? "The bottom half gains buying power, but the investment and output loss is harmful."
@@ -1654,6 +1706,7 @@ const makeVerdict = (input: {
   if (beneficial) {
     return {
       rating: "beneficial",
+      scope: input.serviceValueScored ? "cash-with-service-estimate" : "cash-only",
       headline:
         input.borrowShare > v.fragileBorrowShare
           ? "The bottom half gains, but borrowing makes the result more fragile."
@@ -1664,9 +1717,13 @@ const makeVerdict = (input: {
   }
   return {
     rating: "mixed",
-    headline: "The benefit fades to near break-even—and borrowing is why.",
-    explanation:
-      "The bottom half gains at first, but most of that advantage is lost as prices adjust. The result is highly sensitive to whether wealthy households borrow or sell assets to pay the tax.",
+    scope: input.serviceValueScored ? "cash-with-service-estimate" : "cash-only",
+    headline: input.serviceValueScored
+      ? "Cash buying power is near break-even; the stated service value remains a separate resource estimate."
+      : "Cash-only result: service value is not scored, so overall welfare is not rated.",
+    explanation: input.serviceValueScored
+      ? "Cash purchasing power is near break-even as prices adjust. The displayed service resource estimate is conditional on the selected effectiveness assumption and is not spendable cash."
+      : "The model reports cash purchasing power and service spending separately. Choose an explicit zero, base, or high service-effectiveness assumption to display a resource-equivalent range; this cash-only rating is not an overall welfare claim.",
   };
 };
 

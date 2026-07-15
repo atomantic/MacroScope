@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f2efe7" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./styles.css?v=22" />
+    <link rel="stylesheet" href="./styles.css?v=23" />
     <title>MacroScope</title>
   </head>
   <body>
@@ -405,6 +405,7 @@
             <label for="funding-rule">Funding rule<select id="funding-rule" name="fundingRule"><option value="revenue-constrained">Revenue constrained</option><option value="fixed">Fixed benefit + deficit</option><option value="smoothed">Smoothed with debt</option></select></label>
             <label for="surplus-use">Surplus use<select id="surplus-use" name="surplusUse"><option value="debt-reduction">Reduce public debt</option><option value="additional-services">Additional services</option><option value="rebate">Household rebate</option><option value="treasury-balance">Hold at Treasury</option></select><small class="field-hint">After program-debt service, choose whether extra revenue retires other debt, funds services, returns as cash, or remains parked. Debt reduction falls back to Treasury once the opening debt stock is exhausted.</small></label>
             <label for="benefit-indexation">Benefit indexation<select id="benefit-indexation" name="benefitIndexation"><option value="none">Fixed nominal</option><option value="cpi">CPI indexed</option></select></label>
+            <label for="service-effectiveness">Service value assumption<select id="service-effectiveness" name="serviceEffectiveness"><option value="unscored">Unscored (cash-only result)</option><option value="zero">Zero resource value</option><option value="base">Base avoided-cost value</option><option value="high">High access/value case</option></select><small class="field-hint">Services still add provider demand in every case. This only controls the separately reported household resource-equivalent range; it never turns services into cash.</small></label>
             <label for="direct-cash-share">Delivered as cash (%)<input id="direct-cash-share" name="directCashShare" type="number" min="0" max="100" step="5" /></label>
             <label for="administrative-share">Administration share (%)<input id="administrative-share" name="administrativeShare" type="number" min="0" max="50" step="1" /></label>
           </fieldset>
@@ -578,6 +579,6 @@
     </footer>
     <div class="toast-container" id="toast-container" aria-live="polite" aria-atomic="true"></div>
     <div class="visually-hidden" id="chart-readout" role="status" aria-live="polite"></div>
-    <script src="./app.js?v=22" type="module"></script>
+    <script src="./app.js?v=23" type="module"></script>
   </body>
 </html>

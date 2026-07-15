@@ -16,6 +16,7 @@ export const SCENARIO_FIELD_SPECS = [
   { id: "funding-rule", param: "fr" },
   { id: "surplus-use", param: "su" },
   { id: "benefit-indexation", param: "bi" },
+  { id: "service-effectiveness", param: "se" },
   { id: "direct-cash-share", param: "dc" },
   { id: "administrative-share", param: "as" },
   { id: "borrow-share", param: "bs" },

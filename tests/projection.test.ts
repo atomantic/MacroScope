@@ -546,6 +546,39 @@ describe("ten-year projection dynamics", () => {
     ).toBe(true);
   });
 
+  it("keeps service-heavy results cash-only until a service value is explicitly selected", () => {
+    const base = nationalRequest();
+    const unscored = runComparison({
+      ...base,
+      ubi: { ...base.ubi, directCashShare: 0, serviceEffectiveness: "unscored" },
+    }).projection;
+    const scored = runComparison({
+      ...base,
+      ubi: { ...base.ubi, directCashShare: 0, serviceEffectiveness: "base" },
+    }).projection;
+
+    expect(unscored.annualFlows.publicServicesSpending).toBeGreaterThan(0);
+    expect(unscored.annualFlows.serviceValue.selected).toBeNull();
+    expect(unscored.verdict.scope).toBe("cash-only");
+    const zero = runComparison({
+      ...base,
+      ubi: { ...base.ubi, directCashShare: 0, serviceEffectiveness: "zero" },
+    }).projection;
+    expect(zero.annualFlows.serviceValue.selected).toBe(0);
+    expect(zero.verdict.scope).toBe("cash-only");
+    expect(scored.annualFlows.serviceValue.zero).toBe(0);
+    expect(scored.annualFlows.serviceValue.base).toBeGreaterThan(0);
+    expect(scored.annualFlows.serviceValue.high).toBeGreaterThan(
+      scored.annualFlows.serviceValue.base,
+    );
+    expect(scored.annualFlows.serviceValue.selected).toBe(
+      scored.annualFlows.serviceValue.base,
+    );
+    expect(scored.summary.selectedAnnualResourceValue).toBeGreaterThan(
+      scored.annualFlows.ubiReceived,
+    );
+  });
+
   it("normalizes stress demand against funded surplus spending when requested benefits are zero", () => {
     const base = nationalRequest();
     for (const surplusUse of ["additional-services", "rebate"] as const) {

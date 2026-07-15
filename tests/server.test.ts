@@ -275,6 +275,7 @@ describe("PortOS server", () => {
           fundingRule: "magic",
           surplusUse: "magic",
           benefitIndexation: "magic",
+          serviceEffectiveness: "magic",
         },
       }).errors,
     ).toEqual(
@@ -284,6 +285,7 @@ describe("PortOS server", () => {
         "fundingRule must be fixed, revenue-constrained, or smoothed.",
         "surplusUse must be debt-reduction, additional-services, rebate, or treasury-balance.",
         "benefitIndexation must be none or cpi.",
+        "serviceEffectiveness must be unscored, zero, base, or high.",
       ]),
     );
   });

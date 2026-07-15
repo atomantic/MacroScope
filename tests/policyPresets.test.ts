@@ -52,6 +52,11 @@ const namedProposals = Object.values(POLICY_PRESETS).filter(
 );
 
 describe("policy preset definitions", () => {
+  it("keeps the current-law benchmark transfer-free", () => {
+    const currentLaw = presetFormFields(POLICY_PRESETS["current-law"]);
+    expect(currentLaw.adultBenefit).toBe(0);
+    expect(currentLaw.childBenefit).toBe(0);
+  });
   it("exposes a structured, source-linked definition for every named proposal", () => {
     expect(namedProposals.length).toBeGreaterThan(0);
     for (const def of namedProposals) {

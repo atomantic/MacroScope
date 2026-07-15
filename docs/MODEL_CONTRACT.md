@@ -2,7 +2,7 @@
 
 ## Scope of the first slice
 
-This slice establishes the accounting kernel and policy schema before adding production, endogenous prices, market impact, synthetic-population calibration, or Three.js. It implements the smallest closed economy that can distinguish the central policy mechanisms:
+This slice establishes the accounting kernel and policy schema before adding a full multi-country model. It implements the smallest domestic economy that can distinguish the central policy mechanisms, plus an optional aggregate rest-of-world closure:
 
 1. A household pays wealth tax from existing deposits.
 2. A household originates a collateralized loan and pays the tax from the new deposit.
@@ -30,6 +30,7 @@ Journal events must balance debits and credits before they can mutate state. Eve
 | Treasury account | Asset | Liability | Central bank |
 | Public equity | Asset | Equity claim | Aggregate firm sector |
 | Productive capital | Real asset | Opening/issued equity | Aggregate firm sector |
+| Foreign claim | Asset held by a U.S. resident | Liability issued by rest of world | Aggregate rest-of-world sector |
 
 Account metadata also identifies owner, counterparty, instrument, and whether the account is the holder or issuer side of a financial claim. This lets invariant checks compare every financial asset with its matching liability or equity claim.
 
@@ -40,6 +41,7 @@ Account metadata also identifies owner, counterparty, instrument, and whether th
 - **Government**: Treasury-account asset; tax income; UBI expense.
 - **Central bank**: government-securities asset; reserve and Treasury-account liabilities.
 - **Firm sector**: productive-capital asset; public-equity claims issued.
+- **Rest of world (optional aggregate closure)**: foreign deposits, domestic securities/property claims, Treasury securities, and foreign claims held by U.S. residents.
 
 The kernel checks both the economy-wide trial balance and each entity's accounting identity after every committed event.
 
@@ -85,7 +87,18 @@ Floating-point comparisons use an explicit tolerance. Production-scale simulatio
 
 The interactive runner uses a deterministic weighted sample representing 135.1 million U.S. households. The default run uses 4,000 agents, allocates 80% of them to the bottom 99%, then explicitly oversamples the top 1%, 0.1%, and 0.01%. Wealth-group totals are calibrated to the Federal Reserve Distributional Financial Accounts; within-group joint distributions remain stylized. Adult and child counts reconcile to the July 2025 Census resident population, while aggregate personal income and PCE reconcile independently to calendar-year 2025 BEA totals. Full targets, eligibility rules, sector crosswalk, and diagnostics are documented in [POPULATION_FLOW_CALIBRATION.md](POPULATION_FLOW_CALIBRATION.md).
 
-Each comparison reuses the same households for cash-first, borrow-first, and sell-first strategies. The ten-year path carries each household's initial funding mix forward, services its outstanding tax loan from deposits, and re-underwrites every new loan against current equity and housing collateral after mortgages and prior tax loans. A funding shortfall falls through from cash to borrowing to asset sales, then remains visible as deferred tax rather than compounding into unconstrained credit. Public-equity sales interact with configurable buyer depth and price impact. Falling equity values can breach collateral limits, producing iterative forced sales and loan repayment. Domestic buyers absorb asset quantities, so ownership changes and price revaluation remain distinct. Housing can fund otherwise-unpayable tax liabilities as a slower last-resort transfer, but regional housing price feedback is deferred.
+Each comparison reuses the same households for cash-first, borrow-first, and sell-first strategies. The ten-year path carries each household's initial funding mix forward, services its outstanding tax loan from deposits, and re-underwrites every new loan against current equity and housing collateral after mortgages and prior tax loans. A funding shortfall falls through from cash to borrowing to asset sales, then remains visible as deferred tax rather than compounding into unconstrained credit. Public-equity sales interact with configurable buyer depth and price impact. Falling equity values can breach collateral limits, producing iterative forced sales and loan repayment. In closed mode, domestic buyers absorb asset quantities. In partially-open and stress modes, a configurable rest-of-world share absorbs asset sales and newly issued Treasury debt, while resident capital outflow becomes an explicit foreign claim rather than disappearing deposits. Housing can fund otherwise-unpayable tax liabilities as a slower last-resort transfer, but regional housing price feedback is deferred.
+
+## Aggregate rest-of-world closure
+
+The optional foreign sector is one auditable aggregate, not a country-by-country DSGE or exchange-rate forecast. It separates four stock-flow paths that were previously conflated:
+
+1. Foreign buyers acquire domestic securities and property claims; this raises foreign ownership without creating or destroying U.S. deposits.
+2. Foreign holders buy new Treasury debt; that funding is reported separately from domestic M2.
+3. Residents acquire foreign claims as a capital outflow; the net foreign asset position rises by that claim rather than treating wealth as deleted.
+4. Repatriation returns part of a foreign claim to domestic deposits; the remaining net flow supplies a directional FX-pressure indicator.
+
+Expatriation is likewise split into a reported residence change, a U.S. tax-jurisdiction change (the only channel that reduces the taxable base), and an optional capital-flow response. Every nonzero aggregate cross-border leg is replayed through the ledger with domestic and rest-of-world entries; trial-balance and instrument-mirror residuals must remain within tolerance. The default is closed with all foreign-flow dials at zero, preserving the earlier domestic-only path.
 
 Demand changes are allocated across housing, food, healthcare, transportation, energy, durable goods, discretionary spending, and services. Baseline sector totals use a BEA/BLS crosswalk whose shares sum to the calibrated PCE total; percentile-varying demand changes preserve the model's distributional shape. Sector inflation pressure, supply-constraint amplification, and monetary-policy offset are reduced-form assumptions rather than forecasts.
 

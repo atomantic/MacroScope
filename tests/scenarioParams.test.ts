@@ -64,6 +64,29 @@ describe("scenario URL parameters", () => {
     expect(decoded.fields["persona-tenure"]).toBe("owner");
   });
 
+  it("round-trips the open-economy closure and expatriation channels", () => {
+    const values = {
+      ...defaults,
+      "economy-closure": "partially-open",
+      "foreign-buyer-share": "35",
+      "foreign-treasury-share": "40",
+      "capital-outflow-response": "50",
+      "repatriation-fx-pass-through": "20",
+      "expatriation-residence-share": "60",
+      "expatriation-tax-base-share": "75",
+    };
+    const decoded = decodeScenarioParams(encodeScenarioParams({ values, defaults }));
+    for (const id of [
+      "economy-closure",
+      "foreign-buyer-share",
+      "foreign-treasury-share",
+      "capital-outflow-response",
+      "repatriation-fx-pass-through",
+      "expatriation-residence-share",
+      "expatriation-tax-base-share",
+    ]) expect(decoded.fields[id]).toBe(values[id]);
+  });
+
   it("round-trips the growth-channel dials so shared links preserve them", () => {
     const values = { ...defaults, "savings-response": "0.8", "demand-offset": "1.2" };
     const query = encodeScenarioParams({ values, defaults });

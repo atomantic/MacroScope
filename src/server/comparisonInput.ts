@@ -2,6 +2,7 @@ import {
   DEFAULT_COMPARISON_REQUEST,
   type BenefitIndexation,
   type ComparisonRequestV1,
+  type EconomyClosure,
   type ModelTunables,
   type ServiceEffectiveness,
 } from "../simulation/contracts.js";
@@ -23,6 +24,7 @@ export const parseComparisonRequest = (input: unknown): ParsedComparisonRequest 
   const wealthTax = isRecord(input.wealthTax) ? input.wealthTax : {};
   const ubi = isRecord(input.ubi) ? input.ubi : {};
   const market = isRecord(input.market) ? input.market : {};
+  const economy = isRecord(input.economy) ? input.economy : {};
   const behavior = isRecord(input.behavior) ? input.behavior : {};
 
   const schemaVersion = readNumber(
@@ -159,6 +161,39 @@ export const parseComparisonRequest = (input: unknown): ParsedComparisonRequest 
     2,
     errors,
   );
+  const closure = readEconomyClosure(economy.closure, errors);
+  const foreignBuyerShare = readNumber(
+    economy,
+    "foreignBuyerShare",
+    DEFAULT_COMPARISON_REQUEST.economy.foreignBuyerShare,
+    0,
+    1,
+    errors,
+  );
+  const foreignTreasuryDebtShare = readNumber(
+    economy,
+    "foreignTreasuryDebtShare",
+    DEFAULT_COMPARISON_REQUEST.economy.foreignTreasuryDebtShare,
+    0,
+    1,
+    errors,
+  );
+  const capitalOutflowResponse = readNumber(
+    economy,
+    "capitalOutflowResponse",
+    DEFAULT_COMPARISON_REQUEST.economy.capitalOutflowResponse,
+    0,
+    1,
+    errors,
+  );
+  const repatriationFxPassThrough = readNumber(
+    economy,
+    "repatriationFxPassThrough",
+    DEFAULT_COMPARISON_REQUEST.economy.repatriationFxPassThrough,
+    0,
+    1,
+    errors,
+  );
   const borrowShare = readNumber(
     behavior,
     "borrowShare",
@@ -239,6 +274,22 @@ export const parseComparisonRequest = (input: unknown): ParsedComparisonRequest 
     0.9,
     errors,
   );
+  const expatriationResidenceShare = readNumber(
+    behavior,
+    "expatriationResidenceShare",
+    DEFAULT_COMPARISON_REQUEST.behavior.expatriationResidenceShare,
+    0,
+    1,
+    errors,
+  );
+  const expatriationTaxBaseShare = readNumber(
+    behavior,
+    "expatriationTaxBaseShare",
+    DEFAULT_COMPARISON_REQUEST.behavior.expatriationTaxBaseShare,
+    0,
+    1,
+    errors,
+  );
   const privateBusinessInclusionRate = readNumber(
     behavior,
     "privateBusinessInclusionRate",
@@ -300,6 +351,13 @@ export const parseComparisonRequest = (input: unknown): ParsedComparisonRequest 
         maximumCollateralLtv,
         housingSupplyElasticity,
       },
+      economy: {
+        closure,
+        foreignBuyerShare,
+        foreignTreasuryDebtShare,
+        capitalOutflowResponse,
+        repatriationFxPassThrough,
+      },
       behavior: {
         borrowShare,
         sellShare,
@@ -311,6 +369,8 @@ export const parseComparisonRequest = (input: unknown): ParsedComparisonRequest 
         rentPassThrough,
         avoidanceElasticity,
         expatriationShare,
+        expatriationResidenceShare,
+        expatriationTaxBaseShare,
         privateBusinessInclusionRate,
         savingsResponseElasticity,
         demandGrowthOffset,
@@ -445,6 +505,15 @@ const readServiceEffectiveness = (
   if (raw === "unscored" || raw === "zero" || raw === "base" || raw === "high") return raw;
   errors.push("serviceEffectiveness must be unscored, zero, base, or high.");
   return DEFAULT_COMPARISON_REQUEST.ubi.serviceEffectiveness ?? "unscored";
+};
+
+const readEconomyClosure = (raw: unknown, errors: string[]): EconomyClosure => {
+  if (raw === undefined) return DEFAULT_COMPARISON_REQUEST.economy.closure;
+  if (raw === "closed" || raw === "partially-open" || raw === "open-stress") {
+    return raw;
+  }
+  errors.push("economy.closure must be closed, partially-open, or open-stress.");
+  return DEFAULT_COMPARISON_REQUEST.economy.closure;
 };
 
 const readSurplusUse = (

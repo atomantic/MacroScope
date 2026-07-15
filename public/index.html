@@ -248,6 +248,24 @@
         </div>
       </section>
 
+      <section class="theory-section" aria-labelledby="open-economy-heading">
+        <div class="section-intro theory-intro">
+          <p class="kicker">Open-economy closure</p>
+          <div>
+            <div class="theory-title-line"><span class="theory-badge" id="open-economy-badge">Calculating</span><h2 id="open-economy-heading">Who absorbs the assets and public debt?</h2></div>
+            <p id="open-economy-explanation">Tracing foreign ownership, resident foreign claims, and the net external position…</p>
+          </div>
+        </div>
+        <ol class="theory-chain" aria-label="Open-economy results">
+          <li><span>Foreign-owned domestic claims</span><strong id="open-economy-foreign-claims">—</strong><small>securities and housing claims purchased by non-residents</small></li>
+          <li><span>Foreign-held Treasury debt</span><strong id="open-economy-foreign-debt">—</strong><small>new program debt placed abroad</small></li>
+          <li><span>Resident foreign claims</span><strong id="open-economy-resident-claims">—</strong><small>capital outflow net of repatriation</small></li>
+          <li><span>Net foreign asset position</span><strong id="open-economy-nfa">—</strong><small>U.S. foreign claims less foreign U.S. claims</small></li>
+          <li><span>Peak FX pressure</span><strong id="open-economy-fx">—</strong><small>directional, not an exchange-rate forecast</small></li>
+        </ol>
+        <div class="plain-language-answer"><strong>What this means:</strong><span id="open-economy-accounting">Every reported cross-border transaction is replayed through the double-entry ledger.</span></div>
+      </section>
+
       <section class="stress-section" aria-labelledby="stress-heading">
         <div class="section-intro">
           <p class="kicker">How far from hyperinflation?</p>
@@ -435,7 +453,9 @@
               </div>
               <div class="behavior-grid">
                 <label for="avoidance-elasticity">Avoidance per point (%)<input id="avoidance-elasticity" name="avoidanceElasticity" type="number" min="0" max="50" step="1" /><small class="field-hint">Share of the taxable base that vanishes into valuation games and reclassification for each percentage point of tax rate.</small></label>
-                <label for="expatriation-share">Expatriation over decade (%)<input id="expatriation-share" name="expatriationShare" type="number" min="0" max="90" step="1" /><small class="field-hint">Share of top-tier taxable wealth that leaves the country and the tax base over the ten-year horizon.</small></label>
+                <label for="expatriation-share">Expatriation shock over decade (%)<input id="expatriation-share" name="expatriationShare" type="number" min="0" max="90" step="1" /><small class="field-hint">Top-tier shock to split into a residence change, U.S. tax-jurisdiction change, and optional capital flow. It is not assumed that all three happen together.</small></label>
+                <label for="expatriation-residence-share">Moves residence (%)<input id="expatriation-residence-share" name="expatriationResidenceShare" type="number" min="0" max="100" step="5" /><small class="field-hint">Share of the expatriation shock represented as people changing residence. This is reported separately and does not by itself erase assets or tax revenue.</small></label>
+                <label for="expatriation-tax-base-share">Leaves U.S. tax base (%)<input id="expatriation-tax-base-share" name="expatriationTaxBaseShare" type="number" min="0" max="100" step="5" /><small class="field-hint">Share of the shock that no longer falls under U.S. wealth-tax jurisdiction. The default keeps the model's prior tax-base response.</small></label>
                 <label for="private-business-inclusion">Private-business included (%)<input id="private-business-inclusion" name="privateBusinessInclusionRate" type="number" min="0" max="100" step="5" /><small class="field-hint">Share of hard-to-value private-business wealth actually captured in the base after valuation discounts.</small></label>
               </div>
             </fieldset>
@@ -470,6 +490,25 @@
                 <label for="housing-hedge-share">Asset flow to housing (%)<input id="housing-hedge-share" name="housingHedgeShare" type="number" min="0" max="100" step="5" /></label>
                 <label for="housing-supply">Housing supply response<input id="housing-supply" name="housingSupply" type="number" min="0" max="2" step="0.1" /></label>
                 <label for="rent-pass-through">Price gain passed to rent (%)<input id="rent-pass-through" name="rentPassThrough" type="number" min="0" max="100" step="5" /></label>
+              </div>
+            </fieldset>
+          </details>
+          <details class="scenario-control-section">
+            <summary><span>Open-economy closure</span><small>Foreign buyers, debt, and capital flows</small></summary>
+            <fieldset class="behavior-fieldset">
+              <legend class="visually-hidden">Open-economy closure</legend>
+              <div class="behavior-presets" aria-label="Open-economy presets">
+                <span>Closure preset</span>
+                <button type="button" data-economy-preset="closed">Closed</button>
+                <button type="button" data-economy-preset="partially-open">Partially open</button>
+                <button type="button" data-economy-preset="open-stress">Open stress</button>
+              </div>
+              <div class="behavior-grid">
+                <label for="economy-closure">Economy closure<select id="economy-closure" name="economyClosure"><option value="closed">Closed — domestic buyers only</option><option value="partially-open">Partially open — aggregate rest of world</option><option value="open-stress">Open stress — high foreign exposure</option></select><small class="field-hint">Selects the reported closure. The shares below make the exposure explicit; the model does not claim a country-by-country exchange-rate forecast.</small></label>
+                <label for="foreign-buyer-share">Foreign share of asset sales (%)<input id="foreign-buyer-share" name="foreignBuyerShare" type="number" min="0" max="100" step="5" /><small class="field-hint">Share of forced equity and housing sales bought by the aggregate rest-of-world sector instead of another modeled U.S. household.</small></label>
+                <label for="foreign-treasury-share">Foreign share of new Treasury debt (%)<input id="foreign-treasury-share" name="foreignTreasuryDebtShare" type="number" min="0" max="100" step="5" /><small class="field-hint">Share of new program debt placed with foreign holders. It is shown separately from domestic M2.</small></label>
+                <label for="capital-outflow-response">Capital-outflow response (%)<input id="capital-outflow-response" name="capitalOutflowResponse" type="number" min="0" max="100" step="5" /><small class="field-hint">Share of the expatriation shock converted into U.S. residents acquiring foreign claims. This changes the net foreign asset position without pretending deposits disappear.</small></label>
+                <label for="repatriation-fx-pass-through">Repatriation / FX pass-through (%)<input id="repatriation-fx-pass-through" name="repatriationFxPassThrough" type="number" min="0" max="100" step="5" /><small class="field-hint">Share of each modeled outflow that returns as repatriation. The remaining net flow creates directional exchange-rate pressure.</small></label>
               </div>
             </fieldset>
           </details>

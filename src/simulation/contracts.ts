@@ -29,6 +29,7 @@ export interface ModelTunables {
 }
 
 export type PaymentStrategy = "cash-first" | "borrow-first" | "sell-first";
+export type EconomyClosure = "closed" | "partially-open" | "open-stress";
 export type BenefitIndexation = "none" | "cpi";
 export type ServiceEffectiveness = "unscored" | "zero" | "base" | "high";
 export type ConsumptionSector =
@@ -86,6 +87,22 @@ export interface ComparisonRequestV1 {
     readonly maximumCollateralLtv: number;
     readonly housingSupplyElasticity: number;
   };
+  /**
+   * Aggregate rest-of-world closure. This is deliberately one sector rather
+   * than a multi-country forecast: it makes foreign ownership and financing
+   * explicit without pretending to solve a full exchange-rate model.
+   */
+  readonly economy: {
+    readonly closure: EconomyClosure;
+    /** Share of forced equity/housing sales funded by non-resident buyers. */
+    readonly foreignBuyerShare: number;
+    /** Share of newly issued Treasury debt bought by the rest of the world. */
+    readonly foreignTreasuryDebtShare: number;
+    /** Fraction of the configured expatriation shock that converts into a capital outflow. */
+    readonly capitalOutflowResponse: number;
+    /** Share of an outflow immediately offset by repatriation / FX pass-through. */
+    readonly repatriationFxPassThrough: number;
+  };
   readonly behavior: {
     readonly borrowShare: number;
     readonly sellShare: number;
@@ -103,6 +120,10 @@ export interface ComparisonRequestV1 {
     // with the model's historical 0.7 private-business inclusion.
     readonly avoidanceElasticity: number;
     readonly expatriationShare: number;
+    /** Separately report people moving residence; it does not itself erase assets. */
+    readonly expatriationResidenceShare: number;
+    /** Share of the expatriation shock that leaves the U.S. tax jurisdiction. */
+    readonly expatriationTaxBaseShare: number;
     readonly privateBusinessInclusionRate: number;
     // Growth/investment channel dials (issue #13). savingsResponseElasticity is
     // the fraction of the capital-replacement investment rate lost per unit of
@@ -160,6 +181,20 @@ export interface ProjectionYear {
   // dominates. Exactly 100 every year when both growth dials are 0.
   readonly gdpIndex: number;
   readonly regime: InflationRegime;
+}
+
+export interface OpenEconomyProjectionYear {
+  readonly year: number;
+  readonly foreignAssetPurchases: number;
+  readonly foreignTreasuryPurchases: number;
+  readonly residentCapitalOutflow: number;
+  readonly repatriatedCapital: number;
+  readonly netForeignAssetPosition: number;
+  readonly foreignOwnedDomesticClaims: number;
+  /** Positive values are net capital-outflow / depreciation pressure. */
+  readonly exchangeRatePressure: number;
+  readonly residentsChangingJurisdiction: number;
+  readonly taxableBaseLeavingJurisdiction: number;
 }
 
 export interface FiscalProjectionYear {
@@ -362,6 +397,33 @@ export interface PolicyProjection {
     };
     readonly years: readonly TheoryTestYear[];
   };
+  readonly openEconomy: {
+    readonly closure: EconomyClosure;
+    readonly assumptions: {
+      readonly foreignBuyerShare: number;
+      readonly foreignTreasuryDebtShare: number;
+      readonly capitalOutflowResponse: number;
+      readonly repatriationFxPassThrough: number;
+      readonly residenceChangeShare: number;
+      readonly taxBaseJurisdictionShare: number;
+    };
+    readonly summary: {
+      readonly foreignOwnedDomesticClaims: number;
+      readonly foreignHeldTreasuryDebt: number;
+      readonly residentForeignClaims: number;
+      readonly netForeignAssetPosition: number;
+      readonly cumulativeNetCapitalOutflow: number;
+      readonly peakExchangeRatePressure: number;
+    };
+    readonly accounting: {
+      readonly trialBalanceResidual: number;
+      readonly instrumentResidual: number;
+      readonly events: number;
+      readonly failures: readonly string[];
+      readonly passed: boolean;
+    };
+    readonly years: readonly OpenEconomyProjectionYear[];
+  };
   readonly interpretation: readonly string[];
 }
 
@@ -521,6 +583,13 @@ export const DEFAULT_COMPARISON_REQUEST: ComparisonRequestV1 = {
     maximumCollateralLtv: 0.5,
     housingSupplyElasticity: 0.4,
   },
+  economy: {
+    closure: "closed",
+    foreignBuyerShare: 0,
+    foreignTreasuryDebtShare: 0,
+    capitalOutflowResponse: 0,
+    repatriationFxPassThrough: 0,
+  },
   behavior: {
     borrowShare: 0.65,
     sellShare: 0.2,
@@ -532,6 +601,8 @@ export const DEFAULT_COMPARISON_REQUEST: ComparisonRequestV1 = {
     rentPassThrough: 0.3,
     avoidanceElasticity: 0,
     expatriationShare: 0,
+    expatriationResidenceShare: 1,
+    expatriationTaxBaseShare: 1,
     privateBusinessInclusionRate: 0.7,
     savingsResponseElasticity: 0,
     demandGrowthOffset: 0,

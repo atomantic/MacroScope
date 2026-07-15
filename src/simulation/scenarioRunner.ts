@@ -32,6 +32,7 @@ import {
 import {
   buildPolicyProjection,
   type HouseholdProjectionTaxAssessment,
+  type HouseholdProjectionFunding,
   type ProjectionDemandProfile,
 } from "./projection.js";
 import { computeStrategyAccounting } from "./ledgerAudit.js";
@@ -62,7 +63,7 @@ interface HouseholdTaxAssessment {
 
 interface StrategyRunResult {
   readonly outcome: StrategyOutcome;
-  readonly taxCollectedByHousehold: ReadonlyMap<string, number>;
+  readonly fundingByHousehold: ReadonlyMap<string, HouseholdProjectionFunding>;
   readonly demandProfile: ProjectionDemandProfile;
 }
 
@@ -154,23 +155,24 @@ export const runComparisonWithPopulation = (
     households.map((household) => ({
       percentile: household.percentile,
       weight: household.weight,
+      annualIncome: household.annualIncome,
       taxAssessed: requireTaxAssessment(
         householdTaxAssessments,
         household.id,
       ).taxAssessed,
       assets: household.assets,
       liabilities: household.liabilities,
-      taxCollected: {
-        "cash-first": requireCollectedTax(
-          strategyRuns["cash-first"].taxCollectedByHousehold,
+      funding: {
+        "cash-first": requireFundingBreakdown(
+          strategyRuns["cash-first"].fundingByHousehold,
           household.id,
         ),
-        "borrow-first": requireCollectedTax(
-          strategyRuns["borrow-first"].taxCollectedByHousehold,
+        "borrow-first": requireFundingBreakdown(
+          strategyRuns["borrow-first"].fundingByHousehold,
           household.id,
         ),
-        "sell-first": requireCollectedTax(
-          strategyRuns["sell-first"].taxCollectedByHousehold,
+        "sell-first": requireFundingBreakdown(
+          strategyRuns["sell-first"].fundingByHousehold,
           household.id,
         ),
       },
@@ -208,7 +210,7 @@ export const runComparisonWithPopulation = (
       "The current closed economy assumes domestic buyers absorb all equity and housing sales.",
       "Housing sales remain a national, closed-economy transfer channel; the ten-year owner-renter view adds reduced-form price, supply, and rent feedback rather than regional market clearing.",
       "Wealth Gini values treat negative net worth as zero for the inequality calculation.",
-      `The ten-year path is a transparent reduced-form projection with ${request.ubi.benefitIndexation === "cpi" ? "CPI-indexed policy benefits (one-year recognition lag)" : "fixed nominal policy benefits"}. Each year re-assesses the unchanged nominal wealth-tax schedule against evolved synthetic household balances, so fixed exemptions and bracket crossings are not approximated by a single aggregate revenue multiplier. Paid tax reduces included household assets; avoided or deferred tax does not. Annual financing choices and credit/default dynamics remain outside this projection.`,
+      `The ten-year path is a transparent reduced-form projection with ${request.ubi.benefitIndexation === "cpi" ? "CPI-indexed policy benefits (one-year recognition lag)" : "fixed nominal policy benefits"}. Each year re-assesses the unchanged nominal wealth-tax schedule against evolved synthetic household balances, so fixed exemptions and bracket crossings are not approximated by a single aggregate revenue multiplier. Tax-payment loans are re-underwritten against current collateral; scheduled principal repayment destroys matching loans and deposits, while unpaid tax remains explicit deferred tax. Bank-capital, default, and bailout resolution remain outside this projection.`,
       `Fiscal closure is explicit: the ${request.ubi.fundingRule} funding rule is paired with ${normalizedSurplusUse(request)} for revenue left after scheduled outlays and program-debt service. Program debt carries a documented average interest rate; this is a stock-flow score, not a Treasury maturity model.`,
       "Demand pressure is recomputed from each year's household cash, uniform rebates, and public-service sector mix; equal total outlays can therefore produce different inflation paths when their composition differs.",
       "The growth/investment channel is a reduced-form Solow-style block: investment deviates from the capital-replacement rate as the wealth tax lowers the after-tax return on wealth (savings response) and the transfer adds a demand impulse (demand offset); wages and real GDP per worker track the resulting capital stock. Both response dials default to zero, which holds output on the constant-trend baseline. It captures direction and rough magnitude, not a general-equilibrium forecast.",
@@ -288,12 +290,18 @@ const runStrategy = (
     const item = requireFunding(funding, household.id);
     return item.cash + item.borrowed + item.equitySold + item.housingSold;
   });
-  const taxCollectedByHousehold = new Map<string, number>(
+  const fundingByHousehold = new Map<string, HouseholdProjectionFunding>(
     households.map((household) => {
-      const item = requireFunding(funding, household.id);
+      const fundingResult = requireFunding(funding, household.id);
       return [
         household.id,
-        item.cash + item.borrowed + item.equitySold + item.housingSold,
+        {
+          cash: fundingResult.cash,
+          borrowed: fundingResult.borrowed,
+          equitySold: fundingResult.equitySold,
+          housingSold: fundingResult.housingSold,
+          deferred: fundingResult.deferred,
+        },
       ];
     }),
   );
@@ -613,7 +621,7 @@ const runStrategy = (
       },
       accounting,
     },
-    taxCollectedByHousehold,
+    fundingByHousehold,
     demandProfile: {
       baselineAnnualConsumption: population.baselineAnnualConsumption,
       taxCashDemandBySector,
@@ -1008,15 +1016,15 @@ const requireTaxAssessment = (
   return assessment;
 };
 
-const requireCollectedTax = (
-  collectedTax: ReadonlyMap<string, number>,
+const requireFundingBreakdown = (
+  funding: ReadonlyMap<string, HouseholdProjectionFunding>,
   householdId: string,
-): number => {
-  const collected = collectedTax.get(householdId);
-  if (collected === undefined) {
-    throw new Error(`Missing collected tax for ${householdId}.`);
+): HouseholdProjectionFunding => {
+  const item = funding.get(householdId);
+  if (!item) {
+    throw new Error(`Missing funding breakdown for ${householdId}.`);
   }
-  return collected;
+  return item;
 };
 
 const weightedSum = (

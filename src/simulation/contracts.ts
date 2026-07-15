@@ -138,6 +138,14 @@ export interface ProjectionYear {
   readonly m2: number;
   readonly m2Index: number;
   readonly privateTaxDebt: number;
+  /** New collateralized tax-payment loans originated in this year. */
+  readonly newPrivateLoans: number;
+  /** Principal repaid from borrower deposits and extinguished this year. */
+  readonly privateTaxLoanRepayments: number;
+  /** Interest transferred from borrowers to banks this year. */
+  readonly privateTaxLoanInterestPaid: number;
+  /** Tax assessed but not fundable after current collateral is exhausted. */
+  readonly deferredTax: number;
   readonly governmentDebtAdded: number;
   readonly bottom50PurchasingPowerIndex: number;
   readonly top1RealWealthIndex: number;

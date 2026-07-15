@@ -167,11 +167,29 @@ describe("vertical-slice scenario runner", () => {
       },
     });
     expect(borrowed.projection.summary.privateTaxDebt).toBeGreaterThan(0);
-    expect(borrowed.projection.summary.cumulativeM2Change).toBeGreaterThan(
-      cashOnly.projection.summary.cumulativeM2Change,
-    );
+    expect(borrowed.projection.annualFlows.m2Injection).toBeGreaterThan(0);
     expect(borrowed.projection.summary.publicBurdenPerHousehold).toBe(0);
     expect(cashOnly.projection.summary.cumulativeM2Change).toBeCloseTo(0, 8);
+  });
+
+  it("re-underwrites annual tax loans instead of repeating year-one borrowing", () => {
+    const result = runComparison({
+      ...compactRequest(),
+      wealthTax: { exemption: 0, rate: 0.2 },
+      market: { ...compactRequest().market, maximumCollateralLtv: 0.1 },
+      behavior: { ...compactRequest().behavior, borrowShare: 1, sellShare: 0 },
+    });
+    const years = result.projection.years.slice(1);
+    const firstYear = years[0];
+    const finalYear = years.at(-1);
+    expect(firstYear?.newPrivateLoans).toBeGreaterThan(0);
+    expect(finalYear?.newPrivateLoans).toBeLessThan(firstYear?.newPrivateLoans ?? 0);
+    expect(finalYear?.deferredTax).toBeGreaterThan(0);
+    expect(finalYear?.privateTaxDebt).toBeLessThan(
+      (firstYear?.newPrivateLoans ?? 0) * years.length,
+    );
+    expect(finalYear?.privateTaxLoanInterestPaid).toBeGreaterThan(0);
+    expect(finalYear?.privateTaxLoanRepayments).toBeGreaterThan(0);
   });
 
   it("uses housing sales as a reconciled last-resort liquidity channel", () => {

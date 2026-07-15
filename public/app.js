@@ -2036,7 +2036,7 @@ const renderFlow = (projection) => {
     ? `${compactMoney.format(finalYear.taxCollected)} from ${integer.format(finalYear.taxpayerHouseholds)} modeled taxpayers at a ${percent.format(finalYear.effectiveTaxRate)} effective rate by year ten as the taxed base ${baseTrend}`
     : "on net worth above the exemption";
   byId("flow-mix").textContent = `${percent.format(behaviorMix.borrowShare)} borrow · ${percent.format(behaviorMix.sellShare)} sell`;
-  byId("flow-loans").textContent = `${compactMoney.format(annualFlows.newPrivateLoans)} in new bank loans in year one${finalYear ? ` · ${compactMoney.format(finalYear.newPrivateLoans)} by year ten` : ""}`;
+  byId("flow-loans").textContent = `${compactMoney.format(annualFlows.newPrivateLoans)} in new bank loans in year one${finalYear ? ` · ${compactMoney.format(finalYear.newPrivateLoans)} newly underwritten by year ten${finalYear.deferredTax > 1 ? ` · ${compactMoney.format(finalYear.deferredTax)} tax deferred after funding limits` : ""}` : ""}`;
   byId("flow-ubi").textContent = `${compactMoney.format(annualFlows.ubiReceived)} cash · ${compactMoney.format(annualFlows.publicServicesSpending)} services`;
   const fiscalAction = firstFiscal?.debtIssued > 1
     ? `${compactMoney.format(firstFiscal.debtIssued)} debt issued`
@@ -2047,7 +2047,7 @@ const renderFlow = (projection) => {
         : "no modeled deficit";
   byId("flow-balance").textContent = `${compactMoney.format(annualFlows.administrativeCost)} administration · ${fiscalAction}`;
   byId("flow-result").textContent = `${signedPercent(summary.bottom50PurchasingPowerChange)} buying power`;
-  byId("flow-debt").textContent = `${compactMoney.format(summary.privateTaxDebt)} private tax debt · ${compactMoney.format(fiscal?.endingProgramDebt ?? 0)} program debt`;
+  byId("flow-debt").textContent = `${compactMoney.format(summary.privateTaxDebt)} private tax debt${finalYear?.privateTaxLoanInterestPaid > 1 ? ` · ${compactMoney.format(finalYear.privateTaxLoanInterestPaid)} annual interest paid` : ""} · ${compactMoney.format(fiscal?.endingProgramDebt ?? 0)} program debt`;
   const m2Sentence = annualFlows.m2Injection >= 0
     ? `The selected borrowing behavior adds ${compactMoney.format(annualFlows.m2Injection)} to M2 in year one`
     : `The selected Treasury-balance closure parks enough revenue to drain ${compactMoney.format(Math.abs(annualFlows.m2Injection))} from M2 in year one, outweighing loan-created deposits`;

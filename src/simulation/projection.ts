@@ -89,10 +89,19 @@ const allocateProgramOutlay = (
 export interface HouseholdProjectionTaxAssessment {
   readonly percentile: number;
   readonly weight: number;
+  readonly annualIncome: number;
   readonly taxAssessed: number;
   readonly assets: Readonly<Record<AssetClass, number>>;
   readonly liabilities: Readonly<Record<LiabilityClass, number>>;
-  readonly taxCollected: Readonly<Record<PaymentStrategy, number>>;
+  readonly funding: Readonly<Record<PaymentStrategy, HouseholdProjectionFunding>>;
+}
+
+export interface HouseholdProjectionFunding {
+  readonly cash: number;
+  readonly borrowed: number;
+  readonly equitySold: number;
+  readonly housingSold: number;
+  readonly deferred: number;
 }
 
 export interface PolicyProjectionTaxInputs {
@@ -224,6 +233,8 @@ type AnnualHouseholdTaxState = {
   readonly source: HouseholdProjectionTaxAssessment;
   assets: Record<AssetClass, number>;
   liabilities: Record<LiabilityClass, number>;
+  taxLoanBalance: number;
+  deferredTax: number;
 };
 
 type AnnualHouseholdTaxResult = {
@@ -233,14 +244,12 @@ type AnnualHouseholdTaxResult = {
   readonly groupTaxCollected: ReadonlyMap<string, number>;
   readonly groupTaxShare: ReadonlyMap<string, number>;
   readonly topTierShare: number;
-  readonly collectedByHousehold: ReadonlyMap<AnnualHouseholdTaxState, number>;
+  readonly newPrivateLoans: number;
+  readonly principalRepayments: number;
+  readonly interestPaid: number;
+  readonly privateTaxDebt: number;
+  readonly deferredTax: number;
 };
-
-const PAYMENT_STRATEGIES: readonly PaymentStrategy[] = [
-  "cash-first",
-  "borrow-first",
-  "sell-first",
-];
 
 const createAnnualHouseholdTaxStates = (
   assessments: readonly HouseholdProjectionTaxAssessment[],
@@ -249,51 +258,201 @@ const createAnnualHouseholdTaxStates = (
     source,
     assets: { ...source.assets },
     liabilities: { ...source.liabilities },
+    taxLoanBalance: 0,
+    deferredTax: 0,
   }));
 
-// Year one preserves the strategy engine's exact collected amounts. Later
-// years keep each strategy's observed collection/assessment ratio, while the
-// statutory liability is re-assessed from the household's evolved balance.
-// Credit underwriting, new loan terms, and default paths intentionally belong
-// to the financing follow-up rather than being silently fabricated here.
+const weightedFunding = (
+  funding: Readonly<Record<PaymentStrategy, HouseholdProjectionFunding>>,
+  weights: ReturnType<typeof strategyWeights>,
+): HouseholdProjectionFunding => ({
+  cash: funding["cash-first"].cash * weights.cash +
+    funding["borrow-first"].cash * weights.borrow +
+    funding["sell-first"].cash * weights.sell,
+  borrowed: funding["cash-first"].borrowed * weights.cash +
+    funding["borrow-first"].borrowed * weights.borrow +
+    funding["sell-first"].borrowed * weights.sell,
+  equitySold: funding["cash-first"].equitySold * weights.cash +
+    funding["borrow-first"].equitySold * weights.borrow +
+    funding["sell-first"].equitySold * weights.sell,
+  housingSold: funding["cash-first"].housingSold * weights.cash +
+    funding["borrow-first"].housingSold * weights.borrow +
+    funding["sell-first"].housingSold * weights.sell,
+  deferred: funding["cash-first"].deferred * weights.cash +
+    funding["borrow-first"].deferred * weights.borrow +
+    funding["sell-first"].deferred * weights.sell,
+});
+
+const cashBuffer = (state: AnnualHouseholdTaxState): number =>
+  Math.max(
+    MODEL_CONSTANTS.householdCashBufferFloor,
+    state.source.annualIncome * MODEL_CONSTANTS.householdCashBufferIncomeShare,
+  );
+
+const availableCash = (state: AnnualHouseholdTaxState): number =>
+  Math.max(0, state.assets.deposits - cashBuffer(state));
+
+const debitCash = (state: AnnualHouseholdTaxState, amount: number): number => {
+  const paid = Math.min(Math.max(0, amount), availableCash(state));
+  state.assets.deposits -= paid;
+  return paid;
+};
+
+const borrowCapacity = (
+  state: AnnualHouseholdTaxState,
+  maximumCollateralLtv: number,
+): number =>
+  Math.max(
+    0,
+    maximumCollateralLtv * (state.assets.publicEquity + state.assets.housing) -
+      state.liabilities.mortgage -
+      state.liabilities.collateralizedLoan -
+      state.taxLoanBalance,
+  );
+
+const sellAssets = (
+  state: AnnualHouseholdTaxState,
+  amount: number,
+): Pick<HouseholdProjectionFunding, "equitySold" | "housingSold"> => {
+  const equitySold = Math.min(Math.max(0, amount), state.assets.publicEquity);
+  state.assets.publicEquity -= equitySold;
+  const housingSold = Math.min(
+    Math.max(0, amount - equitySold),
+    state.assets.housing,
+  );
+  state.assets.housing -= housingSold;
+  return { equitySold, housingSold };
+};
+
+const settleAnnualTax = (
+  state: AnnualHouseholdTaxState,
+  taxDue: number,
+  request: ComparisonRequestV1,
+  weights: ReturnType<typeof strategyWeights>,
+): HouseholdProjectionFunding => {
+  let remaining = Math.max(0, taxDue);
+  let cash = 0;
+  let borrowed = 0;
+  let equitySold = 0;
+  let housingSold = 0;
+  const payCash = (target: number): void => {
+    const paid = debitCash(state, Math.min(remaining, target));
+    cash += paid;
+    remaining -= paid;
+  };
+  const borrow = (target: number): void => {
+    if (weights.borrow <= 0) return;
+    const amount = Math.min(
+      remaining,
+      target,
+      borrowCapacity(state, request.market.maximumCollateralLtv),
+    );
+    state.taxLoanBalance += amount;
+    borrowed += amount;
+    remaining -= amount;
+  };
+  const sell = (target: number): void => {
+    const proceeds = sellAssets(state, Math.min(remaining, target));
+    equitySold += proceeds.equitySold;
+    housingSold += proceeds.housingSold;
+    remaining -= proceeds.equitySold + proceeds.housingSold;
+  };
+
+  // The behavior dials allocate the preferred first attempt, but each source is
+  // re-underwritten against the balance sheet that remains after earlier choices.
+  // Any unmet amount falls through to the remaining legal funding sources rather
+  // than creating an unconstrained proportional loan every year.
+  payCash(taxDue * weights.cash);
+  borrow(taxDue * weights.borrow);
+  sell(taxDue * weights.sell);
+  payCash(remaining);
+  borrow(remaining);
+  sell(remaining);
+  return { cash, borrowed, equitySold, housingSold, deferred: remaining };
+};
+
+const serviceTaxLoan = (
+  state: AnnualHouseholdTaxState,
+  request: ComparisonRequestV1,
+): { readonly principalRepaid: number; readonly interestPaid: number } => {
+  if (state.taxLoanBalance <= 0) return { principalRepaid: 0, interestPaid: 0 };
+  const interestDue = state.taxLoanBalance * request.behavior.loanInterestRate;
+  const interestPaid = debitCash(state, interestDue);
+  // Unpaid interest is capitalized as a constrained delinquency balance. Default
+  // resolution and loss allocation are deliberately separate follow-up work.
+  state.taxLoanBalance += interestDue - interestPaid;
+  const scheduledPrincipal = state.taxLoanBalance * request.model.loanAmortizationRate;
+  const principalRepaid = debitCash(state, scheduledPrincipal);
+  state.taxLoanBalance -= principalRepaid;
+  return { principalRepaid, interestPaid };
+};
+
+// Year one preserves the strategy engine's observed funding. Later years
+// re-underwrite each household: outstanding tax loans are serviced first, new
+// borrowing is capped by current collateral, and any unpayable balance remains
+// explicit deferred tax instead of becoming another unconstrained loan.
 const assessAnnualHouseholdTaxes = (
   states: readonly AnnualHouseholdTaxState[],
   policy: WealthTaxPolicyV1,
   avoidanceElasticity: number,
+  request: ComparisonRequestV1,
   weights: ReturnType<typeof strategyWeights>,
   isYearOne: boolean,
 ): AnnualHouseholdTaxResult => {
   const groupTaxCollected = new Map<string, number>(
     US_BASELINE.wealthGroups.map((group) => [group.id, 0]),
   );
-  const collectedByHousehold = new Map<AnnualHouseholdTaxState, number>();
   let taxCollected = 0;
   let taxableBase = 0;
   let taxpayerHouseholds = 0;
+  let newPrivateLoans = 0;
+  let principalRepayments = 0;
+  let interestPaid = 0;
+  let privateTaxDebt = 0;
+  let deferredTax = 0;
 
   for (const state of states) {
+    const servicing = isYearOne
+      ? { principalRepaid: 0, interestPaid: 0 }
+      : serviceTaxLoan(state, request);
     const assessment = assessWealthTax(
-      { assets: state.assets, liabilities: state.liabilities },
+      {
+        assets: state.assets,
+        liabilities: {
+          ...state.liabilities,
+          collateralizedLoan:
+            state.liabilities.collateralizedLoan + state.taxLoanBalance,
+        },
+      },
       policy,
     );
     const response = applyWealthTaxpayerResponse(assessment, avoidanceElasticity);
-    const collectedByStrategy = PAYMENT_STRATEGIES.map((strategy) => {
-      if (isYearOne) return state.source.taxCollected[strategy];
-      const yearOneRatio =
-        state.source.taxAssessed > 0
-          ? state.source.taxCollected[strategy] / state.source.taxAssessed
-          : 0;
-      return response.taxAssessed * Math.min(1, Math.max(0, yearOneRatio));
-    });
+    const funding = isYearOne
+      ? weightedFunding(state.source.funding, weights)
+      : settleAnnualTax(
+          state,
+          response.taxAssessed + state.deferredTax,
+          request,
+          weights,
+        );
+    if (isYearOne) {
+      state.assets.deposits = Math.max(0, state.assets.deposits - funding.cash);
+      state.assets.publicEquity = Math.max(0, state.assets.publicEquity - funding.equitySold);
+      state.assets.housing = Math.max(0, state.assets.housing - funding.housingSold);
+      state.taxLoanBalance += funding.borrowed;
+    }
+    state.deferredTax = funding.deferred;
     const blendedCollection =
-      collectedByStrategy[0]! * weights.cash +
-      collectedByStrategy[1]! * weights.borrow +
-      collectedByStrategy[2]! * weights.sell;
+      funding.cash + funding.borrowed + funding.equitySold + funding.housingSold;
     const weightedCollection = blendedCollection * state.source.weight;
     taxCollected += weightedCollection;
     taxableBase += assessment.taxableBase * state.source.weight;
     if (response.taxAssessed > 0) taxpayerHouseholds += state.source.weight;
-    collectedByHousehold.set(state, blendedCollection);
+    newPrivateLoans += funding.borrowed * state.source.weight;
+    principalRepayments += servicing.principalRepaid * state.source.weight;
+    interestPaid += servicing.interestPaid * state.source.weight;
+    privateTaxDebt += state.taxLoanBalance * state.source.weight;
+    deferredTax += state.deferredTax * state.source.weight;
 
     const group = wealthGroupForPercentile(state.source.percentile);
     groupTaxCollected.set(
@@ -317,14 +476,16 @@ const assessAnnualHouseholdTaxes = (
     groupTaxCollected,
     groupTaxShare,
     topTierShare: taxCollected > 0 ? topTierTaxCollected / taxCollected : 1,
-    collectedByHousehold,
+    newPrivateLoans,
+    principalRepayments,
+    interestPaid,
+    privateTaxDebt,
+    deferredTax,
   };
 };
 
 const evolveAnnualHouseholdTaxStates = (
   states: readonly AnnualHouseholdTaxState[],
-  collectedByHousehold: ReadonlyMap<AnnualHouseholdTaxState, number>,
-  policy: WealthTaxPolicyV1,
   input: {
     readonly annualAssetReturn: number;
     readonly annualInflation: number;
@@ -345,32 +506,10 @@ const evolveAnnualHouseholdTaxStates = (
       wealthGroupForPercentile(state.source.percentile).id,
     );
     const retention = isTopTier ? input.expatriationRetention : 1;
-    const eligibleAssets = (Object.keys(state.assets) as AssetClass[]).filter(
-      (asset) => taxAssetFactor(asset, policy) > 0,
-    );
     for (const asset of Object.keys(state.assets) as AssetClass[]) {
       state.assets[asset] *= growth * retention;
     }
-
-    // Only money actually collected reduces wealth. Avoided and deferred tax
-    // remains a liability to the policy but is not treated as an asset sale.
-    const paid = Math.max(0, collectedByHousehold.get(state) ?? 0);
-    const eligibleBalance = eligibleAssets.reduce(
-      (sum, asset) => sum + state.assets[asset],
-      0,
-    );
-    if (paid === 0 || eligibleBalance === 0) continue;
-    const amountToDebit = Math.min(paid, eligibleBalance);
-    for (const asset of eligibleAssets) {
-      const share = state.assets[asset] / eligibleBalance;
-      state.assets[asset] = Math.max(0, state.assets[asset] - amountToDebit * share);
-    }
   }
-};
-
-const taxAssetFactor = (asset: AssetClass, policy: WealthTaxPolicyV1): number => {
-  const rule = policy.assets[asset];
-  return rule ? rule.inclusionRate * rule.valuationFactor : 0;
 };
 
 const taxGroupCollectionRecord = (
@@ -490,6 +629,7 @@ export const buildPolicyProjection = (
     householdTaxStates,
     taxInputs.policy,
     request.behavior.avoidanceElasticity,
+    request,
     weights,
     true,
   );
@@ -587,6 +727,10 @@ export const buildPolicyProjection = (
       m2,
       m2Index: 100,
       privateTaxDebt,
+      newPrivateLoans: 0,
+      privateTaxLoanRepayments: 0,
+      privateTaxLoanInterestPaid: 0,
+      deferredTax: 0,
       governmentDebtAdded: publicDebt,
       bottom50PurchasingPowerIndex: 100,
       top1RealWealthIndex: 100,
@@ -607,6 +751,7 @@ export const buildPolicyProjection = (
             householdTaxStates,
             taxInputs.policy,
             request.behavior.avoidanceElasticity,
+            request,
             weights,
             false,
           );
@@ -615,7 +760,7 @@ export const buildPolicyProjection = (
     for (const [id, collection] of annualTax.groupTaxCollected) {
       cumulativeGroupTax.set(id, (cumulativeGroupTax.get(id) ?? 0) + collection);
     }
-    const newPrivateLoansYear = newPrivateLoans * taxDemandMultiplier;
+    const newPrivateLoansYear = annualTax.newPrivateLoans;
     const requestedUbiYear = requestedUbi * indexation;
     const openingTreasuryBalance = fiscalState.treasuryBalance;
     const fiscalTransition = resolveFiscalYear(
@@ -640,8 +785,8 @@ export const buildPolicyProjection = (
         (yearOneScheduledCash > 0 ? scheduledCashYear / yearOneScheduledCash : 0) +
       fiscalYear.rebate / Math.max(1, request.representedHouseholds);
 
-    const repayments = privateTaxDebt * request.model.loanAmortizationRate;
-    privateTaxDebt = Math.max(0, privateTaxDebt + newPrivateLoansYear - repayments);
+    const repayments = annualTax.principalRepayments;
+    privateTaxDebt = annualTax.privateTaxDebt;
     publicDebt = fiscalYear.netPublicDebtChange;
     const treasuryBalanceChange =
       fiscalYear.treasuryBalance - openingTreasuryBalance;
@@ -650,6 +795,9 @@ export const buildPolicyProjection = (
       nonTreasuryMoneyChange:
         newPrivateLoansYear -
         repayments +
+        // Interest moves a household deposit into bank income/equity; unlike a
+        // transfer to another depositor, it extinguishes a deposit liability.
+        annualTax.interestPaid +
         governmentDeficitYear * request.behavior.deficitMonetizationShare,
       treasuryBalanceChange,
       drainedTreasuryBalance,
@@ -762,7 +910,7 @@ export const buildPolicyProjection = (
     // (groupRealWealthChange), so they intentionally do not read this dial.
     const topTaxBurden = taxCollectedYear * request.model.topTaxIncidenceShare;
     const interestCost =
-      privateTaxDebt * request.behavior.loanInterestRate * request.model.topTaxIncidenceShare;
+      annualTax.interestPaid * request.model.topTaxIncidenceShare;
     topWealth = Math.max(
       0,
       topWealth * (1 + request.behavior.annualAssetReturn) - topTaxBurden - interestCost,
@@ -813,6 +961,10 @@ export const buildPolicyProjection = (
       m2,
       m2Index: (m2 / US_BASELINE.m2) * 100,
       privateTaxDebt,
+      newPrivateLoans: newPrivateLoansYear,
+      privateTaxLoanRepayments: repayments,
+      privateTaxLoanInterestPaid: annualTax.interestPaid,
+      deferredTax: annualTax.deferredTax,
       governmentDebtAdded: publicDebt,
       bottom50PurchasingPowerIndex:
         (policyRealResources / Math.max(1, baselineRealResources)) * 100,
@@ -835,7 +987,7 @@ export const buildPolicyProjection = (
       governmentDeficit: governmentDeficitYear,
       m2Injection: moneyInjection,
     };
-    evolveAnnualHouseholdTaxStates(householdTaxStates, annualTax.collectedByHousehold, taxInputs.policy, {
+    evolveAnnualHouseholdTaxStates(householdTaxStates, {
       annualAssetReturn: request.behavior.annualAssetReturn,
       annualInflation,
       baselineInflation: US_BASELINE.baselineInflation,

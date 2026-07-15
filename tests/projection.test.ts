@@ -57,7 +57,10 @@ describe("ten-year projection dynamics", () => {
     // tax-base multiplier cannot represent that threshold crossing.
     expect(finalYear?.taxpayerHouseholds).toBeGreaterThan(firstYear?.taxpayerHouseholds ?? 0);
     expect(flows.finalYear.taxCollected).toBeGreaterThan(flows.taxCollected);
-    expect(finalYear?.effectiveTaxRate).toBeLessThan(firstYear?.effectiveTaxRate ?? 1);
+    // Every funded taxpayer still pays the flat statutory rate; the point of
+    // this case is that threshold crossings come from household re-assessment,
+    // not an aggregate multiplier that would miss new taxpayers entirely.
+    expect(finalYear?.effectiveTaxRate).toBeCloseTo(firstYear?.effectiveTaxRate ?? 0, 8);
   });
 
   it("keeps a flat zero-exemption schedule proportional and reconciles each year's cohorts", () => {

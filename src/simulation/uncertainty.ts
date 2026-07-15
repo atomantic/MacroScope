@@ -1193,7 +1193,19 @@ const globalInfluence = (
     }
   }
   interactions.sort((left, right) => right.score - left.score);
-  return { influences: influences.slice(0, 10), interactions: interactions.slice(0, 8) };
+  // Financing shares are a deliberately joint, countermonotonic axis. Keep
+  // that identified axis visible even when a nonlinear scenario makes its
+  // score fall just below the generic top-ten cutoff; otherwise the UI can
+  // misleadingly imply that the financing assumption was not sampled.
+  const financingMix = influences.find(
+    (influence) => influence.parameterId === "borrow-vs-sale-mix",
+  );
+  const topInfluences = influences.slice(0, 10);
+  if (financingMix && !topInfluences.some((influence) => influence === financingMix)) {
+    topInfluences.pop();
+    topInfluences.push(financingMix);
+  }
+  return { influences: topInfluences, interactions: interactions.slice(0, 8) };
 };
 
 const regressionGram = (columns: readonly (readonly number[])[]): number[][] =>

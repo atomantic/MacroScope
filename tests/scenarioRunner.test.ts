@@ -208,6 +208,8 @@ describe("vertical-slice scenario runner", () => {
       behavior: {
         ...DEFAULT_COMPARISON_REQUEST.behavior,
         rentPassThrough: 0.9,
+        assetHedgeShare: 1,
+        housingHedgeShare: 1,
       },
     };
     const active = runComparison({
@@ -372,10 +374,11 @@ describe("vertical-slice scenario runner", () => {
     };
     const universalRatio = finalRatio(0); // zero exemption reaches every tier
     const topTierRatio = finalRatio(50_000_000); // exemption confines tax to the top
-    // Under a top-tier-only tax the whole taxed base can leave, so revenue erodes
-    // by the full geometric expatriation retention. Under a universal tax only
-    // the top-tier share of the base is drained, so the same dial erodes less.
-    expect(topTierRatio).toBeCloseTo((1 - 0.5) ** (9 / 10), 2);
+    // A fixed exemption makes the top-tier tax path nonlinear: after
+    // expatriation, balances can fall back through the cutoff as well as losing
+    // the retained base. The annual household reassessment therefore erodes
+    // revenue more than the former aggregate retention shortcut predicted.
+    expect(topTierRatio).toBeLessThan((1 - 0.5) ** (9 / 10));
     expect(universalRatio).toBeGreaterThan(topTierRatio);
   });
 
@@ -451,6 +454,32 @@ describe("vertical-slice scenario runner", () => {
     // fall at least as fast as under the flat 2%.
     expect(warren.projection.summary.top1RealWealthChange).toBeLessThan(
       flat.projection.summary.top1RealWealthChange,
+    );
+
+    const sanders = runComparison({
+      ...compactRequest(),
+      wealthTax: {
+        targetMode: "exemption",
+        topShare: 0.01,
+        exemption: 32_000_000,
+        rate: 0.01,
+        brackets: [
+          { threshold: 32_000_000, rate: 0.01 },
+          { threshold: 50_000_000, rate: 0.02 },
+          { threshold: 250_000_000, rate: 0.03 },
+          { threshold: 500_000_000, rate: 0.04 },
+          { threshold: 1_000_000_000, rate: 0.05 },
+          { threshold: 2_500_000_000, rate: 0.06 },
+          { threshold: 5_000_000_000, rate: 0.07 },
+          { threshold: 10_000_000_000, rate: 0.08 },
+        ],
+      },
+    });
+    // The annual household reassessment keeps named schedules distinct after
+    // multiple years; this is not a shared aggregate-base trajectory with a
+    // different year-one multiplier.
+    expect(sanders.projection.years.map((year) => year.taxCollected)).not.toEqual(
+      warren.projection.years.map((year) => year.taxCollected),
     );
   });
 

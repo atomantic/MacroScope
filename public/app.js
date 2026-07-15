@@ -2033,7 +2033,7 @@ const renderFlow = (projection) => {
       ? "grows"
       : "holds steady";
   byId("flow-tax-detail").textContent = finalYear
-    ? `${compactMoney.format(finalYear.taxCollected)} by year ten as the taxed base ${baseTrend}`
+    ? `${compactMoney.format(finalYear.taxCollected)} from ${integer.format(finalYear.taxpayerHouseholds)} modeled taxpayers at a ${percent.format(finalYear.effectiveTaxRate)} effective rate by year ten as the taxed base ${baseTrend}`
     : "on net worth above the exemption";
   byId("flow-mix").textContent = `${percent.format(behaviorMix.borrowShare)} borrow · ${percent.format(behaviorMix.sellShare)} sell`;
   byId("flow-loans").textContent = `${compactMoney.format(annualFlows.newPrivateLoans)} in new bank loans in year one${finalYear ? ` · ${compactMoney.format(finalYear.newPrivateLoans)} by year ten` : ""}`;

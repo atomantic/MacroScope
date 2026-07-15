@@ -158,6 +158,8 @@ export const runComparisonWithPopulation = (
         householdTaxAssessments,
         household.id,
       ).taxAssessed,
+      assets: household.assets,
+      liabilities: household.liabilities,
       taxCollected: {
         "cash-first": requireCollectedTax(
           strategyRuns["cash-first"].taxCollectedByHousehold,
@@ -192,6 +194,7 @@ export const runComparisonWithPopulation = (
     strategies,
     projection: buildPolicyProjection(request, strategies, {
       effectiveTaxRate: resolveEffectiveTaxRate(householdTaxAssessments),
+      policy,
       householdAssessments: projectionHouseholdAssessments,
       demandProfiles: Object.fromEntries(
         STRATEGIES.map((strategy) => [strategy, strategyRuns[strategy].demandProfile]),
@@ -205,11 +208,11 @@ export const runComparisonWithPopulation = (
       "The current closed economy assumes domestic buyers absorb all equity and housing sales.",
       "Housing sales remain a national, closed-economy transfer channel; the ten-year owner-renter view adds reduced-form price, supply, and rent feedback rather than regional market clearing.",
       "Wealth Gini values treat negative net worth as zero for the inequality calculation.",
-      `The ten-year path is a transparent reduced-form projection with ${request.ubi.benefitIndexation === "cpi" ? "CPI-indexed policy benefits (one-year recognition lag)" : "fixed nominal policy benefits"}, a wealth-tax base that compounds with asset returns and erodes with taxes paid, partial wage adjustment, and no private-loan bailout.`,
+      `The ten-year path is a transparent reduced-form projection with ${request.ubi.benefitIndexation === "cpi" ? "CPI-indexed policy benefits (one-year recognition lag)" : "fixed nominal policy benefits"}. Each year re-assesses the unchanged nominal wealth-tax schedule against evolved synthetic household balances, so fixed exemptions and bracket crossings are not approximated by a single aggregate revenue multiplier. Paid tax reduces included household assets; avoided or deferred tax does not. Annual financing choices and credit/default dynamics remain outside this projection.`,
       `Fiscal closure is explicit: the ${request.ubi.fundingRule} funding rule is paired with ${normalizedSurplusUse(request)} for revenue left after scheduled outlays and program-debt service. Program debt carries a documented average interest rate; this is a stock-flow score, not a Treasury maturity model.`,
       "Demand pressure is recomputed from each year's household cash, uniform rebates, and public-service sector mix; equal total outlays can therefore produce different inflation paths when their composition differs.",
       "The growth/investment channel is a reduced-form Solow-style block: investment deviates from the capital-replacement rate as the wealth tax lowers the after-tax return on wealth (savings response) and the transfer adds a demand impulse (demand offset); wages and real GDP per worker track the resulting capital stock. Both response dials default to zero, which holds output on the constant-trend baseline. It captures direction and rough magnitude, not a general-equilibrium forecast.",
-      "Taxpayer-response dials act on the aggregate taxed base as reduced-form revenue multipliers: avoidance and the private-business inclusion rate scale year-one collections directly, while expatriation drains the top-tier sub-base gradually over the decade. The top-tier share comes from the same synthetic household collections as the cohort burdens, so exemptions that cut through a cohort and graduated rates are reflected in the split. The ten-year inflation stress grid evolves its revenue and private-loan flows with the same base dynamics (asset returns, effective-rate erosion, and top-tier expatriation), so its cells and hyperinflation threshold reflect them alongside avoidance and inclusion.",
+      "Taxpayer-response dials apply to each annual household assessment: avoidance responds to that household's marginal rate, the private-business inclusion rule is applied before assessment, and expatriation reduces the top-tier household balances between years. Paid tax reduces included assets; avoided or deferred tax does not. The inflation stress grid remains a reduced-form sensitivity path that evolves aggregate revenue and private-loan flows with matching return, effective-rate, and expatriation assumptions.",
       "Cash purchasing-power measures do not assign a dollar welfare value to healthcare or social services delivered in kind.",
       "Percentile targeting resolves an effective exemption from the synthetic weighted population, so its dollar cutoff varies with calibration and sample size.",
       "Accounting checks replay each strategy's aggregate sector-level flows through the double-entry ledger and cross-check them against independent per-household deposit sums; intra-household asset trades net out within the household sector.",

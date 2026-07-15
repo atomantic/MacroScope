@@ -37,7 +37,7 @@ describe("ten-year projection dynamics", () => {
     );
   });
 
-  it("erodes the tax base and revenue when the rate exceeds the asset return", () => {
+  it("re-assesses fixed-exemption threshold crossings instead of applying aggregate erosion", () => {
     const result = runComparison({
       ...nationalRequest(),
       wealthTax: {
@@ -49,17 +49,36 @@ describe("ten-year projection dynamics", () => {
     });
     const flows = result.projection.annualFlows;
     expect(flows.taxCollected).toBeGreaterThan(0);
-    // 10% rate against a 6% asset return shrinks the base every year, so
-    // year-10 revenue must be visibly below year-1 revenue.
-    expect(flows.finalYear.taxCollected).toBeLessThan(flows.taxCollected * 0.75);
-    expect(flows.finalYear.newPrivateLoans).toBeLessThan(flows.newPrivateLoans);
-    // The verdict path reflects the erosion: the bottom-half advantage peaks
-    // before year 10 instead of holding a constant flow.
-    const powerPath = result.projection.years.map(
-      (year) => year.bottom50PurchasingPowerIndex,
-    );
-    expect(powerPath.at(-1)).toBeLessThan(Math.max(...powerPath.slice(1, -1)));
-    expect(result.projection.verdict.rating).not.toBe("beneficial");
+    const firstYear = result.projection.years[1];
+    const finalYear = result.projection.years.at(-1);
+    expect(firstYear).toBeDefined();
+    expect(finalYear).toBeDefined();
+    // The $1B cutoff admits additional households as balances evolve. A single
+    // tax-base multiplier cannot represent that threshold crossing.
+    expect(finalYear?.taxpayerHouseholds).toBeGreaterThan(firstYear?.taxpayerHouseholds ?? 0);
+    expect(flows.finalYear.taxCollected).toBeGreaterThan(flows.taxCollected);
+    expect(finalYear?.effectiveTaxRate).toBeLessThan(firstYear?.effectiveTaxRate ?? 1);
+  });
+
+  it("keeps a flat zero-exemption schedule proportional and reconciles each year's cohorts", () => {
+    const result = runComparison({
+      ...nationalRequest(),
+      wealthTax: {
+        targetMode: "exemption",
+        exemption: 0,
+        topShare: 0.01,
+        rate: 0.01,
+      },
+    });
+    const annualYears = result.projection.years.slice(1);
+    const firstTaxpayerCount = annualYears[0]?.taxpayerHouseholds;
+    for (const year of annualYears) {
+      expect(year.effectiveTaxRate).toBeCloseTo(0.01, 8);
+      expect(year.taxpayerHouseholds).toBeCloseTo(firstTaxpayerCount ?? 0, 6);
+      expect(
+        Object.values(year.taxGroupCollections).reduce((sum, value) => sum + value, 0),
+      ).toBeCloseTo(year.taxCollected, 2);
+    }
   });
 
   it("grows the tax base and revenue when the asset return exceeds the rate", () => {

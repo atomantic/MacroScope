@@ -1,4 +1,13 @@
 import type {
+  AssetClass,
+  LiabilityClass,
+  WealthTaxPolicyV1,
+} from "../policies/schema.js";
+import {
+  applyWealthTaxpayerResponse,
+  assessWealthTax,
+} from "../policies/wealthTax.js";
+import type {
   ComparisonRequestV1,
   ConsumptionSector,
   FiscalProjectionYear,
@@ -81,11 +90,14 @@ export interface HouseholdProjectionTaxAssessment {
   readonly percentile: number;
   readonly weight: number;
   readonly taxAssessed: number;
+  readonly assets: Readonly<Record<AssetClass, number>>;
+  readonly liabilities: Readonly<Record<LiabilityClass, number>>;
   readonly taxCollected: Readonly<Record<PaymentStrategy, number>>;
 }
 
 export interface PolicyProjectionTaxInputs {
   readonly effectiveTaxRate: number;
+  readonly policy: WealthTaxPolicyV1;
   readonly householdAssessments: readonly HouseholdProjectionTaxAssessment[];
   readonly demandProfiles: Readonly<Record<PaymentStrategy, ProjectionDemandProfile>>;
 }
@@ -208,6 +220,166 @@ const TOP_TIER_GROUP_IDS = new Set<string>(
 // non-top-tier remainder, which it cannot. See evolveTaxBase.
 type TaxBaseState = { readonly top: number; readonly rest: number };
 
+type AnnualHouseholdTaxState = {
+  readonly source: HouseholdProjectionTaxAssessment;
+  assets: Record<AssetClass, number>;
+  liabilities: Record<LiabilityClass, number>;
+};
+
+type AnnualHouseholdTaxResult = {
+  readonly taxCollected: number;
+  readonly taxpayerHouseholds: number;
+  readonly effectiveTaxRate: number;
+  readonly groupTaxCollected: ReadonlyMap<string, number>;
+  readonly groupTaxShare: ReadonlyMap<string, number>;
+  readonly topTierShare: number;
+  readonly collectedByHousehold: ReadonlyMap<AnnualHouseholdTaxState, number>;
+};
+
+const PAYMENT_STRATEGIES: readonly PaymentStrategy[] = [
+  "cash-first",
+  "borrow-first",
+  "sell-first",
+];
+
+const createAnnualHouseholdTaxStates = (
+  assessments: readonly HouseholdProjectionTaxAssessment[],
+): AnnualHouseholdTaxState[] =>
+  assessments.map((source) => ({
+    source,
+    assets: { ...source.assets },
+    liabilities: { ...source.liabilities },
+  }));
+
+// Year one preserves the strategy engine's exact collected amounts. Later
+// years keep each strategy's observed collection/assessment ratio, while the
+// statutory liability is re-assessed from the household's evolved balance.
+// Credit underwriting, new loan terms, and default paths intentionally belong
+// to the financing follow-up rather than being silently fabricated here.
+const assessAnnualHouseholdTaxes = (
+  states: readonly AnnualHouseholdTaxState[],
+  policy: WealthTaxPolicyV1,
+  avoidanceElasticity: number,
+  weights: ReturnType<typeof strategyWeights>,
+  isYearOne: boolean,
+): AnnualHouseholdTaxResult => {
+  const groupTaxCollected = new Map<string, number>(
+    US_BASELINE.wealthGroups.map((group) => [group.id, 0]),
+  );
+  const collectedByHousehold = new Map<AnnualHouseholdTaxState, number>();
+  let taxCollected = 0;
+  let taxableBase = 0;
+  let taxpayerHouseholds = 0;
+
+  for (const state of states) {
+    const assessment = assessWealthTax(
+      { assets: state.assets, liabilities: state.liabilities },
+      policy,
+    );
+    const response = applyWealthTaxpayerResponse(assessment, avoidanceElasticity);
+    const collectedByStrategy = PAYMENT_STRATEGIES.map((strategy) => {
+      if (isYearOne) return state.source.taxCollected[strategy];
+      const yearOneRatio =
+        state.source.taxAssessed > 0
+          ? state.source.taxCollected[strategy] / state.source.taxAssessed
+          : 0;
+      return response.taxAssessed * Math.min(1, Math.max(0, yearOneRatio));
+    });
+    const blendedCollection =
+      collectedByStrategy[0]! * weights.cash +
+      collectedByStrategy[1]! * weights.borrow +
+      collectedByStrategy[2]! * weights.sell;
+    const weightedCollection = blendedCollection * state.source.weight;
+    taxCollected += weightedCollection;
+    taxableBase += assessment.taxableBase * state.source.weight;
+    if (response.taxAssessed > 0) taxpayerHouseholds += state.source.weight;
+    collectedByHousehold.set(state, blendedCollection);
+
+    const group = wealthGroupForPercentile(state.source.percentile);
+    groupTaxCollected.set(
+      group.id,
+      (groupTaxCollected.get(group.id) ?? 0) + weightedCollection,
+    );
+  }
+
+  const groupTaxShare = new Map<string, number>();
+  for (const [id, collected] of groupTaxCollected) {
+    groupTaxShare.set(id, taxCollected > 0 ? collected / taxCollected : 0);
+  }
+  const topTierTaxCollected = [...groupTaxCollected]
+    .filter(([id]) => TOP_TIER_GROUP_IDS.has(id))
+    .reduce((sum, [, collected]) => sum + collected, 0);
+
+  return {
+    taxCollected,
+    taxpayerHouseholds,
+    effectiveTaxRate: taxableBase > 0 ? taxCollected / taxableBase : 0,
+    groupTaxCollected,
+    groupTaxShare,
+    topTierShare: taxCollected > 0 ? topTierTaxCollected / taxCollected : 1,
+    collectedByHousehold,
+  };
+};
+
+const evolveAnnualHouseholdTaxStates = (
+  states: readonly AnnualHouseholdTaxState[],
+  collectedByHousehold: ReadonlyMap<AnnualHouseholdTaxState, number>,
+  policy: WealthTaxPolicyV1,
+  input: {
+    readonly annualAssetReturn: number;
+    readonly annualInflation: number;
+    readonly baselineInflation: number;
+    readonly assetPriceInflationPassThrough: number;
+    readonly expatriationRetention: number;
+  },
+): void => {
+  const growth = Math.max(
+    0,
+    1 +
+      input.annualAssetReturn +
+      Math.max(0, input.annualInflation - input.baselineInflation) *
+        input.assetPriceInflationPassThrough,
+  );
+  for (const state of states) {
+    const isTopTier = TOP_TIER_GROUP_IDS.has(
+      wealthGroupForPercentile(state.source.percentile).id,
+    );
+    const retention = isTopTier ? input.expatriationRetention : 1;
+    const eligibleAssets = (Object.keys(state.assets) as AssetClass[]).filter(
+      (asset) => taxAssetFactor(asset, policy) > 0,
+    );
+    for (const asset of Object.keys(state.assets) as AssetClass[]) {
+      state.assets[asset] *= growth * retention;
+    }
+
+    // Only money actually collected reduces wealth. Avoided and deferred tax
+    // remains a liability to the policy but is not treated as an asset sale.
+    const paid = Math.max(0, collectedByHousehold.get(state) ?? 0);
+    const eligibleBalance = eligibleAssets.reduce(
+      (sum, asset) => sum + state.assets[asset],
+      0,
+    );
+    if (paid === 0 || eligibleBalance === 0) continue;
+    const amountToDebit = Math.min(paid, eligibleBalance);
+    for (const asset of eligibleAssets) {
+      const share = state.assets[asset] / eligibleBalance;
+      state.assets[asset] = Math.max(0, state.assets[asset] - amountToDebit * share);
+    }
+  }
+};
+
+const taxAssetFactor = (asset: AssetClass, policy: WealthTaxPolicyV1): number => {
+  const rule = policy.assets[asset];
+  return rule ? rule.inclusionRate * rule.valuationFactor : 0;
+};
+
+const taxGroupCollectionRecord = (
+  collections: ReadonlyMap<string, number>,
+): Readonly<Record<string, number>> =>
+  Object.fromEntries(
+    US_BASELINE.wealthGroups.map((group) => [group.id, collections.get(group.id) ?? 0]),
+  );
+
 // Base-dynamics inputs threaded into the inflation stress grid so its cells and
 // the hyperinflation threshold respond to asset returns, rate erosion, and
 // expatriation — not only to UBI scale and monetization share (issue #17).
@@ -308,27 +480,29 @@ export const buildPolicyProjection = (
   );
   const governmentDeficit = yearOneFiscal.debtIssued;
 
-  // Apportion year-one collections with the exact synthetic households that
-  // produced them. This captures exemptions that cut through a DFA cohort and
-  // makes graduated schedules revenue-weighted instead of taxable-base-weighted.
-  const { groupTaxShare, topTierShare } = deriveHouseholdTaxAttribution(
-    taxInputs.householdAssessments,
-    weights,
-    taxCollected,
-  );
-  const effectiveTaxRate = taxInputs.effectiveTaxRate;
   const cumulativeGroupTax = new Map<string, number>(
     US_BASELINE.wealthGroups.map((group) => [group.id, 0]),
   );
-
-  // Reduced-form wealth-tax base dynamics: the taxable base compounds with the
-  // selected nominal asset return plus partial pass-through of policy-driven
-  // excess inflation into asset prices, and shrinks by the statutory rate paid
-  // out of the base each year (so cumulative tax paid compounds against it).
-  // Year 1 reproduces the strategy outcomes exactly (combined multiplier = 1).
-  // Tracked as two sub-bases so expatriation can drain the top tier alone
-  // (issue #17); combinedBaseMultiplier collapses them each year.
-  let taxBaseState: TaxBaseState = { top: 1, rest: 1 };
+  const householdTaxStates = createAnnualHouseholdTaxStates(
+    taxInputs.householdAssessments,
+  );
+  const initialAnnualTax = assessAnnualHouseholdTaxes(
+    householdTaxStates,
+    taxInputs.policy,
+    request.behavior.avoidanceElasticity,
+    weights,
+    true,
+  );
+  const initialCollectionDifference = Math.abs(initialAnnualTax.taxCollected - taxCollected);
+  const initialCollectionTolerance = Math.max(
+    MODEL_CONSTANTS.absoluteToleranceFloor,
+    taxCollected * MODEL_CONSTANTS.convergenceEpsilon,
+  );
+  if (initialCollectionDifference > initialCollectionTolerance) {
+    throw new Error("Annual household tax assessment does not reconcile to year-one collection.");
+  }
+  const groupTaxShare = initialAnnualTax.groupTaxShare;
+  const topTierShare = initialAnnualTax.topTierShare;
   // Expatriation drains a cumulative share of the TOP-TIER taxable base over the
   // decade (issue #6/#17). evolveTaxBase applies this retention to the top-tier
   // sub-base only. The household-derived share can be below 1 even with a
@@ -403,6 +577,10 @@ export const buildPolicyProjection = (
   const years: PolicyProjection["years"][number][] = [
     {
       year: 0,
+      taxCollected: 0,
+      taxpayerHouseholds: 0,
+      effectiveTaxRate: 0,
+      taxGroupCollections: taxGroupCollectionRecord(new Map()),
       annualInflation: US_BASELINE.baselineInflation,
       monthlyInflation: annualToMonthly(US_BASELINE.baselineInflation),
       priceLevel,
@@ -422,26 +600,22 @@ export const buildPolicyProjection = (
     // CPI indexation applies the last observed policy price level (a one-year
     // recognition lag), so year 1 always matches the strategy outcomes.
     const indexation = request.ubi.benefitIndexation === "cpi" ? priceLevel : 1;
-    const taxBaseMultiplier = combinedBaseMultiplier(taxBaseState, topTierShare);
-    const taxCollectedYear = taxCollected * taxBaseMultiplier;
-    for (const [id, share] of groupTaxShare) {
-      // Attribute each cohort's cumulative tax with its OWN tier multiplier, not
-      // the blended aggregate: top-tier cohorts bear the expatriation drain while
-      // non-top cohorts keep their retained base (issue #17). Because the
-      // top-tier cohorts' shares sum to topTierShare, this sums back to
-      // taxCollectedYear exactly — aggregate collections are unchanged, only the
-      // per-cohort winners/losers split is made faithful. With expatriation off
-      // (top === rest) or a top-only exemption (non-top shares are 0) it reduces
-      // to the blended multiplier.
-      const tierMultiplier = TOP_TIER_GROUP_IDS.has(id)
-        ? taxBaseState.top
-        : taxBaseState.rest;
-      cumulativeGroupTax.set(
-        id,
-        (cumulativeGroupTax.get(id) ?? 0) + taxCollected * share * tierMultiplier,
-      );
+    const annualTax =
+      year === 1
+        ? initialAnnualTax
+        : assessAnnualHouseholdTaxes(
+            householdTaxStates,
+            taxInputs.policy,
+            request.behavior.avoidanceElasticity,
+            weights,
+            false,
+          );
+    const taxCollectedYear = annualTax.taxCollected;
+    const taxDemandMultiplier = taxCollected > 0 ? taxCollectedYear / taxCollected : 0;
+    for (const [id, collection] of annualTax.groupTaxCollected) {
+      cumulativeGroupTax.set(id, (cumulativeGroupTax.get(id) ?? 0) + collection);
     }
-    const newPrivateLoansYear = newPrivateLoans * taxBaseMultiplier;
+    const newPrivateLoansYear = newPrivateLoans * taxDemandMultiplier;
     const requestedUbiYear = requestedUbi * indexation;
     const openingTreasuryBalance = fiscalState.treasuryBalance;
     const fiscalTransition = resolveFiscalYear(
@@ -514,7 +688,7 @@ export const buildPolicyProjection = (
       // channels when the fiscal closure changes composition over time.
       demandInflation:
         demandInflationForAllocation(taxInputs.demandProfiles, weights, {
-          taxBaseMultiplier,
+          taxBaseMultiplier: taxDemandMultiplier,
           scheduledCash: scheduledCashYear,
           rebate: fiscalYear.rebate,
           publicServices: allocation.publicServicesSpending,
@@ -629,6 +803,10 @@ export const buildPolicyProjection = (
 
     years.push({
       year,
+      taxCollected: taxCollectedYear,
+      taxpayerHouseholds: annualTax.taxpayerHouseholds,
+      effectiveTaxRate: annualTax.effectiveTaxRate,
+      taxGroupCollections: taxGroupCollectionRecord(annualTax.groupTaxCollected),
       annualInflation,
       monthlyInflation: annualToMonthly(annualInflation),
       priceLevel,
@@ -657,15 +835,11 @@ export const buildPolicyProjection = (
       governmentDeficit: governmentDeficitYear,
       m2Injection: moneyInjection,
     };
-    // Evolve the taxable base for next year: nominal asset returns plus partial
-    // excess-inflation pass-through grow it; the effective rate erodes it; and
-    // expatriation drains the top-tier sub-base (issue #17).
-    taxBaseState = evolveTaxBase(taxBaseState, {
+    evolveAnnualHouseholdTaxStates(householdTaxStates, annualTax.collectedByHousehold, taxInputs.policy, {
       annualAssetReturn: request.behavior.annualAssetReturn,
       annualInflation,
       baselineInflation: US_BASELINE.baselineInflation,
       assetPriceInflationPassThrough: request.model.assetPriceInflationPassThrough,
-      effectiveTaxRate,
       expatriationRetention,
     });
   }
@@ -697,7 +871,7 @@ export const buildPolicyProjection = (
       annualAssetReturn: request.behavior.annualAssetReturn,
       baselineInflation: US_BASELINE.baselineInflation,
       assetPriceInflationPassThrough: request.model.assetPriceInflationPassThrough,
-      effectiveTaxRate,
+      effectiveTaxRate: taxInputs.effectiveTaxRate,
       expatriationRetention,
       topTierShare,
     },
@@ -1033,88 +1207,6 @@ const wealthGroupForPercentile = (percentile: number): UsWealthGroupBaseline => 
     throw new Error(`Household percentile ${percentile} is outside the wealth groups.`);
   }
   return group;
-};
-
-const deriveHouseholdTaxAttribution = (
-  assessments: readonly HouseholdProjectionTaxAssessment[],
-  weights: ReturnType<typeof strategyWeights>,
-  authoritativeTaxCollected: number,
-): {
-  readonly groupTaxShare: ReadonlyMap<string, number>;
-  readonly topTierShare: number;
-} => {
-  const groupTaxCollected = new Map<string, number>(
-    US_BASELINE.wealthGroups.map((group) => [group.id, 0]),
-  );
-
-  for (const assessment of assessments) {
-    if (
-      !Number.isFinite(assessment.percentile) ||
-      !Number.isFinite(assessment.weight) ||
-      !Number.isFinite(assessment.taxAssessed) ||
-      assessment.weight < 0 ||
-      assessment.taxAssessed < 0
-    ) {
-      throw new Error("Household projection tax inputs must be finite and nonnegative.");
-    }
-    const collectedByStrategy = assessment.taxCollected;
-    for (const strategy of ["cash-first", "borrow-first", "sell-first"] as const) {
-      const collected = collectedByStrategy[strategy];
-      const householdTolerance = Math.max(
-        MODEL_CONSTANTS.absoluteToleranceFloor,
-        assessment.taxAssessed * MODEL_CONSTANTS.convergenceEpsilon,
-      );
-      if (
-        !Number.isFinite(collected) ||
-        collected < 0 ||
-        collected - assessment.taxAssessed > householdTolerance
-      ) {
-        throw new Error("Household collected tax must be finite and no greater than assessed tax.");
-      }
-    }
-
-    const blendedCollection =
-      collectedByStrategy["cash-first"] * weights.cash +
-      collectedByStrategy["borrow-first"] * weights.borrow +
-      collectedByStrategy["sell-first"] * weights.sell;
-    const group = wealthGroupForPercentile(assessment.percentile);
-    groupTaxCollected.set(
-      group.id,
-      (groupTaxCollected.get(group.id) ?? 0) + blendedCollection * assessment.weight,
-    );
-  }
-
-  const attributedTaxCollected = [...groupTaxCollected.values()].reduce(
-    (sum, collected) => sum + collected,
-    0,
-  );
-  const aggregateTolerance = Math.max(
-    MODEL_CONSTANTS.absoluteToleranceFloor,
-    Math.max(authoritativeTaxCollected, attributedTaxCollected) *
-      MODEL_CONSTANTS.convergenceEpsilon,
-  );
-  if (Math.abs(attributedTaxCollected - authoritativeTaxCollected) > aggregateTolerance) {
-    throw new Error("Household tax attribution does not reconcile to collected tax.");
-  }
-
-  const groupTaxShare = new Map<string, number>();
-  for (const [id, collected] of groupTaxCollected) {
-    groupTaxShare.set(
-      id,
-      attributedTaxCollected > 0 ? collected / attributedTaxCollected : 0,
-    );
-  }
-  const topTierTaxCollected = [...groupTaxCollected]
-    .filter(([id]) => TOP_TIER_GROUP_IDS.has(id))
-    .reduce((sum, [, collected]) => sum + collected, 0);
-
-  return {
-    groupTaxShare,
-    // No revenue means the tier split has no effect. Preserve the historical
-    // neutral edge value so the empty top sub-base cannot create a false rest.
-    topTierShare:
-      attributedTaxCollected > 0 ? topTierTaxCollected / attributedTaxCollected : 1,
-  };
 };
 
 const averageBottomHalf = (

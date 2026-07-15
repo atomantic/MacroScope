@@ -125,6 +125,13 @@ export type InflationRegime =
 
 export interface ProjectionYear {
   readonly year: number;
+  // Re-assessed from the evolved synthetic household balances each year. These
+  // are intentionally separate from the year-one strategy summary so bracket
+  // crossings and fixed exemptions remain visible in the ten-year path.
+  readonly taxCollected: number;
+  readonly taxpayerHouseholds: number;
+  readonly effectiveTaxRate: number;
+  readonly taxGroupCollections: Readonly<Record<string, number>>;
   readonly annualInflation: number;
   readonly monthlyInflation: number;
   readonly priceLevel: number;

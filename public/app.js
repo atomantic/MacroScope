@@ -2048,9 +2048,12 @@ const renderFlow = (projection) => {
         ? `${compactMoney.format(firstFiscal.treasuryBalance)} Treasury balance`
         : "no modeled deficit";
   byId("flow-balance").textContent = `${compactMoney.format(annualFlows.administrativeCost)} administration · ${fiscalAction}`;
-  byId("flow-result").textContent = annualFlows.serviceValue.selected === null
-    ? `${signedPercent(summary.bottom50PurchasingPowerChange)} cash-only buying power`
-    : `${signedPercent(summary.bottom50PurchasingPowerChange)} buying power · ${compactMoney.format(summary.selectedAnnualResourceValue)} cash + selected services`;
+  const finalServiceValue = finalYear?.serviceValue?.selected ?? 0;
+  const hasSelectedFinalService =
+    (finalYear?.publicServicesSpending ?? 0) > 0 && finalServiceValue > 0;
+  byId("flow-result").textContent = hasSelectedFinalService
+    ? `${signedPercent(summary.bottom50PurchasingPowerChange)} buying power · ${compactMoney.format((finalYear?.ubiReceived ?? 0) + finalServiceValue)} cash + selected services`
+    : `${signedPercent(summary.bottom50PurchasingPowerChange)} cash-only buying power`;
   byId("flow-debt").textContent = `${compactMoney.format(summary.privateTaxDebt)} private tax debt${finalYear?.privateTaxLoanInterestPaid > 1 ? ` · ${compactMoney.format(finalYear.privateTaxLoanInterestPaid)} annual interest paid` : ""} · ${compactMoney.format(fiscal?.endingProgramDebt ?? 0)} program debt`;
   const m2Sentence = annualFlows.m2Injection >= 0
     ? `The selected borrowing behavior adds ${compactMoney.format(annualFlows.m2Injection)} to M2 in year one`

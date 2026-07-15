@@ -560,6 +560,12 @@ describe("ten-year projection dynamics", () => {
     expect(unscored.annualFlows.publicServicesSpending).toBeGreaterThan(0);
     expect(unscored.annualFlows.serviceValue.selected).toBeNull();
     expect(unscored.verdict.scope).toBe("cash-only");
+    const zero = runComparison({
+      ...base,
+      ubi: { ...base.ubi, directCashShare: 0, serviceEffectiveness: "zero" },
+    }).projection;
+    expect(zero.annualFlows.serviceValue.selected).toBe(0);
+    expect(zero.verdict.scope).toBe("cash-only");
     expect(scored.annualFlows.serviceValue.zero).toBe(0);
     expect(scored.annualFlows.serviceValue.base).toBeGreaterThan(0);
     expect(scored.annualFlows.serviceValue.high).toBeGreaterThan(

@@ -1055,7 +1055,7 @@ export const buildPolicyProjection = (
     borrowShare: weights.borrow,
     harmfulPeakInflation: request.model.verdictHarmfulInflation,
     serviceValueScored:
-      publicServicesSpending > 0 && yearOneServiceValue.selected !== null,
+      publicServicesSpending > 0 && (yearOneServiceValue.selected ?? 0) > 0,
   });
   const stressTest = buildStressTest(
     strategies,

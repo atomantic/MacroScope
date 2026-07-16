@@ -6,6 +6,7 @@ import {
   FIELD_SPECS,
   SCENARIO_FIELD_SPECS,
   PRESET_PARAM,
+  FISCAL_PACKAGE_PARAM,
   STRATEGY_PARAM,
   decodeScenarioParams,
   encodeScenarioParams,
@@ -130,6 +131,37 @@ describe("scenario URL parameters", () => {
     expect(decodeScenarioParams(query).fields["surplus-use"]).toBe(
       "additional-services",
     );
+  });
+
+  it("round-trips a fiscal package independently of the tax schedule", () => {
+    const values = {
+      ...defaults,
+      "tax-rate": "6",
+      "adult-benefit": "0",
+      "surplus-use": "treasury-balance",
+    };
+    const query = encodeScenarioParams({
+      values,
+      defaults,
+      fiscalPackage: "treasury-retention",
+    });
+    const params = new URLSearchParams(query);
+    expect(params.get(FISCAL_PACKAGE_PARAM)).toBe("treasury-retention");
+    expect(params.get("tr")).toBe("6");
+    expect(params.get("su")).toBeNull();
+    expect(decodeScenarioParams(query).fiscalPackage).toBe("treasury-retention");
+  });
+
+  it("pairs a transfer-free tax preset with an explicit fiscal package", () => {
+    const query = encodeScenarioParams({
+      values: { ...defaults },
+      defaults,
+      preset: "warren-2020",
+      fiscalPackage: "services",
+    });
+    const decoded = decodeScenarioParams(query);
+    expect(decoded.preset).toBe("warren-2020");
+    expect(decoded.fiscalPackage).toBe("services");
   });
 
   it("encodes a pristine preset as ?preset=name without field params", () => {

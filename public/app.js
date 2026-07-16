@@ -35,6 +35,7 @@ const {
   benchmarkDeviation,
 } = await import(versioned("./policy-presets.js"));
 const { DIAGNOSTIC_PRESETS } = await import(versioned("./diagnostic-presets.js"));
+const { FISCAL_PACKAGES } = await import(versioned("./fiscal-packages.js"));
 
 const STRATEGIES = ["cash-first", "borrow-first", "sell-first"];
 const LABELS = {
@@ -56,11 +57,23 @@ let defaultFieldValues = {};
 let activePreset = null;
 let activeBehaviorPreset = null;
 let activeEconomyPreset = null;
+let activeFiscalPackage = null;
+const FISCAL_PACKAGE_FIELD_IDS = new Set([
+  "adult-benefit",
+  "child-benefit",
+  "funding-rule",
+  "surplus-use",
+  "benefit-indexation",
+  "service-effectiveness",
+  "direct-cash-share",
+  "administrative-share",
+]);
 const syncChoiceButtons = (selector, activeName) => {
   document.querySelectorAll(selector).forEach((button) => {
     const selected = button.dataset.preset === activeName
       || button.dataset.behaviorPreset === activeName
-      || button.dataset.economyPreset === activeName;
+      || button.dataset.economyPreset === activeName
+      || button.dataset.fiscalPackage === activeName;
     button.setAttribute("aria-pressed", String(selected));
     button.classList.toggle("is-active", selected);
   });
@@ -72,6 +85,8 @@ const syncBehaviorPresetButtons = () =>
   syncChoiceButtons("[data-behavior-preset]", activeBehaviorPreset);
 const syncEconomyPresetButtons = () =>
   syncChoiceButtons("[data-economy-preset]", activeEconomyPreset);
+const syncFiscalPackageButtons = () =>
+  syncChoiceButtons("[data-fiscal-package]", activeFiscalPackage);
 const setActivePreset = (name) => {
   activePreset = name;
   syncPresetButtons();
@@ -84,6 +99,16 @@ const setActiveBehaviorPreset = (name) => {
 const setActiveEconomyPreset = (name) => {
   activeEconomyPreset = name;
   syncEconomyPresetButtons();
+};
+const setActiveFiscalPackage = (name) => {
+  activeFiscalPackage = name;
+  syncFiscalPackageButtons();
+  const note = byId("fiscal-package-note");
+  if (note) {
+    note.textContent = name && FISCAL_PACKAGES[name]
+      ? FISCAL_PACKAGES[name].note
+      : "Tax design, scheduled benefits, and revenue disposition are separate choices. The first three packages have no household cash transfer; rebates and UBI do.";
+  }
 };
 const clearPresetSelections = () => {
   setActivePreset(null);
@@ -533,6 +558,7 @@ const scenarioQuery = () =>
     values: readFieldValues(),
     defaults: defaultFieldValues,
     preset: activePreset,
+    fiscalPackage: activeFiscalPackage,
     strategy: currentStrategy(),
     brackets: encodeBracketsParam(),
     pin: pinnedQuery(),
@@ -596,6 +622,10 @@ const hydrateFormFromUrl = () => {
     setPresetFields(decoded.preset);
     setActivePreset(decoded.preset);
   }
+  const appliedFiscalPackage = Boolean(
+    decoded.fiscalPackage && FISCAL_PACKAGES[decoded.fiscalPackage],
+  );
+  if (appliedFiscalPackage) applyFiscalPackageFields(decoded.fiscalPackage);
   const fieldIds = Object.keys(decoded.fields);
   for (const id of fieldIds) byId(id).value = decoded.fields[id];
   // A custom graduated schedule (br) overrides any preset-supplied brackets,
@@ -606,6 +636,11 @@ const hydrateFormFromUrl = () => {
   // Explicit field or bracket overrides make the state no longer a pristine preset.
   const scenarioFieldIds = new Set(SCENARIO_FIELD_SPECS.map((spec) => spec.id));
   if (fieldIds.some((id) => scenarioFieldIds.has(id)) || appliedBrackets) clearPresetSelections();
+  if (fieldIds.some((id) => FISCAL_PACKAGE_FIELD_IDS.has(id))) {
+    setActiveFiscalPackage(null);
+  } else if (appliedFiscalPackage) {
+    setActiveFiscalPackage(decoded.fiscalPackage);
+  }
   // A stale/unknown strategy would blank the <select> and later crash
   // renderDistribution (strategies[""]); ignore anything not in STRATEGIES.
   const appliedStrategy = Boolean(decoded.strategy && STRATEGIES.includes(decoded.strategy));
@@ -615,8 +650,9 @@ const hydrateFormFromUrl = () => {
   syncPresetButtons();
   syncBehaviorPresetButtons();
   syncEconomyPresetButtons();
+  syncFiscalPackageButtons();
   // An unknown preset name or strategy applies nothing, so it must not force a recompute.
-  return appliedPreset || fieldIds.length > 0 || appliedBrackets || appliedStrategy;
+  return appliedPreset || appliedFiscalPackage || fieldIds.length > 0 || appliedBrackets || appliedStrategy;
 };
 
 const copyText = async (text) => {
@@ -1148,7 +1184,7 @@ const finishScenarioEdits = async () => {
 // Compute one scenario without disturbing the live form: snapshot the fields and
 // bracket schedule, apply the requested (preset + field + bracket) state, run,
 // then restore. Used to reconstruct a URL-restored pinned Scenario A at load.
-const computeScenario = async ({ preset, fields, brackets, strategy: _strategy } = {}) => {
+const computeScenario = async ({ preset, fiscalPackage, fields, brackets, strategy: _strategy } = {}) => {
   const savedFields = readFieldValues();
   const savedBrackets = encodeBracketsParam();
   try {
@@ -1158,6 +1194,9 @@ const computeScenario = async ({ preset, fields, brackets, strategy: _strategy }
     applyFieldValues(defaultFieldValues);
     renderBrackets([]);
     if (preset && PRESETS[preset]) setPresetFields(preset);
+    if (fiscalPackage && FISCAL_PACKAGES[fiscalPackage]) {
+      applyFiscalPackageFields(fiscalPackage);
+    }
     if (fields) {
       for (const id of Object.keys(fields)) {
         if (byId(id)) byId(id).value = fields[id];
@@ -1188,6 +1227,7 @@ const restorePinnedFromUrl = async () => {
   const decoded = decodeScenarioParams(`?${urlPinString}`);
   const result = await computeScenario({
     preset: decoded.preset,
+    fiscalPackage: decoded.fiscalPackage,
     fields: decoded.fields,
     brackets: decoded.brackets,
     strategy: decoded.strategy,
@@ -1346,8 +1386,16 @@ const PIN_METRICS = [
   { label: "Taxpayers reached (year ten)", get: (r) => r.projection.years.at(-1)?.taxpayerHouseholds ?? 0, kind: "number" },
   { label: "Effective tax rate (year ten)", get: (r) => r.projection.years.at(-1)?.effectiveTaxRate ?? 0, kind: "pct" },
   { label: "Cash delivered (year one)", get: (r) => r.projection.annualFlows.ubiReceived, kind: "money" },
+  { label: "Household rebate (year one)", get: (r) => r.projection.annualFlows.rebate, kind: "money" },
   { label: "Public services (year one)", get: (r) => r.projection.annualFlows.publicServicesSpending, kind: "money" },
   { label: "Administration (year one)", get: (r) => r.projection.annualFlows.administrativeCost, kind: "money" },
+  { label: "Public debt issued (year one)", get: (r) => r.projection.fiscal.years[0]?.debtIssued ?? 0, kind: "money" },
+  { label: "Public debt retired (year one)", get: (r) => r.projection.fiscal.years[0]?.debtRepaid ?? 0, kind: "money" },
+  { label: "Interest savings (year one)", get: (r) => r.projection.fiscal.years[0]?.interestSavings ?? 0, kind: "money" },
+  { label: "Treasury balance (year one)", get: (r) => r.projection.fiscal.years[0]?.treasuryBalance ?? 0, kind: "money" },
+  { label: "M2 recycling / drain (year one)", get: (r) => r.projection.annualFlows.m2Injection, kind: "money" },
+  { label: "Debt retired (ten-year total)", get: (r) => r.projection.fiscal.cumulativeDebtRepaid, kind: "money" },
+  { label: "Ending Treasury balance", get: (r) => r.projection.fiscal.endingTreasuryBalance, kind: "money" },
   { label: "Bottom 50% buying power", get: (r) => r.projection.summary.bottom50PurchasingPowerChange, kind: "pct" },
   { label: "Gap to beneficial buying-power guardrail", get: (r) => r.projection.verdict.margins.beneficialPurchasingPower, kind: "points" },
   { label: "Top 1% real wealth", get: (r) => r.projection.summary.top1RealWealthChange, kind: "pct" },
@@ -1375,10 +1423,26 @@ const renderPinComparison = () => {
   wrap.hidden = false;
   const pinnedVerdict = pinnedResult.projection.verdict;
   const liveVerdict = latestResult.projection.verdict;
-  byId("pin-comparison-note").textContent =
-    pinnedVerdict.rating === liveVerdict.rating
-      ? `Both scenarios are rated ${liveVerdict.rating}, but their continuous outcomes and guardrail distances below can still differ materially.`
-      : `Scenario A is rated ${pinnedVerdict.rating}; the live scenario is rated ${liveVerdict.rating}. The table decomposes the drivers of that change.`;
+  const normalizeClosure = (request) => ({
+    ...request,
+    ubi: { ...request.ubi, surplusUse: "closure-held-out" },
+  });
+  const isolatesRevenueUse =
+    pinnedResult.assumptions.ubi.adultMonthlyBenefit === 0 &&
+    pinnedResult.assumptions.ubi.childMonthlyBenefit === 0 &&
+    latestResult.assumptions.ubi.adultMonthlyBenefit === 0 &&
+    latestResult.assumptions.ubi.childMonthlyBenefit === 0 &&
+    JSON.stringify(normalizeClosure(pinnedResult.assumptions)) ===
+      JSON.stringify(normalizeClosure(latestResult.assumptions));
+  const verdictSentence = pinnedVerdict.rating === liveVerdict.rating
+    ? `Both scenarios are rated ${liveVerdict.rating}, but their continuous outcomes and guardrail distances can still differ materially.`
+    : `Scenario A is rated ${pinnedVerdict.rating}; the live scenario is rated ${liveVerdict.rating}.`;
+  const scopeSentence = liveVerdict.scope === "cash-only"
+    ? "The live verdict is cash-only; unscored public-service value is not an overall welfare verdict."
+    : "The live verdict includes the selected public-service value estimate.";
+  byId("pin-comparison-note").textContent = isolatesRevenueUse
+    ? `Revenue-use isolation confirmed: tax, behavior, and every other assumption are held fixed. ${verdictSentence} ${scopeSentence}`
+    : `${verdictSentence} The table decomposes the drivers of that change. ${scopeSentence}`;
   byId("pin-comparison-body").replaceChildren(
     ...PIN_METRICS.map((metric) => {
       const liveValue = metric.get(latestResult);
@@ -1772,6 +1836,17 @@ const restorePersona = () => {
 const renderVerdict = (projection) => {
   const { verdict, summary } = projection;
   document.body.dataset.verdict = verdict.rating;
+  const firstFiscal = projection.fiscal.years[0];
+  const verdictContext = projection.annualFlows.ubiReceived > 1
+    ? "Model verdict · wealth tax funds household cash transfers"
+    : projection.annualFlows.publicServicesSpending > 1
+      ? "Model verdict · wealth tax funds public services · no cash transfer"
+      : (firstFiscal?.debtRepaid ?? 0) > 1
+        ? "Model verdict · wealth tax reduces public debt · no cash transfer"
+        : projection.fiscal.endingTreasuryBalance > 1
+          ? "Model verdict · wealth tax retained at Treasury · no cash transfer"
+          : "Model verdict · wealth-tax policy";
+  byId("verdict-context").textContent = verdictContext;
   byId("verdict-badge").textContent = `${verdict.scope === "cash-only" ? "cash-only · " : "cash + service estimate · "}${verdict.rating}`;
   byId("verdict-headline").textContent = verdict.headline;
   byId("verdict-explanation").textContent = verdict.explanation;
@@ -2648,7 +2723,7 @@ const renderStrategyCards = (strategies) => {
 const renderComparison = (strategies) => {
   const rows = [
     ["Tax collected", (outcome) => compactMoney.format(outcome.fiscal.taxCollected)],
-    ["UBI received", (outcome) => compactMoney.format(outcome.fiscal.ubiReceived)],
+    ["Cash delivered", (outcome) => compactMoney.format(outcome.fiscal.ubiReceived)],
     ["Public services", (outcome) => compactMoney.format(outcome.fiscal.publicServicesSpending)],
     ["Administration", (outcome) => compactMoney.format(outcome.fiscal.administrativeCost)],
     ["Program operating balance", (outcome) => compactMoney.format(outcome.fiscal.governmentBalance)],
@@ -2921,12 +2996,42 @@ const setPresetFields = (name) => {
   syncAllSliders();
 };
 
+const FISCAL_PACKAGE_FIELD_MAP = {
+  adultBenefit: "adult-benefit",
+  childBenefit: "child-benefit",
+  fundingRule: "funding-rule",
+  surplusUse: "surplus-use",
+  benefitIndexation: "benefit-indexation",
+  serviceEffectiveness: "service-effectiveness",
+  directCashShare: "direct-cash-share",
+  administrativeShare: "administrative-share",
+};
+
+const applyFiscalPackageFields = (name) => {
+  const definition = FISCAL_PACKAGES[name];
+  if (!definition) return;
+  for (const [key, id] of Object.entries(FISCAL_PACKAGE_FIELD_MAP)) {
+    byId(id).value = definition.form[key];
+  }
+  syncAllSliders();
+};
+
+const applyFiscalPackage = (name) => {
+  if (!FISCAL_PACKAGES[name]) return;
+  applyFiscalPackageFields(name);
+  setActiveFiscalPackage(name);
+  void dashboardRerun();
+};
+
 const selectPolicyPreset = (name) => {
   if (!PRESETS[name]) return;
   setPresetFields(name);
   setActivePreset(name);
   setActiveBehaviorPreset(null);
   setActiveEconomyPreset(null);
+  // A tax schedule is not a spending package. Its complete-form reset keeps
+  // Warren/Sanders transfer-free until the user explicitly chooses a closure.
+  setActiveFiscalPackage(null);
 };
 
 const applyPreset = (name) => {
@@ -3020,6 +3125,7 @@ const bracketRowsComplete = () =>
 byId("scenario-form").addEventListener("input", (event) => {
   const target = event.target;
   clearPresetSelections();
+  if (FISCAL_PACKAGE_FIELD_IDS.has(target?.id)) setActiveFiscalPackage(null);
   // Direct typing into a number field mirrors onto its slider (the slider's own
   // handler covers the reverse); also enforce the joint borrow/sell clamp.
   if (target instanceof HTMLInputElement && target.type === "number") {
@@ -3036,6 +3142,7 @@ byId("scenario-form").addEventListener("input", (event) => {
 byId("scenario-form").addEventListener("change", (event) => {
   if (event.target instanceof HTMLSelectElement) {
     clearPresetSelections();
+    if (FISCAL_PACKAGE_FIELD_IDS.has(event.target.id)) setActiveFiscalPackage(null);
     if (bracketRowsComplete()) scheduleAutoRun();
     else clearTimeout(autoRunTimer);
   }
@@ -3101,6 +3208,10 @@ byId("clear-brackets").addEventListener("click", () => {
 document.querySelectorAll("[data-preset]").forEach((button) => {
   button.addEventListener("click", () => applyPreset(button.dataset.preset));
 });
+document.querySelectorAll("[data-fiscal-package]").forEach((button) => {
+  button.addEventListener("click", () => applyFiscalPackage(button.dataset.fiscalPackage));
+});
+byId("pin-fiscal-button").addEventListener("click", () => void pinCurrentScenario());
 byId("persona-form").addEventListener("input", () => {
   renderPersona(latestResult);
   updateScenarioUrl();

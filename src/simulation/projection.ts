@@ -1115,7 +1115,7 @@ export const buildPolicyProjection = (
         recipientCashAllocation.debtRepayment +
         // Interest moves a household deposit into bank income/equity; unlike a
         // transfer to another depositor, it extinguishes a deposit liability.
-        annualTax.interestPaid +
+        -annualTax.interestPaid +
         // A facility is represented as a central-bank purchase of the residual
         // bad claim. It is intentionally the only loss path that expands the
         // model's broad-money proxy; guarantees instead add public debt.
@@ -2038,12 +2038,18 @@ const stressPeak = (input: {
     const treasuryBalanceChange =
       fiscalYear.treasuryBalance - openingTreasuryBalance;
     const repayments = privateDebt * input.loanAmortizationRate;
+    // The stress grid assumes scheduled interest is fully paid and retained by
+    // the bank. Like the main projection's actual paid-interest flow, it
+    // extinguishes deposits until a separately modeled bank outlay re-enters
+    // household or firm deposits.
+    const retainedInterest = privateDebt * input.request.behavior.loanInterestRate;
     privateDebt = Math.max(0, privateDebt + newPrivateLoansYear - repayments);
     const moneyFlow = applyTreasuryMoneyFlow({
       m2,
       nonTreasuryMoneyChange:
         newPrivateLoansYear -
-        repayments +
+        repayments -
+        retainedInterest +
         fiscalYear.debtIssued * input.monetizationShare,
       treasuryBalanceChange,
       drainedTreasuryBalance,

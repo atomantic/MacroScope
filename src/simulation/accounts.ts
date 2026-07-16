@@ -13,6 +13,7 @@ export const SYSTEM_ACCOUNTS = {
   bankReserves: "bank:reserves",
   bankDeposits: "bank:deposits",
   bankEquity: "bank:opening-equity",
+  bankInterestIncome: "bank:interest-income",
   treasury: "government:treasury-account",
   taxIncome: "government:tax-income",
   ubiExpense: "government:ubi-expense",
@@ -32,6 +33,7 @@ export const householdAccounts = (householdId: string) => ({
   publicEquity: `${householdId}:public-equity`,
   openingEquity: `${householdId}:opening-equity`,
   taxExpense: `${householdId}:tax-expense`,
+  interestExpense: `${householdId}:interest-expense`,
   ubiIncome: `${householdId}:ubi-income`,
 });
 
@@ -105,6 +107,12 @@ export const createOpeningLedger = (economy: OpeningEconomy, epsilon?: number): 
     name: "Opening bank equity",
     class: "equity",
   }, bankOpeningEquity);
+  add(ledger, {
+    id: SYSTEM_ACCOUNTS.bankInterestIncome,
+    ownerId: SYSTEM.bank,
+    name: "Retained loan-interest income",
+    class: "income",
+  });
 
   add(ledger, {
     id: SYSTEM_ACCOUNTS.treasury,
@@ -245,6 +253,12 @@ export const createOpeningLedger = (economy: OpeningEconomy, epsilon?: number): 
       name: "Wealth-tax expense",
       class: "expense",
       reconciliation: { flow: "tax", side: "source" },
+    });
+    add(ledger, {
+      id: accounts.interestExpense,
+      ownerId: household.id,
+      name: "Collateralized-loan interest expense",
+      class: "expense",
     });
     add(ledger, {
       id: accounts.ubiIncome,

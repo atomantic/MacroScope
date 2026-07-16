@@ -5,6 +5,7 @@ import {
   distributeUbi,
   householdAccounts,
   originateCollateralizedLoan,
+  payCollateralizedLoanInterest,
   payTaxFromDeposits,
   repayCollateralizedLoan,
   SYSTEM_ACCOUNTS,
@@ -152,6 +153,41 @@ describe("accounting kernel", () => {
 
     expect(ledger.balance(SYSTEM_ACCOUNTS.bankDeposits)).toBe(depositsBeforeRepayment - 20);
     expect(ledger.balance(SYSTEM_ACCOUNTS.bankLoans)).toBe(loansBeforeRepayment - 20);
+    assertLedgerInvariants(ledger);
+  });
+
+  it("reconciles loan origination, retained interest, and principal repayment", () => {
+    const ledger = openingEconomy();
+    const household = householdAccounts("household:taxpayer");
+
+    originateCollateralizedLoan(ledger, "household:taxpayer", 100, {
+      tick: 1,
+      eventId: "loan-origination",
+    });
+    payCollateralizedLoanInterest(ledger, "household:taxpayer", 10, {
+      tick: 2,
+      eventId: "retained-interest",
+    });
+    repayCollateralizedLoan(ledger, "household:taxpayer", 40, {
+      tick: 3,
+      eventId: "principal-repayment",
+    });
+
+    expect(ledger.balance(household.deposits)).toBe(150);
+    expect(ledger.balance(household.loans)).toBe(60);
+    expect(ledger.balance(SYSTEM_ACCOUNTS.bankDeposits)).toBe(250);
+    expect(ledger.balance(SYSTEM_ACCOUNTS.bankLoans)).toBe(60);
+    expect(ledger.balance(SYSTEM_ACCOUNTS.bankInterestIncome)).toBe(10);
+
+    const bankAssets =
+      ledger.balance(SYSTEM_ACCOUNTS.bankLoans) +
+      ledger.balance(SYSTEM_ACCOUNTS.bankReserves);
+    const bankClaimsAndEarnedEquity =
+      ledger.balance(SYSTEM_ACCOUNTS.bankDeposits) +
+      ledger.balance(SYSTEM_ACCOUNTS.bankEquity) +
+      ledger.balance(SYSTEM_ACCOUNTS.bankInterestIncome);
+    expect(bankAssets).toBe(260);
+    expect(bankClaimsAndEarnedEquity).toBe(bankAssets);
     assertLedgerInvariants(ledger);
   });
 });

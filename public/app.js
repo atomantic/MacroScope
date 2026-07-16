@@ -2178,9 +2178,26 @@ const renderTheory = (theory, projection) => {
   byId("theory-recipient").textContent =
     `${compactMoney.format(summary.annualRecipientAssetPurchaseCash)}/yr`;
   byId("theory-hedge").textContent = `${percent.format(assumptions.assetHedgeShare)} · ${compactMoney.format(summary.annualLiquiditySeekingAssets)}/yr`;
-  byId("theory-housing").textContent = signedPercent(summary.housingPriceChange);
+  byId("theory-housing").textContent =
+    `${signedPercent(summary.housingPriceChange)} housing · ${signedPercent(summary.equityPriceChange)} equities`;
   byId("theory-rent").textContent = signedPercent(summary.bottomRenterHousingBurdenChange);
   byId("theory-gap").textContent = signedPoints(summary.housingPositionGapChange);
+  const marketTotals = years.slice(1).reduce((total, year) => {
+    const market = year.assetMarket;
+    return {
+      purchases: total.purchases + market.housing.domesticPurchases +
+        market.publicEquity.domesticPurchases + market.housing.foreignPurchases +
+        market.publicEquity.foreignPurchases,
+      sales: total.sales + market.housing.voluntarySales +
+        market.publicEquity.voluntarySales + market.housing.forcedSales +
+        market.publicEquity.forcedSales,
+      supply: total.supply + market.housing.newSupply + market.publicEquity.newSupply,
+      calls: total.calls + market.collateralCalls,
+      capped: total.capped + (market.converged ? 0 : 1),
+    };
+  }, { purchases: 0, sales: 0, supply: 0, calls: 0, capped: 0 });
+  byId("theory-market-result").textContent =
+    `Across ten years, ${compactMoney.format(marketTotals.purchases)} of reported purchases clear against ${compactMoney.format(marketTotals.sales)} of voluntary and forced sales, with ${compactMoney.format(marketTotals.supply)} of new supply. ${marketTotals.calls > 0 ? `${compactNumber(marketTotals.calls)} weighted household collateral calls occur` : "No collateral calls occur in this scenario"}${marketTotals.capped > 0 ? `; ${marketTotals.capped} annual loops hit the iteration cap.` : "."}`;
   byId("theory-renter-result").textContent = `After cash transfers, administration, prices, and rent, modeled bottom-half renters end with ${signedPercent(summary.bottomRenterDisposableIncomeChange)} disposable buying power relative to the no-policy path.`;
   renderLineChart("theory-chart", {
     ...theoryChartOptions(theory),

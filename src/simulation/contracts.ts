@@ -254,9 +254,30 @@ export interface TheoryTestYear {
   readonly liquiditySeekingAssets: number;
   readonly housingPriceIndex: number;
   readonly equityPriceIndex: number;
+  readonly assetMarket: AnnualAssetMarketDiagnostics;
   readonly middleHomeownerWealthIndex: number;
   readonly bottomRenterHousingBurdenIndex: number;
   readonly bottomRenterDisposableIncomeIndex: number;
+}
+
+export interface AssetMarketDiagnostics {
+  readonly domesticPurchases: number;
+  readonly foreignPurchases: number;
+  readonly voluntarySales: number;
+  readonly forcedSales: number;
+  readonly newSupply: number;
+  readonly netOrderFlow: number;
+  readonly priceChange: number;
+}
+
+export interface AnnualAssetMarketDiagnostics {
+  readonly housing: AssetMarketDiagnostics;
+  readonly publicEquity: AssetMarketDiagnostics;
+  readonly collateralCalls: number;
+  readonly forcedRepayments: number;
+  readonly transactionResidual: number;
+  readonly iterations: number;
+  readonly converged: boolean;
 }
 
 export interface StressCell {

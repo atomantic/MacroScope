@@ -5,6 +5,7 @@ export * from "./core/types.js";
 export * from "./policies/schema.js";
 export * from "./policies/wealthTax.js";
 export * from "./simulation/accounts.js";
+export * from "./simulation/assetMarket.js";
 export * from "./simulation/cashAllocation.js";
 export * from "./simulation/contracts.js";
 export * from "./simulation/modelConstants.js";

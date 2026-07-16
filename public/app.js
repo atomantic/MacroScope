@@ -3238,7 +3238,6 @@ const renderWealthStrip = (host, result) => {
   });
   const lineY = yFor(safeLog(exemption));
   svg.append(svgNode("line", { x1: margin.left, y1: lineY, x2: width - margin.right, y2: lineY, class: "baseline-line" }));
-  svg.append(svgNode("text", { x: width - margin.right, y: lineY - 7, class: "series-label series-b", "text-anchor": "end" }, `Exemption ${compactMoney.format(exemption)}`));
   const chart = document.createElement("div");
   chart.className = "chart strip-chart";
   chart.append(svg);

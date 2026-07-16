@@ -98,6 +98,7 @@ describe("PortOS server", () => {
     expect(shellMarkup).toContain('step="0.1"');
     expect(shellMarkup).toContain('data-preset="top-one"');
     expect(shellMarkup).toContain('data-preset="extreme-universal-borrow"');
+    expect(shellMarkup).toContain('data-preset="top-one" aria-pressed="false"');
     expect(shellMarkup).toContain('id="theory-chart"');
     expect(shellMarkup).toContain('id="backtest-chart"');
     expect(shellMarkup).toContain('id="validation-heading"');
@@ -106,9 +107,11 @@ describe("PortOS server", () => {
     expect(shellMarkup).toContain('id="economy-closure"');
     expect(shellMarkup).toContain('id="foreign-buyer-share"');
     expect(shellMarkup).toContain('data-economy-preset="open-stress"');
+    expect(shellMarkup).toContain('data-economy-preset="open-stress" aria-pressed="false"');
     expect(shellMarkup).toContain('id="open-economy-heading"');
     expect(shellMarkup).toContain('id="private-business-inclusion"');
     expect(shellMarkup).toContain('data-behavior-preset="scandinavian"');
+    expect(shellMarkup).toContain('data-behavior-preset="scandinavian" aria-pressed="false"');
     expect(shellMarkup).toContain('id="wage-pass-through"');
     expect(shellMarkup).toContain('id="monetary-offset"');
     expect(shellMarkup).toContain('id="model-constants-body"');

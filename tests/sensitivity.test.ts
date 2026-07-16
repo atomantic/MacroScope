@@ -16,11 +16,17 @@ const request = (overrides: Partial<ComparisonRequestV1> = {}): ComparisonReques
 });
 
 describe("sensitivity tornado analysis", () => {
-  it("produces identical output for identical requests (determinism)", () => {
-    const first = runSensitivityAnalysis(request());
-    const second = runSensitivityAnalysis(request());
-    expect(second).toStrictEqual(first);
-  });
+  it(
+    "produces identical output for identical requests (determinism)",
+    () => {
+      const first = runSensitivityAnalysis(request());
+      const second = runSensitivityAnalysis(request());
+      expect(second).toStrictEqual(first);
+    },
+    // Two complete tornado analyses now include bidirectional annual market
+    // clearing for every perturbed run; leave headroom under parallel CI load.
+    10_000,
+  );
 
   it("reports the same base verdict and headline outputs as a single comparison", () => {
     const req = request();

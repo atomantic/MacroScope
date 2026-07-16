@@ -129,11 +129,20 @@ export const auditOpenEconomyFlows = (flows: OpenEconomyFlows): OpenEconomyLedge
 
   const residuals = measureLedgerResiduals(ledger);
   failures.push(...checkLedgerInvariants(ledger).map((failure) => `${failure.invariant}: ${failure.message}`));
+  const trialBalanceResidual =
+    Math.abs(residuals.trialBalance) <= epsilon ? 0 : residuals.trialBalance;
+  const instrumentResidual =
+    Math.abs(residuals.instrumentMirror) <= epsilon
+      ? 0
+      : residuals.instrumentMirror;
   return {
-    trialBalanceResidual: residuals.trialBalance,
-    instrumentResidual: residuals.instrumentMirror,
+    trialBalanceResidual,
+    instrumentResidual,
     events: ledger.sequence,
     failures,
-    passed: failures.length === 0 && Math.abs(residuals.trialBalance) <= epsilon && Math.abs(residuals.instrumentMirror) <= epsilon,
+    passed:
+      failures.length === 0 &&
+      trialBalanceResidual === 0 &&
+      instrumentResidual === 0,
   };
 };

@@ -100,12 +100,20 @@ export const MODEL_CONSTANTS = {
   taxLoanBankCapitalRatio: 0.1,
 
   // --- Asset / housing feedback ------------------------------------------
-  // Floor added to the user's housing supply elasticity so a perfectly
-  // inelastic (0) input still clears through a finite price move.
-  housingSupplyElasticityFloor: 0.25,
   // Amplifies the equity price-impact coefficient in the ten-year feedback loop
   // relative to the single-year cascade (thin secondary demand moves prices more).
   equityPriceImpactAmplifier: 4,
+  // Annual issuance response used by the equity-market clearer. At 0.35,
+  // roughly one quarter of excess gross demand becomes new claims before the
+  // residual reaches secondary-market prices.
+  equityIssuanceElasticity: 0.35,
+  // Price/collateral cascades are bounded and must settle to less than $1M of
+  // new forced flow before this many inner passes.
+  annualMarketMaximumIterations: 12,
+  annualMarketConvergenceTolerance: 1_000_000,
+  // Prevent a single reduced-form clearing pass from wiping out or exploding
+  // an asset class; multiple passes can still represent a severe cascade.
+  annualMarketMaximumAbsolutePriceMove: 0.25,
   // e-folding time (years) over which the one-off demand shock decays as
   // domestic supply and wages adapt. exp(-(year-1)/decay).
   demandShockDecayYears: 3,

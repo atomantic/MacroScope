@@ -19,6 +19,7 @@ import type {
   ServiceValueRange,
   StrategyOutcome,
   StressCell,
+  AnnualAssetMarketDiagnostics,
   WealthGroupOutcome,
 } from "./contracts.js";
 import { US_BASELINE, type UsWealthGroupBaseline } from "./usBaseline.js";
@@ -38,6 +39,10 @@ import {
   recipientCashAllocationAssumptions,
   type RecipientCashAllocation,
 } from "./cashAllocation.js";
+import {
+  annualAssetClassReturns,
+  clearAssetMarket,
+} from "./assetMarket.js";
 
 // Load-bearing model assumptions are documented in ./modelConstants.ts; these
 // aliases keep the projection math readable. Rationale and sources live there.
@@ -361,6 +366,46 @@ const createAnnualHouseholdTaxStates = (
     deferredTax: 0,
   }));
 
+const applyRecipientNonMarketAllocation = (
+  states: readonly AnnualHouseholdTaxState[],
+  allocation: RecipientCashAllocation,
+  debtBefore: readonly number[],
+  debtAfter: readonly number[],
+): void => {
+  const scoreTotal = states.reduce(
+    (sum, state) =>
+      sum + state.source.annualRequestedBenefit * state.source.weight,
+    0,
+  );
+  const representedWeight = states.reduce(
+    (sum, state) => sum + state.source.weight,
+    0,
+  );
+  for (const [index, state] of states.entries()) {
+    const share =
+      scoreTotal > 0
+        ? state.source.annualRequestedBenefit / scoreTotal
+        : 1 / Math.max(1, representedWeight);
+    state.assets.deposits += allocation.depositSaving * share;
+    state.assets.retirementAssets +=
+      allocation.retirementAndBondPurchases * share;
+    state.assets.otherAssets += allocation.speculativeAssetPurchases * share;
+    let debtRepaid = Math.max(
+      0,
+      (debtBefore[index] ?? 0) - (debtAfter[index] ?? 0),
+    );
+    for (const liability of [
+      "consumerDebt",
+      "collateralizedLoan",
+      "mortgage",
+    ] as const) {
+      const reduction = Math.min(debtRepaid, state.liabilities[liability]);
+      state.liabilities[liability] -= reduction;
+      debtRepaid -= reduction;
+    }
+  }
+};
+
 const weightedFunding = (
   funding: Readonly<Record<PaymentStrategy, HouseholdProjectionFunding>>,
   weights: ReturnType<typeof strategyWeights>,
@@ -682,6 +727,267 @@ const assessAnnualHouseholdTaxes = (
   };
 };
 
+const emptyMarketDiagnostics = () => ({
+  housing: {
+    domesticPurchases: 0,
+    foreignPurchases: 0,
+    voluntarySales: 0,
+    forcedSales: 0,
+    newSupply: 0,
+    netOrderFlow: 0,
+    priceChange: 0,
+  },
+  publicEquity: {
+    domesticPurchases: 0,
+    foreignPurchases: 0,
+    voluntarySales: 0,
+    forcedSales: 0,
+    newSupply: 0,
+    netOrderFlow: 0,
+    priceChange: 0,
+  },
+  collateralCalls: 0,
+  forcedRepayments: 0,
+  transactionResidual: 0,
+  iterations: 0,
+  converged: true,
+});
+
+const clearAnnualAssetMarkets = (
+  states: readonly AnnualHouseholdTaxState[],
+  input: {
+    readonly request: ComparisonRequestV1;
+    readonly domesticHousingPurchases: number;
+    readonly domesticEquityPurchases: number;
+    readonly recipientHousingPurchases: number;
+    readonly recipientEquityPurchases: number;
+    readonly voluntaryHousingSales: number;
+    readonly voluntaryEquitySales: number;
+    readonly housingMarketValue: number;
+    readonly equityMarketValue: number;
+    readonly remainingRecipientDebtByHousehold: number[];
+  },
+): AnnualAssetMarketDiagnostics => {
+  const totals = emptyMarketDiagnostics();
+  let housingForcedSales = 0;
+  let equityForcedSales = 0;
+  let totalHousingPriceFactor = 1;
+  let totalEquityPriceFactor = 1;
+  let collateralCalls = 0;
+  let forcedRepayments = 0;
+  let converged = false;
+  let iterations = 0;
+
+  for (
+    let iteration = 0;
+    iteration < MODEL_CONSTANTS.annualMarketMaximumIterations;
+    iteration += 1
+  ) {
+    iterations = iteration + 1;
+    const firstPass = iteration === 0;
+    const currentHousingSales = firstPass
+      ? input.voluntaryHousingSales
+      : housingForcedSales;
+    const currentEquitySales = firstPass
+      ? input.voluntaryEquitySales
+      : equityForcedSales;
+    const foreignHousingPurchases =
+      currentHousingSales * input.request.economy.foreignBuyerShare;
+    const foreignEquityPurchases =
+      currentEquitySales * input.request.economy.foreignBuyerShare;
+    const housing = clearAssetMarket({
+      domesticPurchases: firstPass ? input.domesticHousingPurchases : 0,
+      foreignPurchases: foreignHousingPurchases,
+      voluntarySales: firstPass ? currentHousingSales : 0,
+      forcedSales: firstPass ? 0 : currentHousingSales,
+      marketValue: input.housingMarketValue * totalHousingPriceFactor,
+      buyerDepthRatio: input.request.market.buyerDepthRatio,
+      priceImpactCoefficient: input.request.market.priceImpactCoefficient,
+      supplyElasticity: input.request.market.housingSupplyElasticity,
+      maximumAbsolutePriceMove:
+        MODEL_CONSTANTS.annualMarketMaximumAbsolutePriceMove,
+    });
+    const equity = clearAssetMarket({
+      domesticPurchases: firstPass ? input.domesticEquityPurchases : 0,
+      foreignPurchases: foreignEquityPurchases,
+      voluntarySales: firstPass ? currentEquitySales : 0,
+      forcedSales: firstPass ? 0 : currentEquitySales,
+      marketValue: input.equityMarketValue * totalEquityPriceFactor,
+      buyerDepthRatio: input.request.market.buyerDepthRatio,
+      priceImpactCoefficient:
+        input.request.market.priceImpactCoefficient *
+        MODEL_CONSTANTS.equityPriceImpactAmplifier,
+      supplyElasticity: MODEL_CONSTANTS.equityIssuanceElasticity,
+      maximumAbsolutePriceMove:
+        MODEL_CONSTANTS.annualMarketMaximumAbsolutePriceMove,
+    });
+
+    totals.housing.domesticPurchases += firstPass
+      ? input.domesticHousingPurchases
+      : 0;
+    totals.housing.foreignPurchases += foreignHousingPurchases;
+    totals.housing.voluntarySales += firstPass ? currentHousingSales : 0;
+    totals.housing.forcedSales += firstPass ? 0 : currentHousingSales;
+    totals.housing.newSupply += housing.newSupply;
+    totals.housing.netOrderFlow += housing.netOrderFlow;
+    totals.publicEquity.domesticPurchases += firstPass
+      ? input.domesticEquityPurchases
+      : 0;
+    totals.publicEquity.foreignPurchases += foreignEquityPurchases;
+    totals.publicEquity.voluntarySales += firstPass ? currentEquitySales : 0;
+    totals.publicEquity.forcedSales += firstPass ? 0 : currentEquitySales;
+    totals.publicEquity.newSupply += equity.newSupply;
+    totals.publicEquity.netOrderFlow += equity.netOrderFlow;
+
+    totalHousingPriceFactor *= 1 + housing.priceChange;
+    totalEquityPriceFactor *= 1 + equity.priceChange;
+    for (const state of states) {
+      state.assets.housing *= 1 + housing.priceChange;
+      state.assets.publicEquity *= 1 + equity.priceChange;
+    }
+
+    housingForcedSales = 0;
+    equityForcedSales = 0;
+    for (const state of states) {
+      if (state.taxLoanBalance <= 0) continue;
+      const collateralCapacity = Math.max(
+        0,
+        input.request.market.maximumCollateralLtv *
+          (state.assets.publicEquity + state.assets.housing) -
+          state.liabilities.mortgage -
+          state.liabilities.collateralizedLoan,
+      );
+      let excessLoan = Math.max(0, state.taxLoanBalance - collateralCapacity);
+      if (excessLoan <= 0) continue;
+      collateralCalls += state.source.weight;
+      const equitySale = Math.min(excessLoan, state.assets.publicEquity);
+      state.assets.publicEquity -= equitySale;
+      excessLoan -= equitySale;
+      const housingSale = Math.min(excessLoan, state.assets.housing);
+      state.assets.housing -= housingSale;
+      const repaid = equitySale + housingSale;
+      state.taxLoanBalance = Math.max(0, state.taxLoanBalance - repaid);
+      equityForcedSales += equitySale * state.source.weight;
+      housingForcedSales += housingSale * state.source.weight;
+      forcedRepayments += repaid * state.source.weight;
+    }
+
+    if (
+      equityForcedSales + housingForcedSales <=
+      MODEL_CONSTANTS.annualMarketConvergenceTolerance
+    ) {
+      converged = true;
+      break;
+    }
+  }
+
+  // If the declared iteration cap binds, the last collateral calls still
+  // execute at the last cleared prices. Record those sales and their foreign
+  // absorption even though no further price pass is attempted.
+  if (!converged && housingForcedSales + equityForcedSales > 0) {
+    totals.housing.forcedSales += housingForcedSales;
+    totals.publicEquity.forcedSales += equityForcedSales;
+    totals.housing.foreignPurchases +=
+      housingForcedSales * input.request.economy.foreignBuyerShare;
+    totals.publicEquity.foreignPurchases +=
+      equityForcedSales * input.request.economy.foreignBuyerShare;
+  }
+
+  const totalHousingSales =
+    totals.housing.voluntarySales + totals.housing.forcedSales;
+  const totalEquitySales =
+    totals.publicEquity.voluntarySales + totals.publicEquity.forcedSales;
+  const domesticHousingTransfer = Math.max(
+    0,
+    totalHousingSales - totals.housing.foreignPurchases,
+  );
+  const domesticEquityTransfer = Math.max(
+    0,
+    totalEquitySales - totals.publicEquity.foreignPurchases,
+  );
+  const housingSupplyForDomesticBuyers =
+    totals.housing.newSupply *
+    (input.domesticHousingPurchases /
+      Math.max(
+        1,
+        totals.housing.domesticPurchases + totals.housing.foreignPurchases,
+      ));
+  const equitySupplyForDomesticBuyers =
+    totals.publicEquity.newSupply *
+    (input.domesticEquityPurchases /
+      Math.max(
+        1,
+        totals.publicEquity.domesticPurchases +
+          totals.publicEquity.foreignPurchases,
+      ));
+  const domesticHousingAddition =
+    domesticHousingTransfer + housingSupplyForDomesticBuyers;
+  const domesticEquityAddition =
+    domesticEquityTransfer + equitySupplyForDomesticBuyers;
+  const recipientHousingAddition = Math.min(
+    input.recipientHousingPurchases,
+    domesticHousingAddition,
+  );
+  const recipientEquityAddition = Math.min(
+    input.recipientEquityPurchases,
+    domesticEquityAddition,
+  );
+  let recipientScoreTotal = 0;
+  let housingScoreTotal = 0;
+  let equityScoreTotal = 0;
+  let representedWeight = 0;
+  for (const state of states) {
+    recipientScoreTotal +=
+      state.source.annualRequestedBenefit * state.source.weight;
+    housingScoreTotal += state.assets.housing * state.source.weight;
+    equityScoreTotal += state.assets.publicEquity * state.source.weight;
+    representedWeight += state.source.weight;
+  }
+  const recipientMortgage =
+    recipientHousingAddition *
+    (1 - input.request.behavior.recipientHousingDownPaymentShare);
+  const remainingHousing = domesticHousingAddition - recipientHousingAddition;
+  const remainingEquity = domesticEquityAddition - recipientEquityAddition;
+  for (const [index, state] of states.entries()) {
+    const recipientShare =
+      recipientScoreTotal > 0
+        ? state.source.annualRequestedBenefit / recipientScoreTotal
+        : 1 / Math.max(1, representedWeight);
+    const housingShare =
+      housingScoreTotal > 0
+        ? state.assets.housing / housingScoreTotal
+        : 1 / Math.max(1, representedWeight);
+    const equityShare =
+      equityScoreTotal > 0
+        ? state.assets.publicEquity / equityScoreTotal
+        : 1 / Math.max(1, representedWeight);
+    state.assets.housing +=
+      recipientHousingAddition * recipientShare +
+      remainingHousing * housingShare;
+    state.assets.publicEquity +=
+      recipientEquityAddition * recipientShare +
+      remainingEquity * equityShare;
+    const mortgageAddition = recipientMortgage * recipientShare;
+    state.liabilities.mortgage += mortgageAddition;
+    input.remainingRecipientDebtByHousehold[index] =
+      (input.remainingRecipientDebtByHousehold[index] ?? 0) + mortgageAddition;
+  }
+
+  totals.housing.priceChange = totalHousingPriceFactor - 1;
+  totals.publicEquity.priceChange = totalEquityPriceFactor - 1;
+  return {
+    ...totals,
+    collateralCalls,
+    forcedRepayments,
+    transactionResidual:
+      totals.housing.forcedSales +
+      totals.publicEquity.forcedSales -
+      forcedRepayments,
+    iterations,
+    converged,
+  };
+};
+
 const evolveAnnualHouseholdTaxStates = (
   states: readonly AnnualHouseholdTaxState[],
   input: {
@@ -692,20 +998,18 @@ const evolveAnnualHouseholdTaxStates = (
     readonly expatriationRetention: number;
   },
 ): void => {
-  const growth = Math.max(
-    0,
-    1 +
-      input.annualAssetReturn +
-      Math.max(0, input.annualInflation - input.baselineInflation) *
-        input.assetPriceInflationPassThrough,
-  );
+  const returns = annualAssetClassReturns(input);
   for (const state of states) {
     const isTopTier = TOP_TIER_GROUP_IDS.has(
       wealthGroupForPercentile(state.source.percentile).id,
     );
     const retention = isTopTier ? input.expatriationRetention : 1;
     for (const asset of Object.keys(state.assets) as AssetClass[]) {
-      state.assets[asset] *= growth * retention;
+      // Housing/equity already received this year's policy-driven market
+      // revaluation inside the clearing loop. These class-specific baseline
+      // returns replace the former blanket return across deposits and every
+      // real/financial asset.
+      state.assets[asset] *= Math.max(0, 1 + returns[asset]) * retention;
     }
   }
 };
@@ -951,6 +1255,7 @@ export const buildPolicyProjection = (
       liquiditySeekingAssets: 0,
       housingPriceIndex: 100,
       equityPriceIndex: 100,
+      assetMarket: emptyMarketDiagnostics(),
       middleHomeownerWealthIndex: 100,
       bottomRenterHousingBurdenIndex: 100,
       bottomRenterDisposableIncomeIndex: 100,
@@ -1032,6 +1337,8 @@ export const buildPolicyProjection = (
     const programBudgetYear = fiscalYear.programOutlay;
     const governmentDeficitYear = fiscalYear.debtIssued;
     const scheduledCashYear = allocation.ubiReceived - fiscalYear.rebate;
+    const recipientDebtBeforeAllocation =
+      remainingRecipientDebtByHousehold.slice();
     const recipientCashAllocation = aggregateRecipientCashAllocation(
       taxInputs.householdAssessments,
       request,
@@ -1039,21 +1346,106 @@ export const buildPolicyProjection = (
       fiscalYear.rebate,
       remainingRecipientDebtByHousehold,
     );
+    applyRecipientNonMarketAllocation(
+      householdTaxStates,
+      recipientCashAllocation,
+      recipientDebtBeforeAllocation,
+      remainingRecipientDebtByHousehold,
+    );
     const bottom50UbiYear =
       bottom50ScheduledCash *
         (yearOneScheduledCash > 0 ? scheduledCashYear / yearOneScheduledCash : 0) +
       fiscalYear.rebate / Math.max(1, request.representedHouseholds);
 
-    // One aggregate rest-of-world sector closes the formerly domestic-only
-    // buyer pool. The four paths are intentionally separate: a non-resident
-    // can buy a domestic claim, Treasury can place debt abroad, a resident can
-    // acquire a foreign claim, and some of that claim can be repatriated.
+    const repayments = annualTax.principalRepayments;
+    // Retained interest rebuilds the loan-book buffer. A private resolution
+    // consumes it; the other paths make the rescue assumption explicit rather
+    // than silently leaving a bank loss in the balance sheet.
+    bankCapital = Math.max(
+      0,
+      bankCapital + annualTax.interestPaid - annualTax.privateBankLosses,
+    );
+    cumulativeGovernmentGuarantees += annualTax.governmentGuarantees;
+    publicDebt = fiscalYear.netPublicDebtChange + cumulativeGovernmentGuarantees;
+    const treasuryBalanceChange =
+      fiscalYear.treasuryBalance - openingTreasuryBalance;
+    const nonTreasuryMoneyChangeBeforeMarket =
+      newPrivateLoansYear -
+      repayments -
+      recipientCashAllocation.debtRepayment -
+      annualTax.interestPaid +
+      annualTax.centralBankFacilities +
+      governmentDeficitYear * request.behavior.deficitMonetizationShare;
+    const preliminaryMoneyFlow = applyTreasuryMoneyFlow({
+      m2,
+      // Cash-transfer recipients who repay existing bank debt extinguish
+      // matching deposits. This can offset asset demand without being confused
+      // with either Treasury redistribution or new-money recycling.
+      nonTreasuryMoneyChange: nonTreasuryMoneyChangeBeforeMarket,
+      treasuryBalanceChange,
+      drainedTreasuryBalance,
+    });
+
+    // Tax-payment loans do not buy assets directly: they settle with Treasury.
+    // This separate, exposed assumption asks how much of the resulting liquidity
+    // is later recycled into inflation hedges by its eventual holders.
+    const liquiditySeekingAssets =
+      Math.max(0, preliminaryMoneyFlow.moneyChange) *
+      request.behavior.assetHedgeShare;
+    const newMoneyHousingDemand =
+      liquiditySeekingAssets * request.behavior.housingHedgeShare;
+    const newMoneyEquityDemand = liquiditySeekingAssets - newMoneyHousingDemand;
+    const housingDemand =
+      newMoneyHousingDemand + recipientCashAllocation.housingPurchaseDemand;
+    const equityDemand =
+      newMoneyEquityDemand + recipientCashAllocation.publicEquityPurchases;
+    const assetMarket = clearAnnualAssetMarkets(householdTaxStates, {
+      request,
+      domesticHousingPurchases: housingDemand,
+      domesticEquityPurchases: equityDemand,
+      recipientHousingPurchases:
+        recipientCashAllocation.housingPurchaseDemand,
+      recipientEquityPurchases:
+        recipientCashAllocation.publicEquityPurchases,
+      voluntaryHousingSales: annualTax.housingSold,
+      voluntaryEquitySales: annualTax.equitySold,
+      housingMarketValue: housingWealth * housingPriceIndex,
+      equityMarketValue: publicEquityWealth * equityPriceIndex,
+      remainingRecipientDebtByHousehold,
+    });
+    housingPriceIndex *= 1 + assetMarket.housing.priceChange;
+    equityPriceIndex *= 1 + assetMarket.publicEquity.priceChange;
+    rentPremiumIndex *=
+      1 + assetMarket.housing.priceChange * request.behavior.rentPassThrough;
+
+    // Forced collateral sales end in principal repayment, so their matching
+    // deposits and loans disappear in addition to scheduled servicing.
+    const moneyFlow = applyTreasuryMoneyFlow({
+      m2,
+      nonTreasuryMoneyChange:
+        nonTreasuryMoneyChangeBeforeMarket - assetMarket.forcedRepayments,
+      treasuryBalanceChange,
+      drainedTreasuryBalance,
+    });
+    const moneyInjection = moneyFlow.moneyChange;
+    drainedTreasuryBalance = moneyFlow.drainedTreasuryBalance;
+    const moneyGrowth = moneyInjection / Math.max(1, m2);
+    m2 += moneyInjection;
+    privateTaxDebt = Math.max(
+      0,
+      annualTax.privateTaxDebt - assetMarket.forcedRepayments,
+    );
+
+    // One aggregate rest-of-world sector remains an explicit part of the
+    // market-clearing buyer pool, including purchases of forced-sale claims.
     const foreignAssetPurchases =
-      (annualTax.equitySold + annualTax.housingSold) * request.economy.foreignBuyerShare;
+      assetMarket.housing.foreignPurchases +
+      assetMarket.publicEquity.foreignPurchases;
     const foreignTreasuryPurchases =
       governmentDeficitYear * request.economy.foreignTreasuryDebtShare;
     const residentCapitalOutflow =
-      (topWealth * request.behavior.expatriationShare * request.economy.capitalOutflowResponse) /
+      (topWealth * request.behavior.expatriationShare *
+        request.economy.capitalOutflowResponse) /
       YEARS;
     const repatriatedCapital =
       residentCapitalOutflow * request.economy.repatriationFxPassThrough;
@@ -1082,76 +1474,16 @@ export const buildPolicyProjection = (
       foreignOwnedDomesticClaims,
       exchangeRatePressure,
       residentsChangingJurisdiction:
-        (US_BASELINE.households * (1 - MODEL_CONSTANTS.topOnePercentPercentile) *
-          request.behavior.expatriationShare * request.behavior.expatriationResidenceShare) /
+        (US_BASELINE.households *
+          (1 - MODEL_CONSTANTS.topOnePercentPercentile) *
+          request.behavior.expatriationShare *
+          request.behavior.expatriationResidenceShare) /
         YEARS,
       taxableBaseLeavingJurisdiction:
         (topWealth * request.behavior.expatriationShare *
           request.behavior.expatriationTaxBaseShare) /
         YEARS,
     });
-
-    const repayments = annualTax.principalRepayments;
-    privateTaxDebt = annualTax.privateTaxDebt;
-    // Retained interest rebuilds the loan-book buffer. A private resolution
-    // consumes it; the other paths make the rescue assumption explicit rather
-    // than silently leaving a bank loss in the balance sheet.
-    bankCapital = Math.max(
-      0,
-      bankCapital + annualTax.interestPaid - annualTax.privateBankLosses,
-    );
-    cumulativeGovernmentGuarantees += annualTax.governmentGuarantees;
-    publicDebt = fiscalYear.netPublicDebtChange + cumulativeGovernmentGuarantees;
-    const treasuryBalanceChange =
-      fiscalYear.treasuryBalance - openingTreasuryBalance;
-    const moneyFlow = applyTreasuryMoneyFlow({
-      m2,
-      // Cash-transfer recipients who repay existing bank debt extinguish
-      // matching deposits. This can offset asset demand without being confused
-      // with either Treasury redistribution or new-money recycling.
-      nonTreasuryMoneyChange:
-        newPrivateLoansYear -
-        repayments -
-        recipientCashAllocation.debtRepayment +
-        // Interest moves a household deposit into bank income/equity; unlike a
-        // transfer to another depositor, it extinguishes a deposit liability.
-        -annualTax.interestPaid +
-        // A facility is represented as a central-bank purchase of the residual
-        // bad claim. It is intentionally the only loss path that expands the
-        // model's broad-money proxy; guarantees instead add public debt.
-        annualTax.centralBankFacilities +
-        governmentDeficitYear * request.behavior.deficitMonetizationShare,
-      treasuryBalanceChange,
-      drainedTreasuryBalance,
-    });
-    const moneyInjection = moneyFlow.moneyChange;
-    drainedTreasuryBalance = moneyFlow.drainedTreasuryBalance;
-    const moneyGrowth = moneyInjection / Math.max(1, m2);
-    m2 += moneyInjection;
-
-    // Tax-payment loans do not buy assets directly: they settle with Treasury.
-    // This separate, exposed assumption asks how much of the resulting liquidity
-    // is later recycled into inflation hedges by its eventual holders.
-    const liquiditySeekingAssets =
-      Math.max(0, moneyInjection) * request.behavior.assetHedgeShare;
-    const newMoneyHousingDemand =
-      liquiditySeekingAssets * request.behavior.housingHedgeShare;
-    const newMoneyEquityDemand = liquiditySeekingAssets - newMoneyHousingDemand;
-    const housingDemand =
-      newMoneyHousingDemand + recipientCashAllocation.housingPurchaseDemand;
-    const equityDemand =
-      newMoneyEquityDemand + recipientCashAllocation.publicEquityPurchases;
-    const housingPricePressure =
-      (housingDemand / Math.max(1, housingWealth)) /
-      (MODEL_CONSTANTS.housingSupplyElasticityFloor +
-        request.market.housingSupplyElasticity);
-    const equityPricePressure =
-      (equityDemand / Math.max(1, publicEquityWealth)) *
-      (1 + request.market.priceImpactCoefficient * MODEL_CONSTANTS.equityPriceImpactAmplifier);
-    housingPriceIndex *= 1 + housingPricePressure;
-    equityPriceIndex *= 1 + equityPricePressure;
-    rentPremiumIndex *=
-      1 + housingPricePressure * request.behavior.rentPassThrough;
 
     const stress = inflationFromStress({
       baselineInflation: US_BASELINE.baselineInflation,
@@ -1268,6 +1600,7 @@ export const buildPolicyProjection = (
       liquiditySeekingAssets,
       housingPriceIndex: housingPriceIndex * 100,
       equityPriceIndex: equityPriceIndex * 100,
+      assetMarket,
       middleHomeownerWealthIndex,
       bottomRenterHousingBurdenIndex:
         (policyRentBurden / Math.max(0.0001, baselineRentBurden)) * 100,
@@ -1290,7 +1623,7 @@ export const buildPolicyProjection = (
       m2Index: (m2 / US_BASELINE.m2) * 100,
       privateTaxDebt,
       newPrivateLoans: newPrivateLoansYear,
-      privateTaxLoanRepayments: repayments,
+      privateTaxLoanRepayments: repayments + assetMarket.forcedRepayments,
       privateTaxLoanInterestPaid: annualTax.interestPaid,
       taxLoanDefaults: annualTax.defaults,
       collateralSeized: annualTax.collateralSeized,

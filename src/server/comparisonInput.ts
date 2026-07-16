@@ -6,6 +6,7 @@ import {
   type ModelTunables,
   type ServiceEffectiveness,
   type TaxLoanResolution,
+  type TaxLoanStructure,
 } from "../simulation/contracts.js";
 import { MODEL_TUNABLES } from "../simulation/modelConstants.js";
 import type { TaxBracket } from "../policies/schema.js";
@@ -231,6 +232,10 @@ export const parseComparisonRequest = (input: unknown): ParsedComparisonRequest 
     behavior.taxLoanResolution,
     errors,
   );
+  const taxLoanStructure = readTaxLoanStructure(
+    behavior.taxLoanStructure,
+    errors,
+  );
   const deficitMonetizationShare = readNumber(
     behavior,
     "deficitMonetizationShare",
@@ -426,6 +431,7 @@ export const parseComparisonRequest = (input: unknown): ParsedComparisonRequest 
         sellShare,
         annualAssetReturn,
         loanInterestRate,
+        taxLoanStructure,
         taxLoanResolution,
         deficitMonetizationShare,
         assetHedgeShare,
@@ -633,6 +639,18 @@ const readTaxLoanResolution = (
     "taxLoanResolution must be private-bank-loss, government-guarantee, or central-bank-facility.",
   );
   return DEFAULT_COMPARISON_REQUEST.behavior.taxLoanResolution;
+};
+
+const readTaxLoanStructure = (
+  raw: unknown,
+  errors: string[],
+): TaxLoanStructure => {
+  if (raw === undefined) return DEFAULT_COMPARISON_REQUEST.behavior.taxLoanStructure;
+  if (raw === "interest-only" || raw === "amortizing" || raw === "demand-rollover") {
+    return raw;
+  }
+  errors.push("taxLoanStructure must be interest-only, amortizing, or demand-rollover.");
+  return DEFAULT_COMPARISON_REQUEST.behavior.taxLoanStructure;
 };
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>

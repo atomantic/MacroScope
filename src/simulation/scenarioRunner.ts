@@ -218,6 +218,7 @@ export const runComparisonWithPopulation = (
       "Every modeled asset and liability class is calibrated by wealth group to the Federal Reserve DFA for 2026:Q1; within-group joint distributions remain stylized.",
       "Adult and child counts match the July 2025 resident population estimate, including group-quarters residents and excluding nonresidents. Personal income and consumption retain their synthetic percentile shapes but reconcile independently to calendar-year 2025 BEA totals.",
       "Equity price impact and inflation are reduced-form assumptions exposed for sensitivity testing.",
+      `Tax-payment financing is household-specific. The ${request.behavior.borrowShare >= 0.9 ? "near-total-borrowing stress" : request.behavior.borrowShare >= 0.65 ? "borrow-dominant" : "central"} preference shifts choices but does not impose an aggregate share; liquidity, income, asset mix, leverage, LTV, and the return-rate spread determine realized cash, borrowing, sales, and deferral.`,
       request.economy.closure === "closed"
         ? "Closed-economy mode assumes domestic buyers absorb all equity and housing sales; all foreign-sector dials are zero by default."
         : "Open-economy mode uses one aggregate rest-of-world sector for foreign buyers, Treasury debt holders, and resident foreign claims; it is an auditable closure, not a multi-country DSGE forecast.",

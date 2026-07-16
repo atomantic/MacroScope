@@ -6,6 +6,8 @@ demand is distinct from new-money liquidity recycling: a money-neutral
 tax/rebate can change portfolios without changing aggregate M2.
 Housing and public equity follow the bidirectional annual loop documented in
 [ASSET_MARKET_CLEARING.md](./ASSET_MARKET_CLEARING.md).
+Tax-payment funding choice and loan servicing follow
+[TAX_PAYMENT_FINANCING.md](./TAX_PAYMENT_FINANCING.md).
 
 ## Scope of the first slice
 

@@ -239,6 +239,7 @@ const populateForm = (request) => {
   byId("sell-share").value = request.behavior.sellShare * 100;
   byId("asset-return").value = request.behavior.annualAssetReturn * 100;
   byId("loan-rate").value = request.behavior.loanInterestRate * 100;
+  byId("tax-loan-structure").value = request.behavior.taxLoanStructure ?? "interest-only";
   byId("tax-loan-resolution").value = request.behavior.taxLoanResolution ?? "private-bank-loss";
   byId("monetization").value = request.behavior.deficitMonetizationShare * 100;
   byId("asset-hedge-share").value = request.behavior.assetHedgeShare * 100;
@@ -319,6 +320,7 @@ const formRequest = () => {
       sellShare: Number(byId("sell-share").value) / 100,
       annualAssetReturn: Number(byId("asset-return").value) / 100,
       loanInterestRate: Number(byId("loan-rate").value) / 100,
+      taxLoanStructure: byId("tax-loan-structure").value,
       taxLoanResolution: byId("tax-loan-resolution").value,
       deficitMonetizationShare: Number(byId("monetization").value) / 100,
       assetHedgeShare: Number(byId("asset-hedge-share").value) / 100,
@@ -2134,7 +2136,7 @@ const renderFlow = (projection) => {
   byId("flow-tax-detail").textContent = finalYear
     ? `${compactMoney.format(finalYear.taxCollected)} from ${integer.format(finalYear.taxpayerHouseholds)} modeled taxpayers at a ${percent.format(finalYear.effectiveTaxRate)} effective rate by year ten as the taxed base ${baseTrend}`
     : "on net worth above the exemption";
-  byId("flow-mix").textContent = `${percent.format(behaviorMix.borrowShare)} borrow · ${percent.format(behaviorMix.sellShare)} sell`;
+  byId("flow-mix").textContent = `${behaviorMix.calibration.replaceAll("-", " ")} · ${percent.format(behaviorMix.borrowShare)} of tax dollars borrowed · ${percent.format(behaviorMix.sellShare)} sold`;
   const resolutionDetail = summary.taxLoanDefaults > 1
     ? ` · ${compactMoney.format(summary.taxLoanDefaults)} defaults resolved over 10 years (${compactMoney.format(summary.collateralSeized)} collateral seized)`
     : "";
@@ -2570,7 +2572,7 @@ const renderReasons = (projection) => {
       ? `Services are unscored, so this is a cash-only result. The transparent zero/base/high resource-equivalent cases are ${compactMoney.format(services.zero)}, ${compactMoney.format(services.base)}, and ${compactMoney.format(services.high)}; none is spendable cash.`
       : `The selected ${services.mode} service assumption values delivery at ${compactMoney.format(services.selected)} resource-equivalent, within the explicit ${compactMoney.format(services.zero)} to ${compactMoney.format(services.high)} range; it is not spendable cash.`;
   byId("reason-benefit").textContent = `${compactMoney.format(annualFlows.ubiReceived)} reaches households as cash and ${compactMoney.format(annualFlows.publicServicesSpending)} funds services in year one, after ${compactMoney.format(annualFlows.administrativeCost)} in modeled administration${annualFlows.finalYear ? `; modeled year-ten flows deliver ${compactMoney.format(annualFlows.finalYear.ubiReceived)} in cash` : ""}. Cash buying power for the bottom half ends ${plainDirection(summary.bottom50PurchasingPowerChange)} relative to a no-policy path. ${serviceSentence}`;
-  byId("reason-risk").textContent = `${percent.format(behaviorMix.borrowShare)} of wealthy households’ payment behavior is represented by the borrow-first path. That leaves ${compactMoney.format(summary.privateTaxDebt)} of private tax debt after ten years and lifts M2 ${signedPercent(summary.cumulativeM2Change)}.`;
+  byId("reason-risk").textContent = `${percent.format(behaviorMix.borrowShare)} of realized tax dollars are borrowed by ${percent.format(behaviorMix.householdsBorrowingShare)} of affected households. That leaves ${compactMoney.format(summary.privateTaxDebt)} of private tax debt after ten years and lifts M2 ${signedPercent(summary.cumulativeM2Change)}.`;
 };
 
 const renderDetails = (result) => {
@@ -2954,6 +2956,22 @@ const applyBehaviorPreset = (name) => {
   void dashboardRerun();
 };
 
+const applyFinancingPreset = (name) => {
+  const presets = {
+    central: { borrow: 45, sell: 25, structure: "interest-only" },
+    "borrow-dominant": { borrow: 75, sell: 15, structure: "interest-only" },
+    stress: { borrow: 95, sell: 5, structure: "demand-rollover" },
+  };
+  const preset = presets[name];
+  if (!preset) return;
+  byId("borrow-share").value = preset.borrow;
+  byId("sell-share").value = preset.sell;
+  byId("tax-loan-structure").value = preset.structure;
+  syncAllSliders();
+  setActivePreset(null);
+  void dashboardRerun();
+};
+
 const applyEconomyPreset = (name) => {
   const presets = {
     closed: { foreignBuyers: 0, foreignDebt: 0, outflow: 0, repatriation: 0 },
@@ -3129,10 +3147,9 @@ const setupExemptionStep = (result) => {
   byId("target-mode").value = "exemption";
   syncTargetControls();
 };
-// The borrow dial is the only payment control the story exposes; fix the sell
-// share at zero so the dial spans the full 0–100% (cash = 100 − borrow) without
-// tripping the borrow+sell ≤ 100 rule, and so equal dial positions always model
-// the same split regardless of drag history.
+// The borrow dial is the only payment control the story exposes; fix the sale
+// shifter at zero so it spans the full 0–100% preference range without tripping
+// the joint boundary. Household characteristics still determine realized paths.
 const setupBorrowStep = () => {
   byId("sell-share").value = "0";
 };
@@ -3178,8 +3195,8 @@ const STORY_STEPS = [
     title: "They rarely sell. They borrow against their wealth.",
     setup: setupBorrowStep,
     body: (r) =>
-      `A wealth-tax bill can be paid with cash or by borrowing against assets. The more the reader assumes is borrowed, the more new bank lending the policy triggers. Right now ${percent.format(r.projection.behaviorMix.borrowShare)} is borrowed.`,
-    dial: { field: "borrow-share", label: "Share paid by borrowing (%)", min: 0, max: 100, step: 5 },
+      `A wealth-tax bill can be paid with cash, borrowing, or sales. The dial shifts household preferences; liquidity, income, collateral, leverage, and loan pricing determine the realized result. Right now ${percent.format(r.projection.behaviorMix.borrowShare)} of tax dollars are borrowed.`,
+    dial: { field: "borrow-share", label: "Borrowing preference (%)", min: 0, max: 100, step: 5 },
     viz: (host, r) => renderPaymentSplit(host, r),
     readout: (r) =>
       `${compactMoney.format(r.projection.annualFlows.newPrivateLoans)} in new bank loans in year one — deposits created out of nothing.`,
@@ -3191,7 +3208,7 @@ const STORY_STEPS = [
     setup: setupBorrowStep,
     body: () =>
       "Taxing and transferring existing deposits just reshuffles money. New bank loans are different: they create fresh deposits. Keep moving the borrow dial and watch M2 respond over ten years.",
-    dial: { field: "borrow-share", label: "Share paid by borrowing (%)", min: 0, max: 100, step: 5 },
+    dial: { field: "borrow-share", label: "Borrowing preference (%)", min: 0, max: 100, step: 5 },
     viz: (host, r) => renderStoryChart(host, "story-money-chart", moneyChartOptions(r.projection)),
     readout: (r) =>
       `M2 ends ${signedPercent(r.projection.summary.cumulativeM2Change)} versus the no-policy path.`,
@@ -3637,6 +3654,9 @@ const initStory = () => {
 
 document.querySelectorAll("[data-behavior-preset]").forEach((button) => {
   button.addEventListener("click", () => applyBehaviorPreset(button.dataset.behaviorPreset));
+});
+document.querySelectorAll("[data-financing-preset]").forEach((button) => {
+  button.addEventListener("click", () => applyFinancingPreset(button.dataset.financingPreset));
 });
 document.querySelectorAll("[data-economy-preset]").forEach((button) => {
   button.addEventListener("click", () => applyEconomyPreset(button.dataset.economyPreset));

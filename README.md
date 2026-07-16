@@ -26,6 +26,7 @@ The current implementation covers the model contract and a usable first policy v
 - A 25-cell stress test that separates elevated inflation, crisis inflation, and the Cagan 50%-per-month hyperinflation threshold.
 - An explicit 512- or 1,000-draw joint-assumption ensemble with seeded Latin-hypercube sampling, p10/p50/p90 bands, verdict frequencies, global influence, pairwise interactions, progress, cancellation, and an optional synthetic-population uncertainty layer.
 - A responsive verdict-led dashboard with editable policy, taxpayer behavior, market, and monetization assumptions.
+- First-class wealth-tax-without-UBI packages for debt reduction, public services, and Treasury retention, alongside explicitly labeled rebate and scheduled-UBI cash transfers.
 
 ## Development
 

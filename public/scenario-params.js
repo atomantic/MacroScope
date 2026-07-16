@@ -71,8 +71,19 @@ export const PERSONA_FIELD_SPECS = [
 export const FIELD_SPECS = [...SCENARIO_FIELD_SPECS, ...PERSONA_FIELD_SPECS];
 
 const SCENARIO_FIELD_IDS = new Set(SCENARIO_FIELD_SPECS.map((spec) => spec.id));
+const FISCAL_PACKAGE_FIELD_IDS = new Set([
+  "adult-benefit",
+  "child-benefit",
+  "funding-rule",
+  "surplus-use",
+  "benefit-indexation",
+  "service-effectiveness",
+  "direct-cash-share",
+  "administrative-share",
+]);
 
 export const PRESET_PARAM = "preset";
+export const FISCAL_PACKAGE_PARAM = "pkg";
 export const STRATEGY_PARAM = "strat";
 export const BRACKETS_PARAM = "br";
 // A pinned "Scenario A" rides alongside the live scenario as a single nested
@@ -90,16 +101,21 @@ export const encodeScenarioParams = ({
   values,
   defaults,
   preset = null,
+  fiscalPackage = null,
   strategy = DEFAULT_STRATEGY,
   brackets = null,
   pin = null,
 } = {}) => {
   const params = new URLSearchParams();
   if (preset) params.set(PRESET_PARAM, preset);
+  if (fiscalPackage) params.set(FISCAL_PACKAGE_PARAM, fiscalPackage);
   for (const spec of FIELD_SPECS) {
     // A pristine policy preset reconstructs all scenario controls, but personal
     // household settings still need to accompany it in a shared link.
     if (preset && SCENARIO_FIELD_IDS.has(spec.id)) continue;
+    // A named fiscal package reconstructs only its own benefit/closure fields;
+    // tax, behavior, market, and household settings still serialize normally.
+    if (fiscalPackage && FISCAL_PACKAGE_FIELD_IDS.has(spec.id)) continue;
     const value = values?.[spec.id];
     if (value !== undefined && String(value) !== String(defaults?.[spec.id])) {
       params.set(spec.param, String(value));
@@ -127,6 +143,7 @@ export const decodeScenarioParams = (search) => {
   }
   return {
     preset: params.get(PRESET_PARAM),
+    fiscalPackage: params.get(FISCAL_PACKAGE_PARAM),
     strategy: params.get(STRATEGY_PARAM),
     brackets: params.get(BRACKETS_PARAM),
     pin: params.get(PIN_PARAM),

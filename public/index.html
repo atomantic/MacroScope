@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f2efe7" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./styles.css?v=25" />
+    <link rel="stylesheet" href="./styles.css?v=26" />
     <title>MacroScope</title>
   </head>
   <body>
@@ -39,7 +39,7 @@
       </button>
       <section class="verdict-section" aria-labelledby="verdict-headline">
         <div class="verdict-copy">
-          <p class="kicker">Model verdict · wealth tax funds redistribution</p>
+          <p class="kicker" id="verdict-context">Model verdict · wealth-tax policy</p>
           <div class="verdict-line">
             <span class="verdict-badge" id="verdict-badge">Calculating</span>
             <span class="scenario-summary" id="scenario-summary">2% above $10M · $1,000/mo adult equivalent</span>
@@ -75,7 +75,7 @@
         <div class="section-intro">
           <p class="kicker">Who wins, who loses</p>
           <h2 id="winners-heading">Every group gets an explicit ten-year outcome.</h2>
-          <p>Each bar shows where a cohort ends versus the no-policy path, combining wealth tax paid, UBI received, purchasing power after inflation, and asset-price effects. Renters read on buying power; asset-holders read on real net worth. <a href="#caveats" class="caveat-link">See what the model does and doesn't capture.</a></p>
+          <p>Each bar shows where a cohort ends versus the no-policy path, combining wealth tax paid, household cash transfers received, purchasing power after inflation, and asset-price effects. Renters read on buying power; asset-holders read on real net worth. <a href="#caveats" class="caveat-link">See what the model does and doesn't capture.</a></p>
         </div>
         <div class="winners-grid" id="winners-grid" aria-label="Ten-year outcome by wealth group"></div>
         <div class="persona-card">
@@ -427,7 +427,18 @@
             </div>
           </fieldset>
           <fieldset>
-            <legend>Redistribution</legend>
+            <legend>Benefits and revenue use</legend>
+            <div class="behavior-presets fiscal-package-presets" aria-label="Benefit and revenue-use packages">
+              <span>Policy package</span>
+              <button type="button" data-fiscal-package="debt-reduction" aria-pressed="false">No cash · reduce debt</button>
+              <button type="button" data-fiscal-package="services" aria-pressed="false">No cash · services</button>
+              <button type="button" data-fiscal-package="treasury-retention" aria-pressed="false">No cash · Treasury</button>
+              <button type="button" data-fiscal-package="rebate" aria-pressed="false">Cash · rebate</button>
+              <button type="button" data-fiscal-package="scheduled-ubi" aria-pressed="false">Cash · scheduled UBI</button>
+            </div>
+            <p class="field-hint" id="fiscal-package-note">Tax design, scheduled benefits, and revenue disposition are separate choices. The first three packages have no household cash transfer; rebates and UBI do.</p>
+            <button type="button" class="link-button" id="pin-fiscal-button">Pin this closure as Scenario A</button>
+            <small class="field-hint">Then choose another no-cash package to isolate revenue disposition while tax and taxpayer behavior stay fixed.</small>
             <label for="adult-benefit">Adult monthly equivalent<input id="adult-benefit" name="adultBenefit" type="number" min="0" step="100" data-slider-max="3000" /></label>
             <label for="child-benefit">Child monthly equivalent<input id="child-benefit" name="childBenefit" type="number" min="0" step="100" data-slider-max="2000" /></label>
             <label for="funding-rule">Funding rule<select id="funding-rule" name="fundingRule"><option value="revenue-constrained">Revenue constrained</option><option value="fixed">Fixed benefit + deficit</option><option value="smoothed">Smoothed with debt</option></select></label>
@@ -637,6 +648,6 @@
     </footer>
     <div class="toast-container" id="toast-container" aria-live="polite" aria-atomic="true"></div>
     <div class="visually-hidden" id="chart-readout" role="status" aria-live="polite"></div>
-    <script src="./app.js?v=25" type="module"></script>
+    <script src="./app.js?v=26" type="module"></script>
   </body>
 </html>

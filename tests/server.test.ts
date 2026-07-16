@@ -362,6 +362,40 @@ describe("PortOS server", () => {
     });
   });
 
+  it("validates recipient cash-allocation assumptions and portfolio shares", () => {
+    const parsed = parseComparisonRequest({
+      behavior: {
+        recipientDebtRepaymentShare: 0.4,
+        recipientAssetPurchaseShare: 0.3,
+        recipientHousingShare: 0.25,
+        recipientRetirementAndBondShare: 0.2,
+        recipientSpeculativeShare: 0.1,
+        recipientHousingDownPaymentShare: 0.15,
+      },
+    });
+    expect(parsed.errors).toEqual([]);
+    expect(parsed.value?.behavior).toMatchObject({
+      recipientDebtRepaymentShare: 0.4,
+      recipientAssetPurchaseShare: 0.3,
+      recipientHousingDownPaymentShare: 0.15,
+    });
+    expect(
+      parseComparisonRequest({
+        behavior: {
+          recipientHousingShare: 0.7,
+          recipientRetirementAndBondShare: 0.3,
+          recipientSpeculativeShare: 0.1,
+          recipientHousingDownPaymentShare: 0.01,
+        },
+      }).errors,
+    ).toEqual(
+      expect.arrayContaining([
+        "recipientHousingDownPaymentShare must be between 0.03 and 1.",
+        "recipientHousingShare plus recipientRetirementAndBondShare plus recipientSpeculativeShare must not exceed 1.",
+      ]),
+    );
+  });
+
   it("accepts only declared tax-loan loss-resolution paths", () => {
     const accepted = parseComparisonRequest({
       behavior: { taxLoanResolution: "government-guarantee" },

@@ -25,7 +25,8 @@ import {
  */
 export interface StrategyFlowAggregates {
   readonly openingDeposits: number;
-  readonly openingCollateralizedLoans: number;
+  /** Existing mortgages, consumer credit, and collateralized household loans. */
+  readonly openingHouseholdLoans: number;
   readonly openingPublicEquity: number;
   readonly newLoans: number;
   readonly taxCollected: number;
@@ -33,6 +34,8 @@ export interface StrategyFlowAggregates {
   /** Public services, administration, and leakage paid to the firm sector. */
   readonly otherGovernmentOutlays: number;
   readonly forcedLoanRepayments: number;
+  /** Existing mortgage, consumer, or collateralized debt repaid from transfers. */
+  readonly recipientDebtRepayments: number;
 }
 
 export interface LedgerAuditResult {
@@ -56,6 +59,7 @@ export interface StrategyAccountingInputs {
   readonly bankDepositsChange: number;
   readonly taxAssessed: number;
   readonly taxDeferred: number;
+  readonly cashAllocationResidual: number;
   readonly equityQuantityResidual: number;
   readonly housingQuantityResidual: number;
   readonly tolerance: number;
@@ -76,12 +80,13 @@ export const auditStrategyFlows = (
   const governmentOutlays = flows.ubiReceived + flows.otherGovernmentOutlays;
   const scale =
     Math.abs(flows.openingDeposits) +
-    Math.abs(flows.openingCollateralizedLoans) +
+    Math.abs(flows.openingHouseholdLoans) +
     Math.abs(flows.openingPublicEquity) +
     Math.abs(flows.newLoans) +
     Math.abs(flows.taxCollected) +
     Math.abs(governmentOutlays) +
-    Math.abs(flows.forcedLoanRepayments);
+    Math.abs(flows.forcedLoanRepayments) +
+    Math.abs(flows.recipientDebtRepayments);
   const epsilon = Math.max(1e-6, scale * 1e-12);
   const failures: string[] = [];
   let ledger: Ledger | undefined;
@@ -98,12 +103,15 @@ export const auditStrategyFlows = (
           {
             id: HOUSEHOLD_SECTOR,
             deposits: flows.openingDeposits,
-            collateralizedLoans: flows.openingCollateralizedLoans,
+            // The aggregate audit uses one bank-loan instrument for all
+            // household credit; the scenario output still reports new
+            // tax-payment collateralized loans separately.
+            collateralizedLoans: flows.openingHouseholdLoans,
             publicEquity: flows.openingPublicEquity,
           },
         ],
         bankReserves: Math.max(
-          flows.openingDeposits - flows.openingCollateralizedLoans,
+          flows.openingDeposits - flows.openingHouseholdLoans,
           flows.taxCollected,
         ),
         treasuryBalance: governmentOutlays,
@@ -140,6 +148,17 @@ export const auditStrategyFlows = (
         tick: 1,
         eventId: "audit-forced-repayment",
       });
+    }
+    if (flows.recipientDebtRepayments > 0) {
+      repayCollateralizedLoan(
+        ledger,
+        HOUSEHOLD_SECTOR,
+        flows.recipientDebtRepayments,
+        {
+          tick: 1,
+          eventId: "audit-recipient-debt-repayment",
+        },
+      );
     }
     replayComplete = true;
   } catch (error) {
@@ -209,6 +228,7 @@ export const computeStrategyAccounting = (
     Math.abs(depositsIdentityResidual) <= inputs.tolerance &&
     Math.abs(bankDepositsIdentityResidual) <= inputs.tolerance &&
     Math.abs(taxFundingResidual) <= inputs.tolerance &&
+    Math.abs(inputs.cashAllocationResidual) <= inputs.tolerance &&
     Math.abs(inputs.equityQuantityResidual) <= inputs.tolerance &&
     Math.abs(inputs.housingQuantityResidual) <= inputs.tolerance &&
     Math.abs(audit.trialBalanceResidual) <= inputs.tolerance &&
@@ -218,6 +238,7 @@ export const computeStrategyAccounting = (
     depositsIdentityResidual,
     bankDepositsIdentityResidual,
     taxFundingResidual,
+    cashAllocationResidual: inputs.cashAllocationResidual,
     equityQuantityResidual: inputs.equityQuantityResidual,
     housingQuantityResidual: inputs.housingQuantityResidual,
     ledgerTrialBalanceResidual: audit.trialBalanceResidual,

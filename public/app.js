@@ -243,6 +243,18 @@ const populateForm = (request) => {
   byId("monetization").value = request.behavior.deficitMonetizationShare * 100;
   byId("asset-hedge-share").value = request.behavior.assetHedgeShare * 100;
   byId("housing-hedge-share").value = request.behavior.housingHedgeShare * 100;
+  byId("recipient-debt-share").value =
+    request.behavior.recipientDebtRepaymentShare * 100;
+  byId("recipient-asset-share").value =
+    request.behavior.recipientAssetPurchaseShare * 100;
+  byId("recipient-housing-share").value =
+    request.behavior.recipientHousingShare * 100;
+  byId("recipient-retirement-share").value =
+    request.behavior.recipientRetirementAndBondShare * 100;
+  byId("recipient-speculative-share").value =
+    request.behavior.recipientSpeculativeShare * 100;
+  byId("recipient-down-payment-share").value =
+    request.behavior.recipientHousingDownPaymentShare * 100;
   byId("rent-pass-through").value = request.behavior.rentPassThrough * 100;
   byId("avoidance-elasticity").value = request.behavior.avoidanceElasticity * 100;
   byId("expatriation-share").value = request.behavior.expatriationShare * 100;
@@ -311,6 +323,18 @@ const formRequest = () => {
       deficitMonetizationShare: Number(byId("monetization").value) / 100,
       assetHedgeShare: Number(byId("asset-hedge-share").value) / 100,
       housingHedgeShare: Number(byId("housing-hedge-share").value) / 100,
+      recipientDebtRepaymentShare:
+        Number(byId("recipient-debt-share").value) / 100,
+      recipientAssetPurchaseShare:
+        Number(byId("recipient-asset-share").value) / 100,
+      recipientHousingShare:
+        Number(byId("recipient-housing-share").value) / 100,
+      recipientRetirementAndBondShare:
+        Number(byId("recipient-retirement-share").value) / 100,
+      recipientSpeculativeShare:
+        Number(byId("recipient-speculative-share").value) / 100,
+      recipientHousingDownPaymentShare:
+        Number(byId("recipient-down-payment-share").value) / 100,
       rentPassThrough: Number(byId("rent-pass-through").value) / 100,
       avoidanceElasticity: Number(byId("avoidance-elasticity").value) / 100,
       expatriationShare: Number(byId("expatriation-share").value) / 100,
@@ -2151,6 +2175,8 @@ const renderTheory = (theory, projection) => {
   byId("theory-heading").textContent = verdict.headline;
   byId("theory-explanation").textContent = verdict.explanation;
   byId("theory-credit").textContent = signedPercent(projection.summary.cumulativeM2Change);
+  byId("theory-recipient").textContent =
+    `${compactMoney.format(summary.annualRecipientAssetPurchaseCash)}/yr`;
   byId("theory-hedge").textContent = `${percent.format(assumptions.assetHedgeShare)} · ${compactMoney.format(summary.annualLiquiditySeekingAssets)}/yr`;
   byId("theory-housing").textContent = signedPercent(summary.housingPriceChange);
   byId("theory-rent").textContent = signedPercent(summary.bottomRenterHousingBurdenChange);
@@ -2860,6 +2886,12 @@ const setPresetFields = (name) => {
     administrativeShare: "administrative-share", borrowShare: "borrow-share",
     sellShare: "sell-share", surplusUse: "surplus-use", assetHedgeShare: "asset-hedge-share",
     housingHedgeShare: "housing-hedge-share", housingSupply: "housing-supply",
+    recipientDebtRepaymentShare: "recipient-debt-share",
+    recipientAssetPurchaseShare: "recipient-asset-share",
+    recipientHousingShare: "recipient-housing-share",
+    recipientRetirementAndBondShare: "recipient-retirement-share",
+    recipientSpeculativeShare: "recipient-speculative-share",
+    recipientHousingDownPaymentShare: "recipient-down-payment-share",
     rentPassThrough: "rent-pass-through", buyerDepth: "buyer-depth",
     priceImpact: "price-impact", serviceEffectiveness: "service-effectiveness",
   };

@@ -38,6 +38,12 @@ import {
 import { computeStrategyAccounting } from "./ledgerAudit.js";
 import { MODEL_CONSTANTS } from "./modelConstants.js";
 import {
+  addRecipientCashAllocation,
+  allocateRecipientCash,
+  emptyRecipientCashAllocation,
+  recipientCashAllocationAssumptions,
+} from "./cashAllocation.js";
+import {
   initialFiscalStateForRequest,
   normalizedSurplusUse,
   resolveFiscalYear,
@@ -156,6 +162,11 @@ export const runComparisonWithPopulation = (
       percentile: household.percentile,
       weight: household.weight,
       annualIncome: household.annualIncome,
+      annualRequestedBenefit:
+        12 *
+        (household.adults * request.ubi.adultMonthlyBenefit +
+          household.children * request.ubi.childMonthlyBenefit),
+      marginalPropensityToConsume: household.marginalPropensityToConsume,
       taxAssessed: requireTaxAssessment(
         householdTaxAssessments,
         household.id,
@@ -359,6 +370,44 @@ const runStrategy = (
   const householdScheduledCashRatio = scheduledCash / Math.max(1, requestedUbi);
   const rebatePerHousehold =
     fiscal.rebate / Math.max(1, population.representedHouseholds);
+  const cashAllocationAssumptions = recipientCashAllocationAssumptions(
+    request.behavior,
+  );
+  const recipientAllocations = new Map(
+    households.map((household) => {
+      const grossUbi =
+        12 *
+        (household.adults * request.ubi.adultMonthlyBenefit +
+          household.children * request.ubi.childMonthlyBenefit);
+      const receivedUbi =
+        grossUbi * householdScheduledCashRatio + rebatePerHousehold;
+      return [
+        household.id,
+        allocateRecipientCash({
+          cashDelivered: receivedUbi,
+          marginalPropensityToConsume: household.marginalPropensityToConsume,
+          percentile: household.percentile,
+          annualIncome: household.annualIncome,
+          deposits: household.assets.deposits,
+          debtCapacity:
+            household.liabilities.mortgage +
+            household.liabilities.collateralizedLoan +
+            household.liabilities.consumerDebt,
+          assumptions: cashAllocationAssumptions,
+        }),
+      ] as const;
+    }),
+  );
+  let recipientCashAllocation = emptyRecipientCashAllocation();
+  for (const household of households) {
+    const allocation = recipientAllocations.get(household.id);
+    if (!allocation) throw new Error(`Missing recipient allocation for ${household.id}.`);
+    recipientCashAllocation = addRecipientCashAllocation(
+      recipientCashAllocation,
+      allocation,
+      household.weight,
+    );
+  }
 
   const cascade = calculateCascade(households, funding, request);
   const primaryBookSales = weightedSum(
@@ -370,12 +419,26 @@ const runStrategy = (
     households,
     (household) => requireFunding(funding, household.id).housingSold,
   );
-  const buyerWeights = households.map((household) =>
-    Math.max(1, household.assets.deposits) * household.weight,
+  const equityBuyerWeights = households.map((household) => {
+    const recipientDemand =
+      recipientAllocations.get(household.id)?.publicEquityPurchases ?? 0;
+    return Math.max(1, household.assets.deposits + recipientDemand) * household.weight;
+  });
+  const housingBuyerWeights = households.map((household) => {
+    const recipientDownPayment =
+      recipientAllocations.get(household.id)?.housingDownPayment ?? 0;
+    return Math.max(1, household.assets.deposits + recipientDownPayment) * household.weight;
+  });
+  const totalEquityBuyerWeight = equityBuyerWeights.reduce(
+    (total, value) => total + value,
+    0,
   );
-  const totalBuyerWeight = buyerWeights.reduce((total, value) => total + value, 0);
-  const totalPurchaseConsideration =
-    primaryBookSales + primaryHousingSales + cascade.totalForcedRepayments;
+  const totalHousingBuyerWeight = housingBuyerWeights.reduce(
+    (total, value) => total + value,
+    0,
+  );
+  const equityPurchaseConsideration =
+    primaryBookSales + cascade.totalForcedRepayments;
 
   const distributionRecords: DistributionRecord[] = [];
   let endingBookEquity = 0;
@@ -401,18 +464,39 @@ const runStrategy = (
       (household.adults * request.ubi.adultMonthlyBenefit +
         household.children * request.ubi.childMonthlyBenefit);
     const receivedUbi = grossUbi * householdScheduledCashRatio + rebatePerHousehold;
+    const recipientAllocation = recipientAllocations.get(household.id);
+    if (!recipientAllocation) {
+      throw new Error(`Missing recipient allocation for ${household.id}.`);
+    }
     const forcedBookSale = cascade.forcedBookSales.get(household.id) ?? 0;
     const forcedRepayment = cascade.forcedRepayments.get(household.id) ?? 0;
-    const buyerWeight = buyerWeights[householdIndex] ?? 0;
-    const purchaseBook = totalBuyerWeight === 0 ? 0 : totalBookSales * (buyerWeight / totalBuyerWeight) / household.weight;
+    const equityBuyerWeight = equityBuyerWeights[householdIndex] ?? 0;
+    const housingBuyerWeight = housingBuyerWeights[householdIndex] ?? 0;
+    const purchaseBook =
+      totalEquityBuyerWeight === 0
+        ? 0
+        : totalBookSales *
+          (equityBuyerWeight / totalEquityBuyerWeight) /
+          household.weight;
     const housingPurchaseBook =
-      totalBuyerWeight === 0
+      totalHousingBuyerWeight === 0
         ? 0
-        : primaryHousingSales * (buyerWeight / totalBuyerWeight) / household.weight;
-    const purchaseCost =
-      totalBuyerWeight === 0
+        : primaryHousingSales *
+          (housingBuyerWeight / totalHousingBuyerWeight) /
+          household.weight;
+    const equityPurchaseCost =
+      totalEquityBuyerWeight === 0
         ? 0
-        : totalPurchaseConsideration * (buyerWeight / totalBuyerWeight) / household.weight;
+        : equityPurchaseConsideration *
+          (equityBuyerWeight / totalEquityBuyerWeight) /
+          household.weight;
+    const housingPurchaseCost =
+      totalHousingBuyerWeight === 0
+        ? 0
+        : primaryHousingSales *
+          (housingBuyerWeight / totalHousingBuyerWeight) /
+          household.weight;
+    const purchaseCost = equityPurchaseCost + housingPurchaseCost;
     const taxPaid = item.cash + item.borrowed + item.equitySold + item.housingSold;
     const depositsAfter =
       household.assets.deposits +
@@ -421,12 +505,33 @@ const runStrategy = (
       item.housingSold -
       taxPaid +
       receivedUbi -
-      purchaseCost;
+      purchaseCost -
+      recipientAllocation.debtRepayment;
     perHouseholdDepositsChange +=
       (depositsAfter - household.assets.deposits) * household.weight;
+    let remainingRecipientDebtRepayment = recipientAllocation.debtRepayment;
+    const consumerDebtAfter = Math.max(
+      0,
+      household.liabilities.consumerDebt - remainingRecipientDebtRepayment,
+    );
+    remainingRecipientDebtRepayment = Math.max(
+      0,
+      remainingRecipientDebtRepayment - household.liabilities.consumerDebt,
+    );
+    const mortgageAfter = Math.max(
+      0,
+      household.liabilities.mortgage - remainingRecipientDebtRepayment,
+    );
+    remainingRecipientDebtRepayment = Math.max(
+      0,
+      remainingRecipientDebtRepayment - household.liabilities.mortgage,
+    );
     const collateralizedLoanAfter = Math.max(
       0,
-      household.liabilities.collateralizedLoan + item.borrowed - forcedRepayment,
+      household.liabilities.collateralizedLoan +
+        item.borrowed -
+        forcedRepayment -
+        remainingRecipientDebtRepayment,
     );
     const equityBookAfter = Math.max(
       0,
@@ -446,11 +551,12 @@ const runStrategy = (
       household.assets.privateBusiness +
       household.assets.retirementAssets +
       household.assets.otherAssets -
-      household.liabilities.mortgage -
+      mortgageAfter -
       collateralizedLoanAfter -
-      household.liabilities.consumerDebt;
+      consumerDebtAfter;
     const consumptionChange =
-      (receivedUbi - item.cash) * household.marginalPropensityToConsume;
+      recipientAllocation.consumption -
+      item.cash * household.marginalPropensityToConsume;
     consumptionDemandChange += consumptionChange * household.weight;
     const shares = consumptionShares(household.percentile);
     for (const sector of SECTORS) {
@@ -478,7 +584,8 @@ const runStrategy = (
       taxAssessed: item.taxAssessed,
       taxPaid,
       ubiReceived: receivedUbi,
-      debtChange: item.borrowed - forcedRepayment,
+      debtChange:
+        item.borrowed - forcedRepayment - recipientAllocation.debtRepayment,
       consumptionChange,
     });
     householdIndex += 1;
@@ -499,13 +606,16 @@ const runStrategy = (
   const taxDeferred = weightedSum(households, (household) =>
     requireFunding(funding, household.id).deferred,
   );
-  const openingCollateralizedLoans = weightedSum(
+  const openingHouseholdLoans = weightedSum(
     households,
-    (household) => household.liabilities.collateralizedLoan,
+    (household) =>
+      household.liabilities.mortgage +
+      household.liabilities.collateralizedLoan +
+      household.liabilities.consumerDebt,
   );
   const depositsChange =
     newLoans - taxCollected + governmentOutlays + fiscal.debtRepaid -
-    cascade.totalForcedRepayments;
+    cascade.totalForcedRepayments - recipientCashAllocation.debtRepayment;
   const equityQuantityResidual = population.aggregatePublicEquity - endingBookEquity;
   const openingBookHousing = weightedSum(
     households,
@@ -556,7 +666,7 @@ const runStrategy = (
   const accounting = computeStrategyAccounting({
     flows: {
       openingDeposits: population.aggregateDeposits,
-      openingCollateralizedLoans,
+      openingHouseholdLoans,
       openingPublicEquity: population.aggregatePublicEquity,
       newLoans,
       taxCollected,
@@ -564,11 +674,13 @@ const runStrategy = (
       otherGovernmentOutlays:
         governmentOutlays - ubiReceived + fiscal.debtRepaid,
       forcedLoanRepayments: cascade.totalForcedRepayments,
+      recipientDebtRepayments: recipientCashAllocation.debtRepayment,
     },
     perHouseholdDepositsChange,
     bankDepositsChange: depositsChange,
     taxAssessed,
     taxDeferred,
+    cashAllocationResidual: recipientCashAllocation.cashReconciliationResidual,
     equityQuantityResidual,
     housingQuantityResidual,
     tolerance,
@@ -606,9 +718,14 @@ const runStrategy = (
       },
       moneyAndCredit: {
         bankDepositsChange: depositsChange,
-        bankLoansChange: newLoans - cascade.totalForcedRepayments,
+        bankLoansChange:
+          newLoans -
+          cascade.totalForcedRepayments -
+          recipientCashAllocation.debtRepayment,
         forcedLoanRepayments: cascade.totalForcedRepayments,
+        recipientDebtRepayments: recipientCashAllocation.debtRepayment,
       },
+      recipientCashAllocation,
       markets: {
         equitySoldForTax: primaryBookSales,
         forcedEquitySales: cascade.totalForcedBookSales,

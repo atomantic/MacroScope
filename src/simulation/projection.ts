@@ -31,6 +31,13 @@ import {
   resolveFiscalYear,
   type FiscalState,
 } from "./fiscal.js";
+import {
+  addRecipientCashAllocation,
+  allocateRecipientCash,
+  emptyRecipientCashAllocation,
+  recipientCashAllocationAssumptions,
+  type RecipientCashAllocation,
+} from "./cashAllocation.js";
 
 // Load-bearing model assumptions are documented in ./modelConstants.ts; these
 // aliases keep the projection math readable. Rationale and sources live there.
@@ -117,6 +124,54 @@ const allocateProgramOutlay = (
   };
 };
 
+const aggregateRecipientCashAllocation = (
+  assessments: readonly HouseholdProjectionTaxAssessment[],
+  request: ComparisonRequestV1,
+  scheduledCash: number,
+  rebate: number,
+  remainingDebtByHousehold: number[],
+): RecipientCashAllocation => {
+  if (scheduledCash <= 0 && rebate <= 0) return emptyRecipientCashAllocation();
+  const requestedBenefit = assessments.reduce(
+    (total, household) =>
+      total + household.annualRequestedBenefit * household.weight,
+    0,
+  );
+  const representedHouseholds = assessments.reduce(
+    (total, household) => total + household.weight,
+    0,
+  );
+  const scheduledCashRatio = scheduledCash / Math.max(1, requestedBenefit);
+  const rebatePerHousehold = rebate / Math.max(1, representedHouseholds);
+  const assumptions = recipientCashAllocationAssumptions(request.behavior);
+
+  return assessments.reduce((total, household, index) => {
+    const debtCapacity = Math.max(
+      0,
+      remainingDebtByHousehold[index] ??
+        household.liabilities.mortgage +
+          household.liabilities.collateralizedLoan +
+          household.liabilities.consumerDebt,
+    );
+    const allocation = allocateRecipientCash({
+      cashDelivered:
+        household.annualRequestedBenefit * scheduledCashRatio +
+        rebatePerHousehold,
+      marginalPropensityToConsume: household.marginalPropensityToConsume,
+      percentile: household.percentile,
+      annualIncome: household.annualIncome,
+      deposits: household.assets.deposits,
+      debtCapacity,
+      assumptions,
+    });
+    remainingDebtByHousehold[index] = Math.max(
+      0,
+      debtCapacity - allocation.debtRepayment,
+    );
+    return addRecipientCashAllocation(total, allocation, household.weight);
+  }, emptyRecipientCashAllocation());
+};
+
 // Household-level tax records are the attribution backbone for the projection.
 // They carry the same assessed and actually collected amounts used by the
 // strategy engine, so cohort burdens and the top-tier revenue split cannot
@@ -125,6 +180,8 @@ export interface HouseholdProjectionTaxAssessment {
   readonly percentile: number;
   readonly weight: number;
   readonly annualIncome: number;
+  readonly annualRequestedBenefit: number;
+  readonly marginalPropensityToConsume: number;
   readonly taxAssessed: number;
   readonly assets: Readonly<Record<AssetClass, number>>;
   readonly liabilities: Readonly<Record<LiabilityClass, number>>;
@@ -767,6 +824,13 @@ export const buildPolicyProjection = (
   const householdTaxStates = createAnnualHouseholdTaxStates(
     taxInputs.householdAssessments,
   );
+  const remainingRecipientDebtByHousehold =
+    taxInputs.householdAssessments.map(
+      (household) =>
+        household.liabilities.mortgage +
+        household.liabilities.collateralizedLoan +
+        household.liabilities.consumerDebt,
+    );
   const initialAnnualTax = assessAnnualHouseholdTaxes(
     householdTaxStates,
     taxInputs.policy,
@@ -883,6 +947,7 @@ export const buildPolicyProjection = (
   const theoryYears: PolicyProjection["theoryTest"]["years"][number][] = [
     {
       year: 0,
+      recipientCashAllocation: emptyRecipientCashAllocation(),
       liquiditySeekingAssets: 0,
       housingPriceIndex: 100,
       equityPriceIndex: 100,
@@ -967,6 +1032,13 @@ export const buildPolicyProjection = (
     const programBudgetYear = fiscalYear.programOutlay;
     const governmentDeficitYear = fiscalYear.debtIssued;
     const scheduledCashYear = allocation.ubiReceived - fiscalYear.rebate;
+    const recipientCashAllocation = aggregateRecipientCashAllocation(
+      taxInputs.householdAssessments,
+      request,
+      scheduledCashYear,
+      fiscalYear.rebate,
+      remainingRecipientDebtByHousehold,
+    );
     const bottom50UbiYear =
       bottom50ScheduledCash *
         (yearOneScheduledCash > 0 ? scheduledCashYear / yearOneScheduledCash : 0) +
@@ -1034,9 +1106,13 @@ export const buildPolicyProjection = (
       fiscalYear.treasuryBalance - openingTreasuryBalance;
     const moneyFlow = applyTreasuryMoneyFlow({
       m2,
+      // Cash-transfer recipients who repay existing bank debt extinguish
+      // matching deposits. This can offset asset demand without being confused
+      // with either Treasury redistribution or new-money recycling.
       nonTreasuryMoneyChange:
         newPrivateLoansYear -
-        repayments +
+        repayments -
+        recipientCashAllocation.debtRepayment +
         // Interest moves a household deposit into bank income/equity; unlike a
         // transfer to another depositor, it extinguishes a deposit liability.
         annualTax.interestPaid +
@@ -1058,9 +1134,13 @@ export const buildPolicyProjection = (
     // is later recycled into inflation hedges by its eventual holders.
     const liquiditySeekingAssets =
       Math.max(0, moneyInjection) * request.behavior.assetHedgeShare;
-    const housingDemand =
+    const newMoneyHousingDemand =
       liquiditySeekingAssets * request.behavior.housingHedgeShare;
-    const equityDemand = liquiditySeekingAssets - housingDemand;
+    const newMoneyEquityDemand = liquiditySeekingAssets - newMoneyHousingDemand;
+    const housingDemand =
+      newMoneyHousingDemand + recipientCashAllocation.housingPurchaseDemand;
+    const equityDemand =
+      newMoneyEquityDemand + recipientCashAllocation.publicEquityPurchases;
     const housingPricePressure =
       (housingDemand / Math.max(1, housingWealth)) /
       (MODEL_CONSTANTS.housingSupplyElasticityFloor +
@@ -1184,6 +1264,7 @@ export const buildPolicyProjection = (
 
     theoryYears.push({
       year,
+      recipientCashAllocation,
       liquiditySeekingAssets,
       housingPriceIndex: housingPriceIndex * 100,
       equityPriceIndex: equityPriceIndex * 100,
@@ -1439,17 +1520,81 @@ const buildTheoryTest = (
   const annualLiquiditySeekingAssets =
     years.slice(1).reduce((sum, year) => sum + year.liquiditySeekingAssets, 0) /
     Math.max(1, years.length - 1);
+  const annualRecipientAssetPurchaseCash =
+    years
+      .slice(1)
+      .reduce(
+        (sum, year) => sum + year.recipientCashAllocation.assetPurchaseCash,
+        0,
+      ) / Math.max(1, years.length - 1);
+  const annualRecipientHousingPurchaseDemand =
+    years
+      .slice(1)
+      .reduce(
+        (sum, year) =>
+          sum + year.recipientCashAllocation.housingPurchaseDemand,
+        0,
+      ) / Math.max(1, years.length - 1);
+  const annualRecipientPublicEquityPurchases =
+    years
+      .slice(1)
+      .reduce(
+        (sum, year) =>
+          sum + year.recipientCashAllocation.publicEquityPurchases,
+        0,
+      ) / Math.max(1, years.length - 1);
+  const annualRecipientRetirementAndBondPurchases =
+    years
+      .slice(1)
+      .reduce(
+        (sum, year) =>
+          sum + year.recipientCashAllocation.retirementAndBondPurchases,
+        0,
+      ) / Math.max(1, years.length - 1);
+  const annualRecipientSpeculativeAssetPurchases =
+    years
+      .slice(1)
+      .reduce(
+        (sum, year) =>
+          sum + year.recipientCashAllocation.speculativeAssetPurchases,
+        0,
+      ) / Math.max(1, years.length - 1);
+  const cumulativeRecipientDebtRepayment = years
+    .slice(1)
+    .reduce(
+      (sum, year) => sum + year.recipientCashAllocation.debtRepayment,
+      0,
+    );
+  const cumulativeRecipientDepositSaving = years
+    .slice(1)
+    .reduce(
+      (sum, year) => sum + year.recipientCashAllocation.depositSaving,
+      0,
+    );
+  const recipientCashReconciliationResidual = years.reduce(
+    (sum, year) =>
+      sum + Math.abs(year.recipientCashAllocation.cashReconciliationResidual),
+    0,
+  );
 
   const { linkThreshold, positionGapThreshold } = MODEL_CONSTANTS.theoryTest;
   const hasMonetaryLink = cumulativeM2Change > linkThreshold;
+  const hasRecipientPortfolioLink =
+    (annualRecipientHousingPurchaseDemand +
+      annualRecipientPublicEquityPurchases) /
+      Math.max(1, totalHousingWealth() + totalPublicEquityWealth()) >
+    linkThreshold;
   const hasAssetLink =
     housingPriceChange > linkThreshold || equityPriceChange > linkThreshold;
   const hasRenterHarm = bottomRenterHousingBurdenChange > linkThreshold;
   const hasWiderPositionGap = housingPositionGapChange > positionGapThreshold;
   const rating =
-    hasMonetaryLink && hasAssetLink && hasRenterHarm && hasWiderPositionGap
+    (hasMonetaryLink || hasRecipientPortfolioLink) &&
+    hasAssetLink &&
+    hasRenterHarm &&
+    hasWiderPositionGap
       ? "active"
-      : hasMonetaryLink && hasAssetLink
+      : (hasMonetaryLink || hasRecipientPortfolioLink) && hasAssetLink
         ? "partial"
         : "inactive";
   const verdict: PolicyProjection["theoryTest"]["verdict"] = rating === "active"
@@ -1466,13 +1611,13 @@ const buildTheoryTest = (
           rating,
           headline: "Asset prices rise, but the renter-harm link is not established.",
           explanation:
-            "Borrowing expands deposits and the selected portfolio response lifts asset prices, but income support, housing supply, or weak rent pass-through prevents a clear widening of renter housing burden.",
+            "Recipient portfolio demand and any new-money recycling lift asset prices, but income support, housing supply, or weak rent pass-through prevents a clear widening of renter housing burden.",
         }
       : {
           rating,
           headline: "The proposed feedback loop breaks under these assumptions.",
           explanation:
-            "Borrowing or the portfolio shift is too small to produce a material policy-linked asset-price and rent effect in this reduced-form test.",
+            "Recipient portfolio demand and new-money recycling are too small to produce a material policy-linked asset-price and rent effect in this reduced-form test.",
         };
 
   return {
@@ -1480,12 +1625,35 @@ const buildTheoryTest = (
     assumptions: {
       assetHedgeShare: request.behavior.assetHedgeShare,
       housingHedgeShare: request.behavior.housingHedgeShare,
+      recipientDebtRepaymentShare:
+        request.behavior.recipientDebtRepaymentShare,
+      recipientAssetPurchaseShare:
+        request.behavior.recipientAssetPurchaseShare,
+      recipientHousingShare: request.behavior.recipientHousingShare,
+      recipientRetirementAndBondShare:
+        request.behavior.recipientRetirementAndBondShare,
+      recipientSpeculativeShare: request.behavior.recipientSpeculativeShare,
+      recipientHousingDownPaymentShare:
+        request.behavior.recipientHousingDownPaymentShare,
+      recipientUncertaintyRanges: {
+        debtRepaymentShare: { low: 0.15, high: 0.6 },
+        assetPurchaseShare: { low: 0.05, high: 0.5 },
+        housingDownPaymentShare: { low: 0.05, high: 0.35 },
+      },
       housingSupplyElasticity: request.market.housingSupplyElasticity,
       rentPassThrough: request.behavior.rentPassThrough,
       baselineRenterHousingCostShare: BASELINE_RENTER_HOUSING_COST_SHARE,
     },
     summary: {
       annualLiquiditySeekingAssets,
+      annualRecipientAssetPurchaseCash,
+      annualRecipientHousingPurchaseDemand,
+      annualRecipientPublicEquityPurchases,
+      annualRecipientRetirementAndBondPurchases,
+      annualRecipientSpeculativeAssetPurchases,
+      cumulativeRecipientDebtRepayment,
+      cumulativeRecipientDepositSaving,
+      recipientCashReconciliationResidual,
       housingPriceChange,
       equityPriceChange,
       middleHomeownerWealthChange,

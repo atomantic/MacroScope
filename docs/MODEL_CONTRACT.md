@@ -1,5 +1,10 @@
 # MacroScope model contract
 
+Cash transfers follow the cohort allocation and reconciliation contract in
+[CASH_TRANSFER_ALLOCATION.md](./CASH_TRANSFER_ALLOCATION.md). Recipient asset
+demand is distinct from new-money liquidity recycling: a money-neutral
+tax/rebate can change portfolios without changing aggregate M2.
+
 ## Scope of the first slice
 
 This slice establishes the accounting kernel and policy schema before adding a full multi-country model. It implements the smallest domestic economy that can distinguish the central policy mechanisms, plus an optional aggregate rest-of-world closure:

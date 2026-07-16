@@ -149,6 +149,9 @@ describe("secondary prediction: a cash-funded transfer barely moves M2", () => {
       borrowShare: 0,
       sellShare: 0,
       deficitMonetizationShare: 0,
+      // Isolate the pure tax/transfer identity. Recipient debt repayment is a
+      // separate, explicitly modeled deposit-destruction channel.
+      recipientDebtRepaymentShare: 0,
     },
   });
 

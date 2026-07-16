@@ -31,6 +31,7 @@ export type EventCause =
   | "government-operations"
   | "voluntary-trade"
   | "loan-origination"
+  | "loan-interest-payment"
   | "loan-repayment"
   | "margin-call"
   | "default"

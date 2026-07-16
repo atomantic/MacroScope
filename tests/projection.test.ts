@@ -13,6 +13,26 @@ const nationalRequest = (): ComparisonRequestV1 => ({
 });
 
 describe("ten-year projection dynamics", () => {
+  it("does not let a higher retained tax-loan interest rate increase M2", () => {
+    const request = nationalRequest();
+    const cumulativeM2At = (loanInterestRate: number): number =>
+      runComparison({
+        ...request,
+        behavior: {
+          ...request.behavior,
+          borrowShare: 1,
+          sellShare: 0,
+          loanInterestRate,
+        },
+      }).projection.summary.cumulativeM2Change;
+
+    const noInterest = cumulativeM2At(0);
+    const defaultInterest = cumulativeM2At(0.045);
+    const highInterest = cumulativeM2At(0.1);
+    expect(defaultInterest).toBeLessThanOrEqual(noInterest);
+    expect(highInterest).toBeLessThanOrEqual(defaultInterest);
+  });
+
   it("keeps the closed-economy baseline unchanged and reports zero foreign flows", () => {
     const result = runComparison({
       ...nationalRequest(),

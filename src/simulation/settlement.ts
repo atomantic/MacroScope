@@ -183,6 +183,30 @@ export const repayCollateralizedLoan = (
   });
 };
 
+export const payCollateralizedLoanInterest = (
+  ledger: Ledger,
+  householdId: string,
+  amount: number,
+  context: SettlementContext,
+): void => {
+  positiveAmount(amount);
+  const household = householdAccounts(householdId);
+  commit(ledger, {
+    id: context.eventId,
+    tick: context.tick,
+    layer: "transaction",
+    cause: "loan-interest-payment",
+    description: `${householdId} pays interest retained by the commercial bank.`,
+    metadata: { householdId, amount },
+    postings: [
+      debit(household.interestExpense, amount),
+      credit(household.deposits, amount),
+      debit(SYSTEM_ACCOUNTS.bankDeposits, amount),
+      credit(SYSTEM_ACCOUNTS.bankInterestIncome, amount),
+    ],
+  });
+};
+
 const debit = (accountId: string, amount: number): Posting => ({
   accountId,
   side: "debit",

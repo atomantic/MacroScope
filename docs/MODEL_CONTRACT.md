@@ -14,6 +14,8 @@ This slice establishes the accounting kernel and policy schema before adding a f
 3. A household sells an asset to another household for existing deposits and pays the tax.
 4. Treasury redistributes the receipts as UBI.
 5. A household repays a loan, destroying a loan and a deposit together.
+6. A household pays tax-loan interest retained by the bank, reducing household
+   and bank deposits while increasing bank income.
 
 ## Accounting layers
 
@@ -41,8 +43,8 @@ Account metadata also identifies owner, counterparty, instrument, and whether th
 
 ## Sector balance sheets
 
-- **Household**: deposits and public equity; collateralized-loan liabilities; opening net worth; tax expense and UBI income.
-- **Commercial bank**: loans and reserves; deposit liabilities; opening bank equity.
+- **Household**: deposits and public equity; collateralized-loan liabilities; opening net worth; tax and interest expense; and UBI income.
+- **Commercial bank**: loans and reserves; deposit liabilities; opening bank equity and retained loan-interest income.
 - **Government**: Treasury-account asset; tax income; UBI expense.
 - **Central bank**: government-securities asset; reserve and Treasury-account liabilities.
 - **Firm sector**: productive-capital asset; public-equity claims issued.
@@ -83,6 +85,10 @@ Steps 4–7, including annual household tax-loan servicing and re-underwriting a
 - A cash-funded tax followed by equal UBI does not create deposits.
 - A borrow-funded tax followed by equal UBI leaves loans and deposits higher while the loan is outstanding.
 - Repayment reduces loans and deposits by the same amount.
+- Retained loan interest reduces household and bank deposits by the same amount
+  and raises bank income; it does not create money. Any later bank wage,
+  dividend, or operating payment must be a separate named flow that restores a
+  recipient deposit. The current projection does not assume that re-entry.
 - An asset sale using existing deposits changes ownership but not aggregate deposits.
 - Revaluations are never tagged as cash transactions.
 
@@ -93,6 +99,32 @@ Floating-point comparisons use an explicit tolerance. Production-scale simulatio
 The interactive runner uses a deterministic weighted sample representing 135.1 million U.S. households. The default run uses 4,000 agents, allocates 80% of them to the bottom 99%, then explicitly oversamples the top 1%, 0.1%, and 0.01%. Wealth-group totals are calibrated to the Federal Reserve Distributional Financial Accounts; within-group joint distributions remain stylized. Adult and child counts reconcile to the July 2025 Census resident population, while aggregate personal income and PCE reconcile independently to calendar-year 2025 BEA totals. Full targets, eligibility rules, sector crosswalk, and diagnostics are documented in [POPULATION_FLOW_CALIBRATION.md](POPULATION_FLOW_CALIBRATION.md).
 
 Each comparison reuses the same households for cash-first, borrow-first, and sell-first strategies. The ten-year path carries each household's initial funding mix forward, services its outstanding tax loan from deposits, and re-underwrites every new loan against current equity and housing collateral after mortgages and prior tax loans. A funding shortfall falls through from cash to borrowing to asset sales, then remains visible as deferred tax rather than compounding into unconstrained credit. Public-equity sales interact with configurable buyer depth and price impact. Falling equity values can breach collateral limits, producing iterative forced sales and loan repayment. In closed mode, domestic buyers absorb asset quantities. In partially-open and stress modes, a configurable rest-of-world share absorbs asset sales and newly issued Treasury debt, while resident capital outflow becomes an explicit foreign claim rather than disappearing deposits. Housing can fund otherwise-unpayable tax liabilities as a slower last-resort transfer, but regional housing price feedback is deferred.
+
+The main projection subtracts tax-loan interest actually paid from M2 while
+retaining it as bank income and capital. The reduced-form stress grid applies
+the same sign but assumes all scheduled interest is paid; unlike the main
+household path, it does not model cash constraints, defaults, or partial payment
+inside each stress cell.
+
+### Default-scenario correction impact
+
+With the cohort cash-allocation model held fixed, correcting retained interest
+from a positive to a negative M2 flow changes the default ten-year run as
+follows:
+
+| Output | Interest added to M2 | Interest removed from M2 |
+| --- | ---: | ---: |
+| Cumulative M2 change | +20.51% | +12.61% |
+| Annual new-money asset demand | $165.48B | $101.78B |
+| Housing-price change | +6.07% | +4.80% |
+| Equity-price change | +2.43% | +1.74% |
+| Peak annual inflation | 3.80% | 3.80% |
+
+The owner-renter theory verdict remains `partial` and the overall policy
+verdict remains `beneficial`; the correction reduces the asset-price channel
+without crossing either verdict threshold. Peak inflation is unchanged because
+the default run's peak occurs before the cumulative interest-sign difference
+becomes the binding inflation input.
 
 ## Aggregate rest-of-world closure
 

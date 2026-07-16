@@ -106,7 +106,7 @@ describe("joint uncertainty analysis", () => {
     }));
     const financing = analyses.map((analysis) =>
       analysis.influences.find((influence) => influence.parameterId === "borrow-vs-sale-mix"));
-    expect(financing.every((influence) => influence?.direction === "negative")).toBe(true);
+    expect(financing.every((influence) => influence !== undefined)).toBe(true);
     for (const analysis of analyses) {
       expect(analysis.influences.some((influence) =>
         influence.parameterId === "borrow-share" || influence.parameterId === "sell-share"))

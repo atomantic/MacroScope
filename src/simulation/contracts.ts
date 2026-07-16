@@ -35,6 +35,7 @@ export type TaxLoanResolution =
   | "private-bank-loss"
   | "government-guarantee"
   | "central-bank-facility";
+export type TaxLoanStructure = "interest-only" | "amortizing" | "demand-rollover";
 export type EconomyClosure = "closed" | "partially-open" | "open-stress";
 export type BenefitIndexation = "none" | "cpi";
 export type ServiceEffectiveness = "unscored" | "zero" | "base" | "high";
@@ -114,6 +115,7 @@ export interface ComparisonRequestV1 {
     readonly sellShare: number;
     readonly annualAssetReturn: number;
     readonly loanInterestRate: number;
+    readonly taxLoanStructure: TaxLoanStructure;
     /** Declared loss-allocation path when a tax-payment loan misses debt service. */
     readonly taxLoanResolution: TaxLoanResolution;
     readonly deficitMonetizationShare: number;
@@ -187,6 +189,8 @@ export interface ProjectionYear {
   readonly privateTaxLoanRepayments: number;
   /** Interest transferred from borrowers to banks this year. */
   readonly privateTaxLoanInterestPaid: number;
+  /** Assets voluntarily sold to restore debt service or collateral before default. */
+  readonly taxLoanSaleToCure: number;
   /** Tax-payment debt resolved after missed interest or scheduled principal. */
   readonly taxLoanDefaults: number;
   /** Pledged equity/housing transferred to the lender during resolution. */
@@ -361,6 +365,10 @@ export interface PolicyProjection {
     readonly cashShare: number;
     readonly borrowShare: number;
     readonly sellShare: number;
+    readonly householdsPayingCashShare: number;
+    readonly householdsBorrowingShare: number;
+    readonly householdsSellingShare: number;
+    readonly calibration: "central" | "borrow-dominant" | "near-total-borrow-stress";
   };
   readonly annualFlows: {
     readonly taxCollected: number;
@@ -673,10 +681,11 @@ export const DEFAULT_COMPARISON_REQUEST: ComparisonRequestV1 = {
     repatriationFxPassThrough: 0,
   },
   behavior: {
-    borrowShare: 0.65,
-    sellShare: 0.2,
+    borrowShare: 0.45,
+    sellShare: 0.25,
     annualAssetReturn: 0.06,
     loanInterestRate: 0.045,
+    taxLoanStructure: "interest-only",
     taxLoanResolution: "private-bank-loss",
     deficitMonetizationShare: 0,
     assetHedgeShare: 0.35,

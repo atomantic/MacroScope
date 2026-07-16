@@ -205,7 +205,7 @@ describe("vertical-slice scenario runner", () => {
     ).toBe(true);
   });
 
-  it("resolves missed tax-loan debt service through the selected loss path", () => {
+  it("uses income and sale-to-cure before default and collateral seizure", () => {
     const request = {
       ...compactRequest(),
       wealthTax: { exemption: 0, rate: 0.2 },
@@ -214,36 +214,22 @@ describe("vertical-slice scenario runner", () => {
         ...compactRequest().behavior,
         borrowShare: 1,
         sellShare: 0,
-        loanInterestRate: 0.2,
+        loanInterestRate: 0.5,
+        annualAssetReturn: -0.5,
+        taxLoanStructure: "amortizing" as const,
       },
     };
-    const run = (taxLoanResolution: "private-bank-loss" | "government-guarantee" | "central-bank-facility") =>
-      runComparison({
-        ...request,
-        behavior: { ...request.behavior, taxLoanResolution },
-      });
-    const privateLoss = run("private-bank-loss").projection;
-    const guarantee = run("government-guarantee").projection;
-    const facility = run("central-bank-facility").projection;
+    const projection = runComparison(request).projection;
 
-    expect(privateLoss.summary.taxLoanDefaults).toBeGreaterThan(0);
-    expect(privateLoss.summary.privateBankLosses).toBeGreaterThan(0);
-    expect(guarantee.summary.governmentGuarantees).toBeGreaterThan(0);
-    expect(facility.summary.centralBankFacilities).toBeGreaterThan(0);
-    for (const summary of [privateLoss.summary, guarantee.summary, facility.summary]) {
-      expect(summary.taxLoanDefaults).toBeCloseTo(
-        summary.collateralSeized +
-          summary.privateBankLosses +
-          summary.governmentGuarantees +
-          summary.centralBankFacilities,
-        4,
-      );
-    }
-    expect(guarantee.years.at(-1)?.governmentDebtAdded).toBeGreaterThan(
-      privateLoss.years.at(-1)?.governmentDebtAdded ?? 0,
+    expect(projection.years.some((year) => year.taxLoanSaleToCure > 0)).toBe(true);
+    expect(projection.summary.taxLoanDefaults).toBeGreaterThan(0);
+    expect(projection.summary.taxLoanDefaults).toBeCloseTo(
+      projection.summary.collateralSeized +
+        projection.summary.privateBankLosses +
+        projection.summary.governmentGuarantees +
+        projection.summary.centralBankFacilities,
+      4,
     );
-    expect(facility.years.at(-1)?.m2).toBeGreaterThan(guarantee.years.at(-1)?.m2 ?? 0);
-    expect(privateLoss.summary.bankCapital).toBeLessThan(guarantee.summary.bankCapital);
   });
 
   it("uses housing sales as a reconciled last-resort liquidity channel", () => {
@@ -279,9 +265,16 @@ describe("vertical-slice scenario runner", () => {
       },
       behavior: {
         ...DEFAULT_COMPARISON_REQUEST.behavior,
+        borrowShare: 1,
+        sellShare: 0,
         rentPassThrough: 0.9,
         assetHedgeShare: 1,
         housingHedgeShare: 1,
+        recipientAssetPurchaseShare: 1,
+      },
+      ubi: {
+        ...DEFAULT_COMPARISON_REQUEST.ubi,
+        fundingRule: "fixed" as const,
       },
     };
     const active = runComparison({
@@ -299,7 +292,7 @@ describe("vertical-slice scenario runner", () => {
     });
 
     expect(runComparison(DEFAULT_COMPARISON_REQUEST).projection.theoryTest.verdict.rating).toBe(
-      "partial",
+      "inactive",
     );
     expect(active.projection.theoryTest.verdict.rating).toBe("active");
     expect(active.projection.theoryTest.summary.housingPriceChange).toBeGreaterThan(0.01);

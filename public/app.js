@@ -54,17 +54,41 @@ let defaultFieldValues = {};
 // Non-null while the form still matches a named preset exactly, so the URL can
 // stay the shareable `?preset=name` form. Cleared on any manual edit.
 let activePreset = null;
-const syncPresetButtons = () => {
-  document.querySelectorAll("[data-preset]").forEach((button) => {
-    const selected = button.dataset.preset === activePreset;
+let activeBehaviorPreset = null;
+let activeEconomyPreset = null;
+const syncChoiceButtons = (selector, activeName) => {
+  document.querySelectorAll(selector).forEach((button) => {
+    const selected = button.dataset.preset === activeName
+      || button.dataset.behaviorPreset === activeName
+      || button.dataset.economyPreset === activeName;
     button.setAttribute("aria-pressed", String(selected));
     button.classList.toggle("is-active", selected);
   });
 };
+const syncPresetButtons = () => {
+  syncChoiceButtons("[data-preset]", activePreset);
+};
+const syncBehaviorPresetButtons = () =>
+  syncChoiceButtons("[data-behavior-preset]", activeBehaviorPreset);
+const syncEconomyPresetButtons = () =>
+  syncChoiceButtons("[data-economy-preset]", activeEconomyPreset);
 const setActivePreset = (name) => {
   activePreset = name;
   syncPresetButtons();
   renderPresetDefinition(name);
+};
+const setActiveBehaviorPreset = (name) => {
+  activeBehaviorPreset = name;
+  syncBehaviorPresetButtons();
+};
+const setActiveEconomyPreset = (name) => {
+  activeEconomyPreset = name;
+  syncEconomyPresetButtons();
+};
+const clearPresetSelections = () => {
+  setActivePreset(null);
+  setActiveBehaviorPreset(null);
+  setActiveEconomyPreset(null);
 };
 // A/B "Scenario A": a frozen run whose lines ghost onto every chart and whose
 // outcomes anchor the comparison table. pinnedResult holds the computed run;
@@ -343,7 +367,7 @@ const makeBracketRow = (thresholdMillions = "", ratePercent = "") => {
   remove.addEventListener("click", () => {
     row.remove();
     // A structural bracket change no longer matches a named preset.
-    setActivePreset(null);
+    clearPresetSelections();
     syncBracketMode();
     updateScenarioUrl();
   });
@@ -555,7 +579,7 @@ const hydrateFormFromUrl = () => {
   if (appliedBrackets) renderBrackets(bracketRows);
   // Explicit field or bracket overrides make the state no longer a pristine preset.
   const scenarioFieldIds = new Set(SCENARIO_FIELD_SPECS.map((spec) => spec.id));
-  if (fieldIds.some((id) => scenarioFieldIds.has(id)) || appliedBrackets) setActivePreset(null);
+  if (fieldIds.some((id) => scenarioFieldIds.has(id)) || appliedBrackets) clearPresetSelections();
   // A stale/unknown strategy would blank the <select> and later crash
   // renderDistribution (strategies[""]); ignore anything not in STRATEGIES.
   const appliedStrategy = Boolean(decoded.strategy && STRATEGIES.includes(decoded.strategy));
@@ -563,6 +587,8 @@ const hydrateFormFromUrl = () => {
   syncTargetControls();
   syncAllSliders();
   syncPresetButtons();
+  syncBehaviorPresetButtons();
+  syncEconomyPresetButtons();
   // An unknown preset name or strategy applies nothing, so it must not force a recompute.
   return appliedPreset || fieldIds.length > 0 || appliedBrackets || appliedStrategy;
 };
@@ -2227,7 +2253,7 @@ const applyDialValue = (formId, formValue, snap = "nearest") => {
   // applied value never exceeds the feasible ceiling.
   if (snapped > max) snapped = Math.floor(max / step) * step;
   field.value = clamp(snapped, min, max).toFixed(decimals);
-  setActivePreset(null);
+  clearPresetSelections();
   syncSlider(formId);
   updateScenarioUrl();
   openScenarioDrawer({ focusId: formId });
@@ -2844,10 +2870,17 @@ const setPresetFields = (name) => {
   syncAllSliders();
 };
 
-const applyPreset = (name) => {
+const selectPolicyPreset = (name) => {
   if (!PRESETS[name]) return;
   setPresetFields(name);
   setActivePreset(name);
+  setActiveBehaviorPreset(null);
+  setActiveEconomyPreset(null);
+};
+
+const applyPreset = (name) => {
+  if (!PRESETS[name]) return;
+  selectPolicyPreset(name);
   void dashboardRerun();
 };
 
@@ -2868,6 +2901,7 @@ const applyBehaviorPreset = (name) => {
   byId("private-business-inclusion").value = preset.inclusion;
   syncAllSliders();
   setActivePreset(null);
+  setActiveBehaviorPreset(name);
   void dashboardRerun();
 };
 
@@ -2886,6 +2920,7 @@ const applyEconomyPreset = (name) => {
   byId("repatriation-fx-pass-through").value = preset.repatriation;
   syncAllSliders();
   setActivePreset(null);
+  setActiveEconomyPreset(name);
   void dashboardRerun();
 };
 
@@ -2917,7 +2952,7 @@ const bracketRowsComplete = () =>
   );
 byId("scenario-form").addEventListener("input", (event) => {
   const target = event.target;
-  setActivePreset(null);
+  clearPresetSelections();
   // Direct typing into a number field mirrors onto its slider (the slider's own
   // handler covers the reverse); also enforce the joint borrow/sell clamp.
   if (target instanceof HTMLInputElement && target.type === "number") {
@@ -2933,7 +2968,7 @@ byId("scenario-form").addEventListener("input", (event) => {
 // Selects fire change (not reliably input across browsers); auto-run on those too.
 byId("scenario-form").addEventListener("change", (event) => {
   if (event.target instanceof HTMLSelectElement) {
-    setActivePreset(null);
+    clearPresetSelections();
     if (bracketRowsComplete()) scheduleAutoRun();
     else clearTimeout(autoRunTimer);
   }
@@ -2987,13 +3022,13 @@ byId("distribution-strategy").addEventListener("change", () => {
 byId("target-mode").addEventListener("change", syncTargetControls);
 byId("add-bracket").addEventListener("click", () => {
   byId("bracket-rows").append(makeBracketRow());
-  setActivePreset(null);
+  clearPresetSelections();
   syncBracketMode();
   updateScenarioUrl();
 });
 byId("clear-brackets").addEventListener("click", () => {
   renderBrackets([]);
-  setActivePreset(null);
+  clearPresetSelections();
   updateScenarioUrl();
 });
 document.querySelectorAll("[data-preset]").forEach((button) => {
@@ -3281,9 +3316,10 @@ const renderStory = () => {
     ].forEach(([preset, label]) => {
       const button = element("button", label);
       button.type = "button";
+      button.dataset.preset = preset;
+      button.setAttribute("aria-pressed", String(preset === activePreset));
       button.addEventListener("click", async () => {
-        setPresetFields(preset);
-        setActivePreset(preset);
+        selectPolicyPreset(preset);
         await storyRerun();
       });
       presetWrap.append(button);

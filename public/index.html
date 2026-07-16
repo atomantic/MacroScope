@@ -382,25 +382,25 @@
           <div class="scenario-drawer-body">
           <div class="policy-presets" aria-label="Policy scenario presets">
             <span>Start with a scenario</span>
-            <button type="button" data-preset="top-one">1% on top 1%</button>
-            <button type="button" data-preset="billionaire">10% over $1B</button>
-            <button type="button" data-preset="ten-million">5% over $10M</button>
-            <button type="button" data-preset="universal">Universal 1% + UBI</button>
+            <button type="button" data-preset="top-one" aria-pressed="false">1% on top 1%</button>
+            <button type="button" data-preset="billionaire" aria-pressed="false">10% over $1B</button>
+            <button type="button" data-preset="ten-million" aria-pressed="false">5% over $10M</button>
+            <button type="button" data-preset="universal" aria-pressed="false">Universal 1% + UBI</button>
           </div>
           <div class="policy-presets policy-presets-real" aria-label="Real-world policy presets">
             <span>Or a real proposal</span>
-            <button type="button" data-preset="warren-2020">Warren 2020</button>
-            <button type="button" data-preset="sanders-2020">Sanders 2020</button>
-            <button type="button" data-preset="current-law">Current law (no tax)</button>
+            <button type="button" data-preset="warren-2020" aria-pressed="false">Warren 2020</button>
+            <button type="button" data-preset="sanders-2020" aria-pressed="false">Sanders 2020</button>
+            <button type="button" data-preset="current-law" aria-pressed="false">Current law (no tax)</button>
             <a class="preset-reference-link" href="#policy-references">See real-world precedents ↓</a>
           </div>
           <div class="policy-presets policy-presets-diagnostic" aria-label="Diagnostic benchmark presets">
             <span>Test a mechanism</span>
-            <button type="button" data-preset="cash-rebate">Cash tax / rebate</button>
-            <button type="button" data-preset="borrow-rent-stress">Borrowing + rent stress</button>
-            <button type="button" data-preset="asset-sale-stress">Asset-sale stress</button>
-            <button type="button" data-preset="services-only">Services only</button>
-            <button type="button" data-preset="extreme-universal-borrow">Extreme 20% universal</button>
+            <button type="button" data-preset="cash-rebate" aria-pressed="false">Cash tax / rebate</button>
+            <button type="button" data-preset="borrow-rent-stress" aria-pressed="false">Borrowing + rent stress</button>
+            <button type="button" data-preset="asset-sale-stress" aria-pressed="false">Asset-sale stress</button>
+            <button type="button" data-preset="services-only" aria-pressed="false">Services only</button>
+            <button type="button" data-preset="extreme-universal-borrow" aria-pressed="false">Extreme 20% universal</button>
           </div>
           <div class="preset-definition" id="preset-definition" hidden></div>
           <fieldset class="wealth-tax-fieldset">
@@ -448,9 +448,9 @@
               <legend class="visually-hidden">Taxpayer response</legend>
               <div class="behavior-presets" aria-label="Taxpayer-response presets">
                 <span>Response scenario</span>
-                <button type="button" data-behavior-preset="full-compliance">Full compliance</button>
-                <button type="button" data-behavior-preset="scandinavian">Scandinavian experience</button>
-                <button type="button" data-behavior-preset="french-isf">French ISF experience</button>
+                <button type="button" data-behavior-preset="full-compliance" aria-pressed="false">Full compliance</button>
+                <button type="button" data-behavior-preset="scandinavian" aria-pressed="false">Scandinavian experience</button>
+                <button type="button" data-behavior-preset="french-isf" aria-pressed="false">French ISF experience</button>
               </div>
               <div class="behavior-grid">
                 <label for="avoidance-elasticity">Avoidance per point (%)<input id="avoidance-elasticity" name="avoidanceElasticity" type="number" min="0" max="50" step="1" /><small class="field-hint">Share of the taxable base that vanishes into valuation games and reclassification for each percentage point of tax rate.</small></label>
@@ -500,9 +500,9 @@
               <legend class="visually-hidden">Open-economy closure</legend>
               <div class="behavior-presets" aria-label="Open-economy presets">
                 <span>Closure preset</span>
-                <button type="button" data-economy-preset="closed">Closed</button>
-                <button type="button" data-economy-preset="partially-open">Partially open</button>
-                <button type="button" data-economy-preset="open-stress">Open stress</button>
+                <button type="button" data-economy-preset="closed" aria-pressed="false">Closed</button>
+                <button type="button" data-economy-preset="partially-open" aria-pressed="false">Partially open</button>
+                <button type="button" data-economy-preset="open-stress" aria-pressed="false">Open stress</button>
               </div>
               <div class="behavior-grid">
                 <label for="economy-closure">Economy closure<select id="economy-closure" name="economyClosure"><option value="closed">Closed — domestic buyers only</option><option value="partially-open">Partially open — aggregate rest of world</option><option value="open-stress">Open stress — high foreign exposure</option></select><small class="field-hint">Selects the reported closure. The shares below make the exposure explicit; the model does not claim a country-by-country exchange-rate forecast.</small></label>

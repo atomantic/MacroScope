@@ -164,6 +164,9 @@ describe("vertical-slice scenario runner", () => {
         ...compactRequest().behavior,
         borrowShare: 0,
         sellShare: 0,
+        // Isolate a money-neutral transfer from the separate recipient
+        // debt-repayment channel, which correctly destroys deposits.
+        recipientDebtRepaymentShare: 0,
       },
     });
     expect(borrowed.projection.summary.privateTaxDebt).toBeGreaterThan(0);
@@ -281,6 +284,7 @@ describe("vertical-slice scenario runner", () => {
       behavior: {
         ...harshHousing.behavior,
         assetHedgeShare: 0,
+        recipientAssetPurchaseShare: 0,
       },
     });
 

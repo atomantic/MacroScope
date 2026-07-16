@@ -6,6 +6,7 @@ import {
 } from "../policies/schema.js";
 import { US_BASELINE, type PopulationFlowDiagnostic } from "./usBaseline.js";
 import { DEFAULT_MODEL_TUNABLES } from "./modelConstants.js";
+import type { RecipientCashAllocation } from "./cashAllocation.js";
 
 /**
  * The promoted, user-tunable model constants (issue #8). Each mirrors a
@@ -118,6 +119,16 @@ export interface ComparisonRequestV1 {
     readonly deficitMonetizationShare: number;
     readonly assetHedgeShare: number;
     readonly housingHedgeShare: number;
+    /** Share of recipients' post-consumption cash targeted to existing debt. */
+    readonly recipientDebtRepaymentShare: number;
+    /** Share of post-consumption, post-debt cash targeted to asset purchases. */
+    readonly recipientAssetPurchaseShare: number;
+    /** Portfolio split applied to recipient asset-purchase cash. */
+    readonly recipientHousingShare: number;
+    readonly recipientRetirementAndBondShare: number;
+    readonly recipientSpeculativeShare: number;
+    /** Cash down payment divided by this share yields housing purchase demand. */
+    readonly recipientHousingDownPaymentShare: number;
     readonly rentPassThrough: number;
     // Taxpayer-response dials (issue #6). Fraction of the reported taxable base
     // erased per percentage point of statutory rate through avoidance and
@@ -238,6 +249,8 @@ export interface FiscalProjectionYear {
 
 export interface TheoryTestYear {
   readonly year: number;
+  readonly recipientCashAllocation: RecipientCashAllocation;
+  /** Newly created deposits later recycled into assets; separate from transfers. */
   readonly liquiditySeekingAssets: number;
   readonly housingPriceIndex: number;
   readonly equityPriceIndex: number;
@@ -408,12 +421,31 @@ export interface PolicyProjection {
     readonly assumptions: {
       readonly assetHedgeShare: number;
       readonly housingHedgeShare: number;
+      readonly recipientDebtRepaymentShare: number;
+      readonly recipientAssetPurchaseShare: number;
+      readonly recipientHousingShare: number;
+      readonly recipientRetirementAndBondShare: number;
+      readonly recipientSpeculativeShare: number;
+      readonly recipientHousingDownPaymentShare: number;
+      readonly recipientUncertaintyRanges: {
+        readonly debtRepaymentShare: { readonly low: number; readonly high: number };
+        readonly assetPurchaseShare: { readonly low: number; readonly high: number };
+        readonly housingDownPaymentShare: { readonly low: number; readonly high: number };
+      };
       readonly housingSupplyElasticity: number;
       readonly rentPassThrough: number;
       readonly baselineRenterHousingCostShare: number;
     };
     readonly summary: {
       readonly annualLiquiditySeekingAssets: number;
+      readonly annualRecipientAssetPurchaseCash: number;
+      readonly annualRecipientHousingPurchaseDemand: number;
+      readonly annualRecipientPublicEquityPurchases: number;
+      readonly annualRecipientRetirementAndBondPurchases: number;
+      readonly annualRecipientSpeculativeAssetPurchases: number;
+      readonly cumulativeRecipientDebtRepayment: number;
+      readonly cumulativeRecipientDepositSaving: number;
+      readonly recipientCashReconciliationResidual: number;
       readonly housingPriceChange: number;
       readonly equityPriceChange: number;
       readonly middleHomeownerWealthChange: number;
@@ -511,7 +543,9 @@ export interface StrategyOutcome {
     readonly bankDepositsChange: number;
     readonly bankLoansChange: number;
     readonly forcedLoanRepayments: number;
+    readonly recipientDebtRepayments: number;
   };
+  readonly recipientCashAllocation: RecipientCashAllocation;
   readonly markets: {
     readonly equitySoldForTax: number;
     readonly forcedEquitySales: number;
@@ -539,6 +573,7 @@ export interface StrategyOutcome {
     readonly depositsIdentityResidual: number;
     readonly bankDepositsIdentityResidual: number;
     readonly taxFundingResidual: number;
+    readonly cashAllocationResidual: number;
     readonly equityQuantityResidual: number;
     readonly housingQuantityResidual: number;
     readonly ledgerTrialBalanceResidual: number;
@@ -625,6 +660,12 @@ export const DEFAULT_COMPARISON_REQUEST: ComparisonRequestV1 = {
     deficitMonetizationShare: 0,
     assetHedgeShare: 0.35,
     housingHedgeShare: 0.6,
+    recipientDebtRepaymentShare: 0.35,
+    recipientAssetPurchaseShare: 0.25,
+    recipientHousingShare: 0.3,
+    recipientRetirementAndBondShare: 0.2,
+    recipientSpeculativeShare: 0.1,
+    recipientHousingDownPaymentShare: 0.2,
     rentPassThrough: 0.3,
     avoidanceElasticity: 0,
     expatriationShare: 0,

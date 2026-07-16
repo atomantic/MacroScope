@@ -255,6 +255,54 @@ export const parseComparisonRequest = (input: unknown): ParsedComparisonRequest 
     1,
     errors,
   );
+  const recipientDebtRepaymentShare = readNumber(
+    behavior,
+    "recipientDebtRepaymentShare",
+    DEFAULT_COMPARISON_REQUEST.behavior.recipientDebtRepaymentShare,
+    0,
+    1,
+    errors,
+  );
+  const recipientAssetPurchaseShare = readNumber(
+    behavior,
+    "recipientAssetPurchaseShare",
+    DEFAULT_COMPARISON_REQUEST.behavior.recipientAssetPurchaseShare,
+    0,
+    1,
+    errors,
+  );
+  const recipientHousingShare = readNumber(
+    behavior,
+    "recipientHousingShare",
+    DEFAULT_COMPARISON_REQUEST.behavior.recipientHousingShare,
+    0,
+    1,
+    errors,
+  );
+  const recipientRetirementAndBondShare = readNumber(
+    behavior,
+    "recipientRetirementAndBondShare",
+    DEFAULT_COMPARISON_REQUEST.behavior.recipientRetirementAndBondShare,
+    0,
+    1,
+    errors,
+  );
+  const recipientSpeculativeShare = readNumber(
+    behavior,
+    "recipientSpeculativeShare",
+    DEFAULT_COMPARISON_REQUEST.behavior.recipientSpeculativeShare,
+    0,
+    1,
+    errors,
+  );
+  const recipientHousingDownPaymentShare = readNumber(
+    behavior,
+    "recipientHousingDownPaymentShare",
+    DEFAULT_COMPARISON_REQUEST.behavior.recipientHousingDownPaymentShare,
+    0.03,
+    1,
+    errors,
+  );
   const rentPassThrough = readNumber(
     behavior,
     "rentPassThrough",
@@ -322,6 +370,16 @@ export const parseComparisonRequest = (input: unknown): ParsedComparisonRequest 
   if (borrowShare + sellShare > 1) {
     errors.push("borrowShare plus sellShare must not exceed 1.");
   }
+  if (
+    recipientHousingShare +
+      recipientRetirementAndBondShare +
+      recipientSpeculativeShare >
+    1
+  ) {
+    errors.push(
+      "recipientHousingShare plus recipientRetirementAndBondShare plus recipientSpeculativeShare must not exceed 1.",
+    );
+  }
 
   const model = readModelTunables(input.model, errors);
 
@@ -372,6 +430,12 @@ export const parseComparisonRequest = (input: unknown): ParsedComparisonRequest 
         deficitMonetizationShare,
         assetHedgeShare,
         housingHedgeShare,
+        recipientDebtRepaymentShare,
+        recipientAssetPurchaseShare,
+        recipientHousingShare,
+        recipientRetirementAndBondShare,
+        recipientSpeculativeShare,
+        recipientHousingDownPaymentShare,
         rentPassThrough,
         avoidanceElasticity,
         expatriationShare,

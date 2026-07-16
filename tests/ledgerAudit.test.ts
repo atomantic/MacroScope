@@ -8,13 +8,14 @@ import {
 
 const consistentFlows = (): StrategyFlowAggregates => ({
   openingDeposits: 1_000_000,
-  openingCollateralizedLoans: 100_000,
+  openingHouseholdLoans: 100_000,
   openingPublicEquity: 5_000_000,
   newLoans: 40_000,
   taxCollected: 90_000,
   ubiReceived: 70_000,
   otherGovernmentOutlays: 20_000,
   forcedLoanRepayments: 5_000,
+  recipientDebtRepayments: 3_000,
 });
 
 const consistentInputs = (): StrategyAccountingInputs => {
@@ -26,16 +27,19 @@ const consistentInputs = (): StrategyAccountingInputs => {
       flows.newLoans -
       flows.taxCollected +
       flows.ubiReceived -
-      flows.forcedLoanRepayments,
+      flows.forcedLoanRepayments -
+      flows.recipientDebtRepayments,
     // Bank view adds the operations spending parked in firm deposits.
     bankDepositsChange:
       flows.newLoans -
       flows.taxCollected +
       flows.ubiReceived +
       flows.otherGovernmentOutlays -
-      flows.forcedLoanRepayments,
+      flows.forcedLoanRepayments -
+      flows.recipientDebtRepayments,
     taxAssessed: 100_000,
     taxDeferred: 10_000,
+    cashAllocationResidual: 0,
     equityQuantityResidual: 0,
     housingQuantityResidual: 0,
     tolerance: 0.01,
@@ -48,9 +52,13 @@ describe("scenario ledger audit", () => {
     const audit = auditStrategyFlows(flows);
     expect(audit.failures).toEqual([]);
     expect(audit.replayComplete).toBe(true);
-    expect(audit.events).toBe(5);
+    expect(audit.events).toBe(6);
     expect(audit.householdDepositsChange).toBeCloseTo(
-      flows.newLoans - flows.taxCollected + flows.ubiReceived - flows.forcedLoanRepayments,
+      flows.newLoans -
+        flows.taxCollected +
+        flows.ubiReceived -
+        flows.forcedLoanRepayments -
+        flows.recipientDebtRepayments,
       6,
     );
     expect(audit.bankDepositsChange).toBeCloseTo(
@@ -58,7 +66,8 @@ describe("scenario ledger audit", () => {
         flows.taxCollected +
         flows.ubiReceived +
         flows.otherGovernmentOutlays -
-        flows.forcedLoanRepayments,
+        flows.forcedLoanRepayments -
+        flows.recipientDebtRepayments,
       6,
     );
     expect(Math.abs(audit.trialBalanceResidual)).toBeLessThan(1e-6);

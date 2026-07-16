@@ -98,6 +98,31 @@ describe("scenario URL parameters", () => {
     expect(decoded.fields["demand-offset"]).toBe("1.2");
   });
 
+  it("round-trips recipient cash-allocation assumptions", () => {
+    const values = {
+      ...defaults,
+      "recipient-debt-share": "40",
+      "recipient-asset-share": "30",
+      "recipient-housing-share": "25",
+      "recipient-retirement-share": "20",
+      "recipient-speculative-share": "10",
+      "recipient-down-payment-share": "15",
+    };
+    const decoded = decodeScenarioParams(
+      encodeScenarioParams({ values, defaults }),
+    );
+    for (const id of [
+      "recipient-debt-share",
+      "recipient-asset-share",
+      "recipient-housing-share",
+      "recipient-retirement-share",
+      "recipient-speculative-share",
+      "recipient-down-payment-share",
+    ]) {
+      expect(decoded.fields[id]).toBe(values[id]);
+    }
+  });
+
   it("round-trips the explicit surplus closure", () => {
     const values = { ...defaults, "surplus-use": "additional-services" };
     const query = encodeScenarioParams({ values, defaults });

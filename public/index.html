@@ -230,10 +230,11 @@
         </div>
         <ol class="theory-chain" aria-label="Theory causal links">
           <li><span>01 · Accounting result</span><strong id="theory-credit">—</strong><small>tax-payment loans create deposits</small></li>
-          <li><span>02 · Behavior assumption</span><strong id="theory-hedge">—</strong><small>of new liquidity seeks assets</small></li>
-          <li><span>03 · Market response</span><strong id="theory-housing">—</strong><small>house-price premium vs. no policy</small></li>
-          <li><span>04 · Incidence test</span><strong id="theory-rent">—</strong><small>renter housing-burden change</small></li>
-          <li><span>05 · Distribution result</span><strong id="theory-gap">—</strong><small>owner–renter housing-position gap</small></li>
+          <li><span>02 · Recipient portfolio</span><strong id="theory-recipient">—</strong><small>transfer cash seeks assets</small></li>
+          <li><span>03 · New-money recycling</span><strong id="theory-hedge">—</strong><small>new deposits seek assets</small></li>
+          <li><span>04 · Market response</span><strong id="theory-housing">—</strong><small>house-price premium vs. no policy</small></li>
+          <li><span>05 · Incidence test</span><strong id="theory-rent">—</strong><small>renter housing-burden change</small></li>
+          <li><span>06 · Distribution result</span><strong id="theory-gap">—</strong><small>owner–renter housing-position gap</small></li>
         </ol>
         <div class="theory-visual">
           <figure>
@@ -242,7 +243,7 @@
           </figure>
           <aside class="theory-reading">
             <span>How to read this test</span>
-            <p>The theory is supported only if borrowing expands deposits, some resulting liquidity seeks hard assets, constrained supply raises housing prices, and rent rises faster than renter resources.</p>
+            <p>The test keeps two asset-demand channels separate: recipients may save part of existing-money transfers, while lending or deficit monetization may create new deposits. Either channel still needs constrained supply and rent pass-through to widen the owner–renter gap.</p>
             <p id="theory-renter-result">—</p>
           </aside>
         </div>
@@ -484,11 +485,17 @@
           </details>
           <details class="scenario-control-section">
             <summary><span>Asset feedback</span><small>Liquidity, housing, and rent</small></summary>
-            <fieldset class="split-fieldset">
+            <fieldset class="behavior-fieldset">
               <legend class="visually-hidden">Asset feedback</legend>
-              <div class="split-fieldset-grid">
-                <label for="asset-hedge-share">New liquidity to assets (%)<input id="asset-hedge-share" name="assetHedgeShare" type="number" min="0" max="100" step="5" /></label>
-                <label for="housing-hedge-share">Asset flow to housing (%)<input id="housing-hedge-share" name="housingHedgeShare" type="number" min="0" max="100" step="5" /></label>
+              <div class="behavior-grid">
+                <label for="recipient-debt-share">Recipient cash to debt (%)<input id="recipient-debt-share" name="recipientDebtRepaymentShare" type="number" min="0" max="100" step="5" /><small class="field-hint">Base share of cash left after consumption used to pay existing debt. Lower-liquidity, higher-debt households tilt above this base; the documented uncertainty range is 15%–60%.</small></label>
+                <label for="recipient-asset-share">Remaining recipient cash to assets (%)<input id="recipient-asset-share" name="recipientAssetPurchaseShare" type="number" min="0" max="100" step="5" /><small class="field-hint">Base share after consumption and debt service that seeks assets. Existing liquidity and market participation vary the interior response by cohort; the uncertainty range is 5%–50%.</small></label>
+                <label for="recipient-housing-share">Recipient asset cash to housing (%)<input id="recipient-housing-share" name="recipientHousingShare" type="number" min="0" max="100" step="5" /><small class="field-hint">Down-payment share of recipient asset cash. Housing, retirement/bonds, and speculative shares together cannot exceed 100%; public equity receives the remainder.</small></label>
+                <label for="recipient-retirement-share">Recipient asset cash to retirement/bonds (%)<input id="recipient-retirement-share" name="recipientRetirementAndBondShare" type="number" min="0" max="100" step="5" /></label>
+                <label for="recipient-speculative-share">Recipient asset cash to speculative assets (%)<input id="recipient-speculative-share" name="recipientSpeculativeShare" type="number" min="0" max="100" step="5" /><small class="field-hint">Separate demand for assets such as crypto; it is reported but does not silently inflate the public-equity index.</small></label>
+                <label for="recipient-down-payment-share">Housing down payment (%)<input id="recipient-down-payment-share" name="recipientHousingDownPaymentShare" type="number" min="3" max="100" step="1" /><small class="field-hint">Turns down-payment cash into purchase demand. A 20% down payment means $1 can support $5 of housing demand; the uncertainty range is 5%–35%.</small></label>
+                <label for="asset-hedge-share">New liquidity to assets (%)<input id="asset-hedge-share" name="assetHedgeShare" type="number" min="0" max="100" step="5" /><small class="field-hint">Share of newly created deposits recycled into assets. This is separate from recipients investing a tax-funded transfer.</small></label>
+                <label for="housing-hedge-share">New-money asset flow to housing (%)<input id="housing-hedge-share" name="housingHedgeShare" type="number" min="0" max="100" step="5" /></label>
                 <label for="housing-supply">Housing supply response<input id="housing-supply" name="housingSupply" type="number" min="0" max="2" step="0.1" /></label>
                 <label for="rent-pass-through">Price gain passed to rent (%)<input id="rent-pass-through" name="rentPassThrough" type="number" min="0" max="100" step="5" /></label>
               </div>

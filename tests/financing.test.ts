@@ -46,6 +46,21 @@ describe("heterogeneous tax financing", () => {
     expect(unlevered).toBe("borrow");
   });
 
+  it("makes intermediate borrowing preferences less cash-first, not more", () => {
+    // Five times the tax bill is enough liquidity to prefer cash at a low
+    // borrowing preference, but not enough to keep draining deposits after the
+    // household has expressed a strong preference to borrow against ample
+    // collateral. This guards against a threshold that accidentally reverses
+    // the dial's direction and leaves the walkthrough unchanged until 100%.
+    const borderlineLiquid = { ...base, deposits: 1_000_000, sellShifter: 0 };
+    expect(
+      preferredHouseholdFinancingPath({ ...borderlineLiquid, borrowShifter: 0.25 }),
+    ).toBe("cash");
+    expect(
+      preferredHouseholdFinancingPath({ ...borderlineLiquid, borrowShifter: 0.75 }),
+    ).toBe("borrow");
+  });
+
   it("returns normalized propensity weights before selecting a preferred path", () => {
     const weights = chooseHouseholdFinancingWeights(base);
     expect(weights.cash + weights.borrow + weights.sell).toBeCloseTo(1, 12);

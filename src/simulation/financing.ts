@@ -70,9 +70,14 @@ export const preferredHouseholdFinancingPath = (
   const currentLtv = input.securedLiabilities / collateral;
   const liquidTaxCoverage = input.deposits / Math.max(1, input.taxDue);
   const marketableTaxCoverage = input.publicEquity / Math.max(1, input.taxDue);
+  // A stronger borrowing preference should make a household *less* willing to
+  // exhaust liquid balances before borrowing. The prior threshold moved in the
+  // opposite direction (`6 - borrowShifter * 2`), which made cash easier to
+  // select as the borrow dial rose and created a visible cliff at 100%.
+  const cashPreferenceCoverage = 4 + input.borrowShifter * 2;
   if (
     input.borrowShifter < 0.9 &&
-    liquidTaxCoverage >= 6 - input.borrowShifter * 2
+    liquidTaxCoverage >= cashPreferenceCoverage
   ) {
     return "cash";
   }

@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f2efe7" />
     <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="./styles.css?v=26" />
+    <link rel="stylesheet" href="./styles.css?v=27" />
     <title>MacroScope</title>
   </head>
   <body>
@@ -50,22 +50,23 @@
         <div class="hero-question" aria-label="Question answered by this model">
           <span>Core test</span>
           <strong>Does the bottom half keep more buying power after inflation?</strong>
+          <small>Every result is conditional on the assumptions below—not a forecast. Use the <b>i</b> icons for definitions.</small>
         </div>
       </section>
 
       <section class="headline-metrics" aria-label="Ten-year policy outcomes">
         <article>
-          <span>Bottom 50% buying power</span>
+          <span class="term-label">Bottom 50% buying power <button class="info-button" type="button" aria-label="Explain bottom 50 percent buying power" aria-expanded="false" aria-describedby="tip-buying-power">i</button><span class="info-popover" id="tip-buying-power" role="tooltip">Cash income and transfers after modeled inflation, compared with the same households on a no-policy path. In-kind services are reported separately.</span></span>
           <strong id="metric-buying-power">—</strong>
           <small>vs. no-policy path, year 10</small>
         </article>
         <article>
-          <span>Peak annual inflation</span>
+          <span class="term-label">Peak annual inflation <button class="info-button" type="button" aria-label="Explain peak annual inflation" aria-expanded="false" aria-describedby="tip-peak-inflation">i</button><span class="info-popover" id="tip-peak-inflation" role="tooltip">The highest single-year inflation rate reached during the ten-year scenario—not the average across all ten years.</span></span>
           <strong id="metric-inflation">—</strong>
           <small id="metric-inflation-context">baseline 2.6%</small>
         </article>
         <article>
-          <span>M2 money stock</span>
+          <span class="term-label">M2 money stock <button class="info-button" type="button" aria-label="Explain M2 money stock" aria-expanded="false" aria-describedby="tip-m2">i</button><span class="info-popover" id="tip-m2" role="tooltip">A broad measure of spendable money, including cash and common bank deposits. Bank lending creates deposits; loan repayment removes them.</span></span>
           <strong id="metric-m2">—</strong>
           <small>cumulative change, year 10</small>
         </article>
@@ -158,7 +159,7 @@
         <div class="section-intro">
           <p class="kicker">The ten-year story</p>
           <h2 id="trajectory-heading">The transfer helps first. Prices and financing decide whether it lasts.</h2>
-          <p>Every line is indexed to 100 before the policy, so the ending distance shows who gained or lost relative to the no-policy U.S. path.</p>
+          <p>Every line starts at an index of 100. A value of 105 means 5% above the no-policy path; 95 means 5% below it.</p>
         </div>
         <div class="chart-grid">
           <figure>
@@ -276,6 +277,10 @@
         </div>
         <div class="stress-layout">
           <div class="stress-table-wrap">
+            <div class="stress-axis-guide" aria-label="How to read the stress-test axes">
+              <div><strong>Rows · Benefit scale</strong><span id="stress-scale-note">1× uses the benefit amounts selected below; 2× doubles both amounts.</span></div>
+              <div><strong>Columns · Issued debt monetized</strong><span>0% leaves debt issued by the selected funding rule unmonetized; 100% models permanent money creation for all of that debt.</span></div>
+            </div>
             <table class="stress-table" aria-label="Inflation stress test">
               <thead id="stress-head"></thead>
               <tbody id="stress-body"></tbody>
@@ -382,6 +387,7 @@
             </div>
           </header>
           <div class="scenario-drawer-body">
+          <p class="assumption-guide">Change one input, recalculate, and watch which links move. Percentages describe modeled behavior or sensitivity—not measured certainties.</p>
           <div class="policy-presets" aria-label="Policy scenario presets">
             <span>Start with a scenario</span>
             <button type="button" data-preset="top-one" aria-pressed="false">1% on top 1%</button>
@@ -408,10 +414,10 @@
           <fieldset class="wealth-tax-fieldset">
             <legend>Wealth tax</legend>
             <div class="wealth-tax-controls">
-              <label for="target-mode">Target by<select id="target-mode" name="targetMode"><option value="exemption">Dollar exemption</option><option value="top-share">Top wealth share</option></select></label>
-              <label for="exemption" id="exemption-label">Exemption ($M)<input id="exemption" name="exemption" type="number" min="0" max="1000000" step="1" data-slider-max="100" /></label>
-              <label for="top-share" id="top-share-label">Top share (%)<input id="top-share" name="topShare" type="number" min="0.01" max="100" step="0.1" /></label>
-              <label for="tax-rate" id="tax-rate-label">Annual rate (%)<input id="tax-rate" name="taxRate" type="number" min="0" max="20" step="0.1" /></label>
+              <label for="target-mode">Target by<select id="target-mode" name="targetMode"><option value="exemption">Dollar exemption</option><option value="top-share">Top wealth share</option></select><small class="field-hint">Choose a dollar cutoff or the richest share of modeled households.</small></label>
+              <label for="exemption" id="exemption-label">Exemption ($M)<input id="exemption" name="exemption" type="number" min="0" max="1000000" step="1" data-slider-max="100" /><small class="field-hint">Only net wealth above this amount is taxed.</small></label>
+              <label for="top-share" id="top-share-label">Top share (%)<input id="top-share" name="topShare" type="number" min="0.01" max="100" step="0.1" /><small class="field-hint">Selects households from the wealthiest downward; 1 means the top 1%.</small></label>
+              <label for="tax-rate" id="tax-rate-label">Annual rate (%)<input id="tax-rate" name="taxRate" type="number" min="0" max="20" step="0.1" /><small class="field-hint">Share of taxable net wealth assessed every year.</small></label>
             </div>
             <div class="bracket-editor" id="bracket-editor">
               <div class="bracket-editor-head">
@@ -439,20 +445,20 @@
             <p class="field-hint" id="fiscal-package-note">Tax design, scheduled benefits, and revenue disposition are separate choices. The first three packages have no household cash transfer; rebates and UBI do.</p>
             <button type="button" class="link-button" id="pin-fiscal-button">Pin this closure as Scenario A</button>
             <small class="field-hint">Then choose another no-cash package to isolate revenue disposition while tax and taxpayer behavior stay fixed.</small>
-            <label for="adult-benefit">Adult monthly equivalent<input id="adult-benefit" name="adultBenefit" type="number" min="0" step="100" data-slider-max="3000" /></label>
-            <label for="child-benefit">Child monthly equivalent<input id="child-benefit" name="childBenefit" type="number" min="0" step="100" data-slider-max="2000" /></label>
-            <label for="funding-rule">Funding rule<select id="funding-rule" name="fundingRule"><option value="revenue-constrained">Revenue constrained</option><option value="fixed">Fixed benefit + deficit</option><option value="smoothed">Smoothed with debt</option></select></label>
+            <label for="adult-benefit">Adult monthly equivalent<input id="adult-benefit" name="adultBenefit" type="number" min="0" step="100" data-slider-max="3000" /><small class="field-hint">Target monthly value per adult before administration; it may be cash or services.</small></label>
+            <label for="child-benefit">Child monthly equivalent<input id="child-benefit" name="childBenefit" type="number" min="0" step="100" data-slider-max="2000" /><small class="field-hint">Target monthly value per child before administration.</small></label>
+            <label for="funding-rule">Funding rule<select id="funding-rule" name="fundingRule"><option value="revenue-constrained">Revenue constrained</option><option value="fixed">Fixed benefit + deficit</option><option value="smoothed">Smoothed with debt</option></select><small class="field-hint">Revenue constrained caps spending at tax receipts; the other paths fund the full target and add debt.</small></label>
             <label for="surplus-use">Surplus use<select id="surplus-use" name="surplusUse"><option value="debt-reduction">Reduce public debt</option><option value="additional-services">Additional services</option><option value="rebate">Household rebate</option><option value="treasury-balance">Hold at Treasury</option></select><small class="field-hint">After program-debt service, choose whether extra revenue retires other debt, funds services, returns as cash, or remains parked. Debt reduction falls back to Treasury once the opening debt stock is exhausted.</small></label>
             <label for="benefit-indexation">Benefit indexation<select id="benefit-indexation" name="benefitIndexation"><option value="none">Fixed nominal</option><option value="cpi">CPI indexed</option></select></label>
             <label for="service-effectiveness">Service value assumption<select id="service-effectiveness" name="serviceEffectiveness"><option value="unscored">Unscored (cash-only result)</option><option value="zero">Zero resource value</option><option value="base">Base avoided-cost value</option><option value="high">High access/value case</option></select><small class="field-hint">Services still add provider demand in every case. This only controls the separately reported household resource-equivalent range; it never turns services into cash.</small></label>
-            <label for="direct-cash-share">Delivered as cash (%)<input id="direct-cash-share" name="directCashShare" type="number" min="0" max="100" step="5" /></label>
-            <label for="administrative-share">Administration share (%)<input id="administrative-share" name="administrativeShare" type="number" min="0" max="50" step="1" /></label>
+            <label for="direct-cash-share">Delivered as cash (%)<input id="direct-cash-share" name="directCashShare" type="number" min="0" max="100" step="5" /><small class="field-hint">The remainder is modeled as healthcare and social-service spending.</small></label>
+            <label for="administrative-share">Administration share (%)<input id="administrative-share" name="administrativeShare" type="number" min="0" max="50" step="1" /><small class="field-hint">Portion consumed by valuation, compliance, and program delivery before benefits.</small></label>
           </fieldset>
           <fieldset>
             <legend>How the wealthy pay</legend>
             <div class="behavior-presets" aria-label="Financing calibration presets"><span>Financing calibration</span><button type="button" data-financing-preset="central">Central</button><button type="button" data-financing-preset="borrow-dominant">Borrow dominant</button><button type="button" data-financing-preset="stress">Near-total stress</button></div>
             <label for="borrow-share">Borrowing preference (%)<input id="borrow-share" name="borrowShare" type="number" min="0" max="100" step="5" /><small class="field-hint">A scenario shifter, not a realized share imposed on every household. Liquidity, collateral, leverage, income, and the loan spread determine actual financing.</small></label>
-            <label for="sell-share">Asset-sale preference (%)<input id="sell-share" name="sellShare" type="number" min="0" max="100" step="5" /></label>
+            <label for="sell-share">Asset-sale preference (%)<input id="sell-share" name="sellShare" type="number" min="0" max="100" step="5" /><small class="field-hint">Scenario preference for selling assets before using cash or borrowing; household constraints determine realized financing.</small></label>
             <label for="loan-rate">Loan interest (%)<input id="loan-rate" name="loanRate" type="number" min="0" max="50" step="0.1" title="The annual interest charged on the modeled collateralized tax-payment loan." aria-describedby="loan-rate-hint" /><small class="field-hint" id="loan-rate-hint">The annual cost of the modeled collateralized tax-payment loan (4.5% by default). The central interest-only case has no scheduled principal; neither setting represents a current quote.</small></label>
             <label for="tax-loan-structure">Loan structure<select id="tax-loan-structure" name="taxLoanStructure"><option value="interest-only">Interest-only demand loan</option><option value="amortizing">Amortizing loan</option><option value="demand-rollover">Demand loan with rollover</option></select><small class="field-hint">Interest-only is the central securities-backed-loan case. Amortizing uses the Advanced principal rate. Rollover can capitalize unpaid interest while collateral permits.</small></label>
             <label for="tax-loan-resolution">If cure and rollover fail<select id="tax-loan-resolution" name="taxLoanResolution"><option value="private-bank-loss">Seize collateral, bank takes loss</option><option value="government-guarantee">Seize collateral, public guarantee</option><option value="central-bank-facility">Seize collateral, central-bank facility</option></select><small class="field-hint">The borrower first uses income/dividends and sale-to-cure. Default and collateral seizure occur only after those paths fail.</small></label>
@@ -481,9 +487,9 @@
             <fieldset class="split-fieldset">
               <legend class="visually-hidden">Macro assumptions</legend>
               <div class="split-fieldset-grid">
-                <label for="asset-return">Annual asset return (%)<input id="asset-return" name="assetReturn" type="number" min="-50" max="50" step="0.5" /></label>
-                <label for="monetization">Deficit monetized (%)<input id="monetization" name="monetization" type="number" min="0" max="100" step="5" /></label>
-                <label for="buyer-depth">Buyer depth (% equity)<input id="buyer-depth" name="buyerDepth" type="number" min="0.1" max="200" step="0.1" /></label>
+                <label for="asset-return">Annual asset return (%)<input id="asset-return" name="assetReturn" type="number" min="-50" max="50" step="0.5" /><small class="field-hint">Baseline yearly return for the modeled asset portfolio before tax and financing costs.</small></label>
+                <label for="monetization">Deficit monetized (%)<input id="monetization" name="monetization" type="number" min="0" max="100" step="5" /><small class="field-hint">Share of debt issued by the funding rule modeled as permanent money creation.</small></label>
+                <label for="buyer-depth">Buyer depth (% equity)<input id="buyer-depth" name="buyerDepth" type="number" min="0.1" max="200" step="0.1" /><small class="field-hint">How much selling buyers can absorb before equity prices move sharply.</small></label>
               </div>
             </fieldset>
           </details>
@@ -509,9 +515,9 @@
                 <label for="recipient-speculative-share">Recipient asset cash to speculative assets (%)<input id="recipient-speculative-share" name="recipientSpeculativeShare" type="number" min="0" max="100" step="5" /><small class="field-hint">Separate demand for assets such as crypto; it is reported but does not silently inflate the public-equity index.</small></label>
                 <label for="recipient-down-payment-share">Housing down payment (%)<input id="recipient-down-payment-share" name="recipientHousingDownPaymentShare" type="number" min="3" max="100" step="1" /><small class="field-hint">Turns down-payment cash into purchase demand. A 20% down payment means $1 can support $5 of housing demand; the uncertainty range is 5%–35%.</small></label>
                 <label for="asset-hedge-share">New liquidity to assets (%)<input id="asset-hedge-share" name="assetHedgeShare" type="number" min="0" max="100" step="5" /><small class="field-hint">Share of newly created deposits recycled into assets. This is separate from recipients investing a tax-funded transfer.</small></label>
-                <label for="housing-hedge-share">New-money asset flow to housing (%)<input id="housing-hedge-share" name="housingHedgeShare" type="number" min="0" max="100" step="5" /></label>
-                <label for="housing-supply">Housing supply response<input id="housing-supply" name="housingSupply" type="number" min="0" max="2" step="0.1" /></label>
-                <label for="rent-pass-through">Price gain passed to rent (%)<input id="rent-pass-through" name="rentPassThrough" type="number" min="0" max="100" step="5" /></label>
+                <label for="housing-hedge-share">New-money asset flow to housing (%)<input id="housing-hedge-share" name="housingHedgeShare" type="number" min="0" max="100" step="5" /><small class="field-hint">Housing's share of new-money asset demand; the remainder goes to public equities.</small></label>
+                <label for="housing-supply">Housing supply response<input id="housing-supply" name="housingSupply" type="number" min="0" max="2" step="0.1" /><small class="field-hint">0 means highly constrained supply; 2 means construction responds strongly and limits prices.</small></label>
+                <label for="rent-pass-through">Price gain passed to rent (%)<input id="rent-pass-through" name="rentPassThrough" type="number" min="0" max="100" step="5" /><small class="field-hint">Share of policy-linked house-price pressure assumed to reach rents.</small></label>
               </div>
             </fieldset>
           </details>
@@ -581,14 +587,17 @@
         <div class="strategy-grid" id="strategy-grid"></div>
         <div class="detail-table">
           <h3>Funding-path comparison</h3>
+          <p class="detail-explainer">Each column reruns the same households with a different first choice for paying the tax. “Δ” means change from the starting scenario.</p>
           <div class="table-scroll"><table><thead><tr><th>Metric</th><th>Cash first</th><th>Borrow first</th><th>Sell first</th></tr></thead><tbody id="comparison-body"></tbody></table></div>
         </div>
         <div class="detail-table">
           <div class="detail-heading"><h3>Household deciles</h3><label for="distribution-strategy">Strategy<select id="distribution-strategy"><option value="cash-first">Cash first</option><option value="borrow-first">Borrow first</option><option value="sell-first">Sell first</option></select></label></div>
+          <p class="detail-explainer">D1 is the lowest-wealth tenth of households; D10 is the highest-wealth tenth. Values are averages within each group.</p>
           <div class="table-scroll"><table><thead><tr><th>Decile</th><th>Net worth before</th><th>Net worth after</th><th>Tax paid</th><th>UBI received</th><th>Consumption Δ</th></tr></thead><tbody id="distribution-body"></tbody></table></div>
         </div>
         <div class="detail-table">
           <h3>Consumption sectors</h3>
+          <p class="detail-explainer">Each cell shows additional modeled demand followed by its estimated inflation contribution in percentage points.</p>
           <div class="table-scroll"><table><thead><tr><th>Sector</th><th>Cash first</th><th>Borrow first</th><th>Sell first</th></tr></thead><tbody id="sector-body"></tbody></table></div>
         </div>
         <div class="caveats" id="caveats"><h3>Model boundaries</h3><ul id="caveat-list"></ul>
@@ -648,6 +657,6 @@
     </footer>
     <div class="toast-container" id="toast-container" aria-live="polite" aria-atomic="true"></div>
     <div class="visually-hidden" id="chart-readout" role="status" aria-live="polite"></div>
-    <script src="./app.js?v=26" type="module"></script>
+    <script src="./app.js?v=27" type="module"></script>
   </body>
 </html>

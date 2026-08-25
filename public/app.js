@@ -149,6 +149,45 @@ const percent = new Intl.NumberFormat(undefined, {
 
 const byId = (id) => document.getElementById(id);
 
+const staleBuildMessage =
+  "The page is newer than the running model. Rebuild and restart MacroScope, then reload.";
+
+const assertCompatibleRequest = (request) => {
+  const values = [
+    request?.wealthTax?.topShare,
+    request?.ubi?.directCashShare,
+    request?.ubi?.administrativeShare,
+    request?.market?.housingSupplyElasticity,
+    request?.behavior?.assetHedgeShare,
+    request?.behavior?.housingHedgeShare,
+    request?.behavior?.rentPassThrough,
+    request?.model?.wagePassThrough,
+  ];
+  if (
+    request?.wealthTax?.targetMode === undefined ||
+    typeof request?.ubi?.surplusUse !== "string" ||
+    typeof request?.economy?.closure !== "string" ||
+    values.some((value) => !Number.isFinite(value))
+  ) {
+    throw new Error(staleBuildMessage);
+  }
+};
+
+const assertCompatibleResult = (result) => {
+  const annualFlows = result?.projection?.annualFlows;
+  if (
+    !result?.wealthTaxTarget ||
+    !result?.projection?.theoryTest ||
+    !result?.projection?.openEconomy ||
+    !result?.projection?.stressTest ||
+    !Number.isFinite(result?.population?.sampledHouseholds) ||
+    !Number.isFinite(annualFlows?.publicServicesSpending) ||
+    !Number.isFinite(annualFlows?.administrativeCost)
+  ) {
+    throw new Error(staleBuildMessage);
+  }
+};
+
 const setScenarioSummary = (summary) => {
   byId("scenario-summary").textContent = summary;
   const drawerSummary = byId("scenario-drawer-summary");
@@ -171,6 +210,8 @@ const initialize = async () => {
       const defaults = await defaultResponse.json();
       baseline = await baselineResponse.json();
       const snapshot = await snapshotResponse.json();
+      assertCompatibleRequest(defaults);
+      assertCompatibleResult(snapshot);
       historicalBacktest = await backtestResponse.json();
       renderValidation(historicalBacktest);
       byId("service-status").classList.add("online");
@@ -212,6 +253,7 @@ const initialize = async () => {
     const health = await healthResponse.json();
     const defaults = await defaultResponse.json();
     baseline = await baselineResponse.json();
+    assertCompatibleRequest(defaults);
     historicalBacktest = await backtestResponse.json();
     renderValidation(historicalBacktest);
     byId("service-status").classList.add("online");
@@ -990,6 +1032,7 @@ const runScenario = async ({ auto = false } = {}) => {
     const payload = isStaticSnapshot
       ? await runLocalScenario(request)
       : await runServerScenario(request);
+    assertCompatibleResult(payload);
     latestResult = payload;
     render(payload);
     setScenarioSummary(scenarioSummary(request, payload));
@@ -1468,7 +1511,7 @@ const render = (result) => {
   renderFlow(result.projection);
   renderTheory(result.projection.theoryTest, result.projection);
   renderOpenEconomy(result.projection.openEconomy);
-  renderStress(result.projection.stressTest);
+  renderStress(result.projection.stressTest, result.assumptions.ubi);
   renderReasons(result.projection);
   renderDetails(result);
   renderPersona(result);
@@ -2313,16 +2356,21 @@ const theoryChartOptions = (theory) => {
   };
 };
 
-const renderStress = (stress) => {
+const renderStress = (stress, ubi) => {
   const ruleLabel = stress.fundingRule === "fixed"
     ? "fixed benefits"
     : stress.fundingRule === "smoothed"
       ? "trailing-three-year smoothed revenue"
       : "current revenue";
   byId("stress-description").textContent = `Each cell holds peak annual inflation in a ten-year run. Rows scale the requested benefit; the ${ruleLabel} rule determines actual outlays, and columns monetize the debt that rule issues. Surpluses use ${stress.surplusUse.replaceAll("-", " ")}.`;
+  byId("stress-scale-note").textContent = `1× means ${money.format(ubi.adultMonthlyBenefit)} per adult and ${money.format(ubi.childMonthlyBenefit)} per child each month. 0.5× halves both; 2× doubles both.`;
   const headRow = document.createElement("tr");
   headRow.append(element("th", "Benefit scale"));
-  stress.monetizationShares.forEach((share) => headRow.append(element("th", `${percent.format(share)} monetized`)));
+  stress.monetizationShares.forEach((share) => {
+    const heading = element("th", `${percent.format(share)} monetized`);
+    heading.title = "Share of debt issued by the selected funding rule financed through permanent money creation.";
+    headRow.append(heading);
+  });
   byId("stress-head").replaceChildren(headRow);
   byId("stress-body").replaceChildren(...stress.ubiMultipliers.map((multiplier) => {
     const row = document.createElement("tr");
@@ -2331,14 +2379,14 @@ const renderStress = (stress) => {
       const cellData = stress.cells.find((cell) => cell.ubiMultiplier === multiplier && cell.monetizationShare === share);
       const cell = element("td", stressInflationLabel(cellData.peakAnnualInflation));
       cell.className = cellData.regime;
-      cell.setAttribute("aria-label", `${multiplier} times requested benefit, ${percent.format(share)} issued debt monetized: peak annual inflation ${formatRate(cellData.peakAnnualInflation)}, ${cellData.regime}`);
+      cell.setAttribute("aria-label", `${multiplier} times the selected benefit package, ${percent.format(share)} of issued debt monetized: peak annual inflation ${formatRate(cellData.peakAnnualInflation)}, ${cellData.regime}`);
       row.append(cell);
     });
     return row;
   }));
   byId("hyper-threshold").textContent = stress.threshold.firstUbiMultiplierAtFullMonetization === null
     ? stress.threshold.explanation
-    : `First modeled breach: about ${integer.format(stress.threshold.firstUbiMultiplierAtFullMonetization)}× this benefit with issued debt fully monetized. This is an extreme boundary, not a forecast.`;
+    : `First modeled breach: about ${integer.format(stress.threshold.firstUbiMultiplierAtFullMonetization)}× the selected benefit package with issued debt fully monetized. This is an extreme boundary, not a forecast.`;
 };
 
 // Load a swept assumption's value into its form field and recompute. The write
@@ -3101,6 +3149,30 @@ const setFormStatus = (message, isError = false) => {
   status.textContent = message;
   status.classList.toggle("error", isError);
 };
+
+const closeInfoPopovers = (except = null) => {
+  document.querySelectorAll(".info-button[aria-expanded='true']").forEach((button) => {
+    if (button !== except) button.setAttribute("aria-expanded", "false");
+  });
+};
+
+document.addEventListener("click", (event) => {
+  const button = event.target.closest?.(".info-button");
+  if (!button) {
+    closeInfoPopovers();
+    return;
+  }
+  const willOpen = button.getAttribute("aria-expanded") !== "true";
+  closeInfoPopovers(button);
+  button.setAttribute("aria-expanded", String(willOpen));
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Escape") return;
+  const active = document.activeElement;
+  closeInfoPopovers();
+  if (active?.matches?.(".info-button")) active.blur();
+});
 
 byId("scenario-form").addEventListener("submit", (event) => {
   event.preventDefault();

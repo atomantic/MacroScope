@@ -103,6 +103,11 @@ describe("PortOS server", () => {
     expect(shellMarkup).toContain('data-preset="extreme-universal-borrow"');
     expect(shellMarkup).toContain('data-preset="top-one" aria-pressed="false"');
     expect(shellMarkup).toContain('id="theory-chart"');
+    expect(shellMarkup).toContain('id="stress-scale-note"');
+    expect(shellMarkup).toContain("Rows · Benefit scale");
+    expect(shellMarkup).toContain("Explain M2 money stock");
+    expect(shellMarkup).toContain('class="assumption-guide"');
+    expect(shellMarkup).toContain("Only net wealth above this amount is taxed.");
     expect(shellMarkup).toContain('id="backtest-chart"');
     expect(shellMarkup).toContain('id="validation-heading"');
     expect(shellMarkup).toContain('id="avoidance-elasticity"');

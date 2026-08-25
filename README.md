@@ -63,7 +63,7 @@ PortOS can import this directory directly. It will detect:
 - Start command `npm start`.
 - Health endpoint `/health`.
 
-The PM2 process serves the compiled engine and static shell from one Node process. Ports belong in `ecosystem.config.cjs`, not `.env`.
+The PM2 process serves the compiled engine and static shell from one Node process. The PM2 start and restart scripts rebuild the engine first so compiled API output cannot drift behind the directly served UI. Ports belong in `ecosystem.config.cjs`, not `.env`.
 
 ## Scenario API
 
